@@ -1,0 +1,60 @@
+import type { ChibiState, Chibiwafu, Vec2 } from '../types';
+
+let nextId = 1;
+
+export function resetIdCounter(n: number) { nextId = n; }
+export function peekNextId() { return nextId; }
+
+export interface SpawnArgs {
+  name: string;
+  birthTick: number;
+  pos: Vec2;
+  maxAgeSec: number;
+}
+
+export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
+  return {
+    id: nextId++,
+    name: args.name,
+    birthTick: args.birthTick,
+    ageSec: 0,
+    pos: { ...args.pos },
+    target: null,
+    state: 'idle',
+    stateTimer: 0,
+    deathTick: null,
+    deathCauseId: null,
+    speed: 18 + Math.random() * 10,
+    maxAgeSec: args.maxAgeSec,
+    faceLeft: Math.random() < 0.5,
+  };
+}
+
+export function setState(c: Chibiwafu, s: ChibiState, seconds: number) {
+  c.state = s;
+  c.stateTimer = seconds;
+}
+
+export function isAlive(c: Chibiwafu): boolean {
+  return c.state !== 'dead';
+}
+
+export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: number }) {
+  if (!c.target || distance(c.pos, c.target) < 4) {
+    const margin = 30;
+    c.target = {
+      x: margin + Math.random() * (bounds.w - margin * 2),
+      y: margin + Math.random() * (bounds.h - margin * 2),
+    };
+    c.faceLeft = c.target.x < c.pos.x;
+  }
+  const dx = c.target.x - c.pos.x;
+  const dy = c.target.y - c.pos.y;
+  const d = Math.max(0.001, Math.hypot(dx, dy));
+  c.pos.x += (dx / d) * c.speed * dt;
+  c.pos.y += (dy / d) * c.speed * dt;
+}
+
+export function distance(a: Vec2, b: Vec2): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}

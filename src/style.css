@@ -1,0 +1,141 @@
+:root {
+  --bg: #f6efe0;
+  --ink: #3a2a1a;
+  --mud: #b08a5b;
+  --accent: #e8735a;
+  --panel: #fffaf0;
+  --shadow: #00000022;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Hiragino Maru Gothic ProN", "Yu Gothic", sans-serif;
+  overflow: hidden;
+}
+
+#app {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  height: 100vh;
+}
+
+#stage {
+  position: relative;
+  background: #e4d6b7;
+  overflow: hidden;
+}
+
+#stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#hud {
+  background: var(--panel);
+  border-left: 2px solid var(--ink);
+  overflow-y: auto;
+  padding: 12px;
+  font-size: 13px;
+}
+
+.hud-title {
+  font-size: 18px;
+  font-weight: 700;
+  padding-bottom: 8px;
+  border-bottom: 2px dashed var(--mud);
+  margin-bottom: 8px;
+}
+
+.panel {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #e2d6b8;
+  border-radius: 6px;
+  box-shadow: 0 1px 0 var(--shadow);
+}
+
+.panel h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel h3 small { color: #888; font-weight: 400; }
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+
+.stat b { font-variant-numeric: tabular-nums; }
+
+button {
+  font-family: inherit;
+  padding: 6px 10px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+button:hover { filter: brightness(1.08); }
+button:disabled { background: #bbb; cursor: not-allowed; }
+
+.actions { display: flex; gap: 4px; }
+
+.build-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px dashed #eee;
+}
+
+.build-row:last-child { border-bottom: none; }
+
+.build-row .name { font-weight: 700; }
+.build-row .desc { font-size: 11px; color: #777; }
+.build-row button { padding: 2px 8px; font-size: 11px; margin: 0; }
+
+.log ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+  font-size: 11px;
+}
+
+.log li {
+  padding: 2px 0;
+  border-bottom: 1px dotted #eee;
+}
+
+.log .name { color: var(--accent); font-weight: 700; }
+.log .cause { color: #555; }
+
+.dex-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  font-size: 11px;
+}
+
+.dex-row.locked { color: #aaa; font-style: italic; }
+.dex-row .count { font-variant-numeric: tabular-nums; }

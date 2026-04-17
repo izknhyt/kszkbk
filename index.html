@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>くそざこ村 — idle</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="stage"></div>
+      <aside id="hud">
+        <header class="hud-title">くそざこ村</header>
+        <section class="panel">
+          <div class="stat"><span>くそざこP</span><b id="stat-points">0</b></div>
+          <div class="stat"><span>人口</span><b id="stat-pop">0</b> / <b id="stat-cap">0</b></div>
+          <div class="stat"><span>累計死亡</span><b id="stat-deaths">0</b></div>
+          <div class="stat"><span>季節</span><b id="stat-season">春</b></div>
+        </section>
+        <section class="panel">
+          <h3>建物</h3>
+          <div id="build-list"></div>
+        </section>
+        <section class="panel actions">
+          <button id="btn-ondo" title="くそざこ音頭をかける">音頭を流す</button>
+          <button id="btn-bokai" title="棒会議を開催する">棒会議</button>
+        </section>
+        <section class="panel log">
+          <h3>最近の死</h3>
+          <ol id="recent-deaths"></ol>
+        </section>
+        <section class="panel">
+          <h3>死因図鑑 <small id="dex-count">0/0</small></h3>
+          <div id="dex-list"></div>
+        </section>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

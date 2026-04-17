@@ -1,0 +1,20 @@
+{
+  "name": "kszkbk",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "くそざこ村 — idle village watching game",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  },
+  "dependencies": {
+    "pixi.js": "^8.1.6"
+  }
+}
