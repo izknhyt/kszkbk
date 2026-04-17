@@ -42,12 +42,19 @@ export function isAlive(c: Chibiwafu): boolean {
   return c.state !== 'dead';
 }
 
+// 陸地の上限 y（これより下は泥川）。wanderStep の target 計算で利用。
+// 川に落ちる奴はたまにはいる（冒険家など）ので target 抽選で 6% だけ越境を許す。
+const DRY_Y_LIMIT = 410;
+const RIVER_TRESPASS_CHANCE = 0.06;
+
 export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: number }) {
   if (!c.target || distance(c.pos, c.target) < 4) {
     const margin = 30;
+    const allowRiver = Math.random() < RIVER_TRESPASS_CHANCE || c.traits.includes('bouken');
+    const maxY = allowRiver ? bounds.h - margin : Math.min(DRY_Y_LIMIT, bounds.h - margin);
     c.target = {
       x: margin + Math.random() * (bounds.w - margin * 2),
-      y: margin + Math.random() * (bounds.h - margin * 2),
+      y: margin + Math.random() * (maxY - margin),
     };
     c.faceLeft = c.target.x < c.pos.x;
   }

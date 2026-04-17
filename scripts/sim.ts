@@ -21,7 +21,7 @@ import type { DeathCauseId, TraitId } from '../src/types';
 const SIM_MINUTES = 60;
 const INTERACT = process.argv.includes('--interact');
 
-const w = createWorld({ w: 800, h: 500 });
+const w = createWorld();
 const dt = CONFIG.TICK_DT;
 const totalTicks = Math.floor((SIM_MINUTES * 60) / dt);
 

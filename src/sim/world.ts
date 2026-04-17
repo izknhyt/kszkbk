@@ -82,13 +82,14 @@ function createDex(): Record<DeathCauseId, DexEntry> {
   return out;
 }
 
-export function createWorld(bounds: { w: number; h: number }): WorldState {
+export function createWorld(): WorldState {
+  const bounds = { w: CONFIG.WORLD_W, h: CONFIG.WORLD_H };
   return {
     tick: 0,
     timeSec: 0,
     secondsPerSeason: CONFIG.SECONDS_PER_SEASON,
     season: 'spring',
-    furanaPos: { x: bounds.w / 2, y: 200 },
+    furanaPos: { x: bounds.w / 2, y: 220 },
     chibis: [],
     corpses: [],
     maxCorpses: CONFIG.MAX_CORPSES_VISIBLE,
@@ -570,12 +571,15 @@ export function buildAt(w: WorldState, defId: string): boolean {
   const def = BUILDINGS[defId];
   if (!def) return false;
   w.points -= cost;
-  const count = w.buildings.filter((b) => b.defId === defId).length;
-  const row = Math.floor(count / 4);
-  const col = count % 4;
-  const baseX = 60 + col * 70;
-  const baseY = 300 + row * 50;
-  w.buildings.push({ defId, level: 1, pos: { x: baseX, y: baseY } });
+  // 建物は type ごとに別の帯に並べる。横はワールド幅をほぼ埋めるように伸ばす。
+  const typeOrder = ['noukou', 'kouba', 'hakaba', 'taiko'];
+  const typeIdx = Math.max(0, typeOrder.indexOf(defId));
+  const sameCount = w.buildings.filter((b) => b.defId === defId).length;
+  const laneY = 300 + typeIdx * 30;
+  const laneMargin = 80;
+  const laneW = w.bounds.w - laneMargin * 2;
+  const laneX = laneMargin + ((sameCount * 80) % laneW);
+  w.buildings.push({ defId, level: 1, pos: { x: laneX, y: laneY } });
   return true;
 }
 

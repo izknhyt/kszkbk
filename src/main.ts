@@ -15,13 +15,11 @@ import { DEATH_CAUSES } from './sim/deaths';
 
 async function start() {
   const host = document.getElementById('stage') as HTMLElement;
-  const rect = host.getBoundingClientRect();
-  const world = createWorld({ w: Math.max(600, rect.width), h: Math.max(500, rect.height) });
+  const world = createWorld();
   load(world);
 
   const stage = await createStage(host);
   stage.app.renderer.on('resize', (w: number, h: number) => {
-    world.bounds = { w, h };
     stage.resize(w, h);
   });
 

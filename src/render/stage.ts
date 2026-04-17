@@ -5,6 +5,7 @@ import { BUILDINGS } from '../city/buildings';
 import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
 import type { Bubble } from '../sim/bubbles';
 import { TRAIT_DEFS } from '../sim/traits';
+import { CONFIG } from '../config';
 import { frameFor, loadSpriteLibrary, type SpriteLibrary } from './sprites';
 
 const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number; accents: number }> = {
@@ -19,6 +20,8 @@ export interface StageHandle {
   resize: (w: number, h: number) => void;
   draw: (world: WorldState) => void;
   setSeason: (s: Season) => void;
+  // カメラ状態（HUDからの操作用に露出）
+  resetCamera: () => void;
 }
 
 interface ChibiView {
@@ -45,6 +48,12 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   });
   host.appendChild(app.canvas);
 
+  // --- カメラ ----------------------------------------------------------------
+  // 全ゲームレイヤは cameraLayer の中に入れ、transform でスクロール＆ズームする。
+  // HUD はHTML側にあるので、ここでは canvas 内部だけ考えればよい。
+  const cameraLayer = new Container();
+  app.stage.addChild(cameraLayer);
+
   const bgLayer = new Container();
   const buildingLayer = new Container();
   const eventUnderLayer = new Container(); // 下レイヤ（ring／disk）
@@ -53,16 +62,102 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const npcLayer = new Container();
   const fxLayer = new Container();
   const eventOverLayer = new Container(); // 上レイヤ（火炎／粉塵）
-  app.stage.addChild(
+  cameraLayer.addChild(
     bgLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, fxLayer, eventOverLayer,
   );
 
   const lib = await loadSpriteLibrary('/chibiwafu.png');
 
   let currentSeason: Season = 'spring';
-  drawBackground(bgLayer, app.renderer.width, app.renderer.height, currentSeason);
+  drawBackground(bgLayer, CONFIG.WORLD_W, CONFIG.WORLD_H, currentSeason);
   const furana = drawFurana();
   fxLayer.addChild(furana);
+
+  // --- カメラ状態 ------------------------------------------------------------
+  let cameraScale = 1;
+  let cameraX = 0;
+  let cameraY = 0;
+
+  function clamp(v: number, lo: number, hi: number) {
+    return Math.max(lo, Math.min(hi, v));
+  }
+
+  function clampCamera() {
+    const vw = app.renderer.width;
+    const vh = app.renderer.height;
+    const ww = CONFIG.WORLD_W * cameraScale;
+    const wh = CONFIG.WORLD_H * cameraScale;
+    // ワールドが画面より小さい時は中央寄せ、大きい時は縁を超えないようクランプ
+    if (ww <= vw) cameraX = (vw - ww) / 2;
+    else cameraX = clamp(cameraX, vw - ww, 0);
+    if (wh <= vh) cameraY = (vh - wh) / 2;
+    else cameraY = clamp(cameraY, vh - wh, 0);
+  }
+
+  function applyCamera() {
+    cameraLayer.position.set(cameraX, cameraY);
+    cameraLayer.scale.set(cameraScale);
+  }
+
+  function fitCameraToViewport() {
+    const vw = app.renderer.width;
+    const vh = app.renderer.height;
+    const fit = Math.min(vw / CONFIG.WORLD_W, vh / CONFIG.WORLD_H);
+    cameraScale = clamp(fit, CONFIG.CAMERA_MIN_SCALE, CONFIG.CAMERA_MAX_SCALE);
+    cameraX = 0;
+    cameraY = 0;
+    clampCamera();
+    applyCamera();
+  }
+  fitCameraToViewport();
+
+  // --- 入力：ホイールでズーム（カーソル中心）、ドラッグでパン ----------------
+  const canvas = app.canvas;
+  canvas.style.touchAction = 'none';
+  canvas.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? CONFIG.CAMERA_ZOOM_STEP : 1 / CONFIG.CAMERA_ZOOM_STEP;
+      const newScale = clamp(cameraScale * factor, CONFIG.CAMERA_MIN_SCALE, CONFIG.CAMERA_MAX_SCALE);
+      // カーソル位置のワールド座標を固定したままズーム
+      const worldX = (mx - cameraX) / cameraScale;
+      const worldY = (my - cameraY) / cameraScale;
+      cameraScale = newScale;
+      cameraX = mx - worldX * cameraScale;
+      cameraY = my - worldY * cameraScale;
+      clampCamera();
+      applyCamera();
+    },
+    { passive: false },
+  );
+
+  let dragState: { lastX: number; lastY: number; pointerId: number } | null = null;
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    dragState = { lastX: e.clientX, lastY: e.clientY, pointerId: e.pointerId };
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragState || dragState.pointerId !== e.pointerId) return;
+    cameraX += e.clientX - dragState.lastX;
+    cameraY += e.clientY - dragState.lastY;
+    dragState.lastX = e.clientX;
+    dragState.lastY = e.clientY;
+    clampCamera();
+    applyCamera();
+  });
+  const endDrag = (e: PointerEvent) => {
+    if (dragState && dragState.pointerId === e.pointerId) {
+      canvas.releasePointerCapture(e.pointerId);
+      dragState = null;
+    }
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerleave', endDrag);
 
   const views = new Map<number, ChibiView>();
   const corpseViews = new Map<number, Sprite>();
@@ -70,16 +165,17 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const npcViews = new Map<NpcId, Container>();
   const bubbleViews = new Map<number, BubbleView>();
 
-  function resize(w: number, h: number) {
-    bgLayer.removeChildren();
-    drawBackground(bgLayer, w, h, currentSeason);
+  function resize(_w: number, _h: number) {
+    // ワールドサイズは固定。表示領域が変わったらカメラの可視範囲再計算のみ。
+    clampCamera();
+    applyCamera();
   }
 
   function setSeason(s: Season) {
     if (s === currentSeason) return;
     currentSeason = s;
     bgLayer.removeChildren();
-    drawBackground(bgLayer, app.renderer.width, app.renderer.height, currentSeason);
+    drawBackground(bgLayer, CONFIG.WORLD_W, CONFIG.WORLD_H, currentSeason);
   }
 
   function draw(world: WorldState) {
@@ -198,7 +294,13 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     corpseLayer.children.sort((a, b) => a.y - b.y);
   }
 
-  return { app, resize, draw, setSeason };
+  return {
+    app,
+    resize,
+    draw,
+    setSeason,
+    resetCamera: fitCameraToViewport,
+  };
 }
 
 function renderEventOverlay(under: Container, over: Container, world: WorldState) {
