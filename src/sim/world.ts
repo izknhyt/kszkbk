@@ -65,6 +65,8 @@ export interface WorldState {
   fireCooldown: number;
   // 棒会議の再発動まで秒。人口が閾値超えると棒会議が自動発動する。
   bokaigiCooldown: number;
+  // 棒会議発動後の演出用タイマー（秒）。stage が読んでマーカーを表示する。
+  bokaigiMarkerTimer: number;
   // 季節境界検出用。1tick前の季節。
   lastSeason: Season;
   npcs: NpcState[];
@@ -108,6 +110,7 @@ export function createWorld(bounds: { w: number; h: number }): WorldState {
     ondoCooldown: CONFIG.ONDO_BASE_INTERVAL_SEC * 0.45,
     fireCooldown: CONFIG.FIRE_BASE_INTERVAL_SEC * 0.45,
     bokaigiCooldown: CONFIG.BOKAIGI_COOLDOWN_SEC * 0.6,
+    bokaigiMarkerTimer: 0,
     lastSeason: 'spring',
     npcs: createNpcs(bounds),
     bubbles: [],
@@ -206,6 +209,7 @@ function maybeTriggerBokaigi(w: WorldState, dt: number) {
   if (alive.length < CONFIG.BOKAIGI_CLUSTER_MIN) return;
   const suzu = w.npcs.find((n) => n.id === 'suzu');
   if (suzu) spawnBubble(w.bubbles, suzu.pos, '棒会議ひらくよ', 'speech', 2.2);
+  w.bokaigiMarkerTimer = 2.5;
   const victimCount = Math.min(alive.length, 1 + Math.floor(Math.random() * CONFIG.BOKAIGI_VICTIMS_MAX));
   const picked = new Set<number>();
   for (let i = 0; i < victimCount; i++) {
@@ -495,6 +499,7 @@ export function tickWorld(w: WorldState, dt: number) {
   updateNpcs(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
+  if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);
   w.lastSeason = prevSeason;
 }
 

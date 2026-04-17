@@ -46,11 +46,15 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   const bgLayer = new Container();
   const buildingLayer = new Container();
+  const eventUnderLayer = new Container(); // 下レイヤ（ring／disk）
   const corpseLayer = new Container();
   const chibiLayer = new Container();
   const npcLayer = new Container();
   const fxLayer = new Container();
-  app.stage.addChild(bgLayer, buildingLayer, corpseLayer, chibiLayer, npcLayer, fxLayer);
+  const eventOverLayer = new Container(); // 上レイヤ（火炎／粉塵）
+  app.stage.addChild(
+    bgLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, fxLayer, eventOverLayer,
+  );
 
   const lib = await loadSpriteLibrary('/chibiwafu.png');
 
@@ -136,6 +140,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         views.delete(id);
       }
     }
+    const ondoWobble = world.event?.kind === 'ondo';
     for (const c of world.chibis) {
       let v = views.get(c.id);
       if (!v) {
@@ -143,7 +148,10 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         chibiLayer.addChild(v.container);
         views.set(c.id, v);
       }
-      v.container.position.set(c.pos.x, c.pos.y);
+      // 音頭中は全ちびわふが個体位相で揺れる（演出のみ、sim pos は不変）。
+      const wx = ondoWobble ? Math.sin(world.timeSec * 6 + c.id * 0.7) * 8 : 0;
+      const wy = ondoWobble ? Math.abs(Math.cos(world.timeSec * 6 + c.id * 0.7)) * -3 : 0;
+      v.container.position.set(c.pos.x + wx, c.pos.y + wy);
       v.sprite.scale.x = (c.faceLeft ? -1 : 1) * calcScale(lib);
       if (v.lastState !== c.state) {
         v.sprite.texture = frameFor(lib, c.state);
@@ -181,12 +189,103 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       v.container.alpha = Math.min(1, b.ttl / Math.max(0.2, b.maxTtl * 0.35));
     }
 
+    // event overlays
+    renderEventOverlay(eventUnderLayer, eventOverLayer, world);
+
     // depth sort by y
     chibiLayer.children.sort((a, b) => a.y - b.y);
     corpseLayer.children.sort((a, b) => a.y - b.y);
   }
 
   return { app, resize, draw, setSeason };
+}
+
+function renderEventOverlay(under: Container, over: Container, world: WorldState) {
+  under.removeChildren();
+  over.removeChildren();
+
+  // 棒会議マーカー（2.5秒）
+  if (world.bokaigiMarkerTimer > 0) {
+    const suzu = world.npcs.find((n) => n.id === 'suzu');
+    if (suzu) {
+      const r = 40 + Math.sin(world.timeSec * 8) * 8;
+      const alpha = Math.min(1, world.bokaigiMarkerTimer / 1.5);
+      const g = new Graphics();
+      g.circle(0, 0, r).stroke({ color: 0x8b5a2b, width: 3, alpha: 0.8 * alpha });
+      g.circle(0, 0, r * 0.55).stroke({ color: 0x8b5a2b, width: 2, alpha: 0.6 * alpha });
+      g.position.set(suzu.pos.x, suzu.pos.y);
+      under.addChild(g);
+    }
+  }
+
+  if (!world.event) return;
+
+  if (world.event.kind === 'ondo') {
+    // 村の中心に脈打つ二重リング。
+    const x = world.bounds.w / 2;
+    const y = 260;
+    const beat = Math.sin(world.timeSec * 4);
+    const r = 90 + beat * 14;
+    const g = new Graphics();
+    g.circle(x, y, r).stroke({ color: 0xe8735a, width: 3, alpha: 0.55 });
+    g.circle(x, y, r * 0.62).stroke({ color: 0xe8735a, width: 2, alpha: 0.4 });
+    under.addChild(g);
+    // 画面上部に「♪くそざこ音頭♪」テキスト
+    const t = new Text({
+      text: '♪くそざこ音頭♪',
+      style: new TextStyle({
+        fontFamily: 'sans-serif',
+        fontSize: 16,
+        fontWeight: 'bold',
+        fill: 0xe8735a,
+      }),
+    });
+    t.anchor.set(0.5, 0);
+    t.position.set(world.bounds.w / 2, 8 + Math.sin(world.timeSec * 6) * 2);
+    over.addChild(t);
+  } else if (world.event.kind === 'fire') {
+    // 各 kouba の上で炎＋粉塵。
+    for (const b of world.buildings) {
+      if (b.defId !== 'kouba') continue;
+      const flame = new Graphics();
+      const r = 18 + Math.sin(world.timeSec * 5) * 6;
+      flame.circle(0, 0, r).fill({ color: 0xff6633, alpha: 0.55 });
+      flame.circle(0, -r * 0.6, r * 0.7).fill({ color: 0xffb347, alpha: 0.8 });
+      flame.circle(0, -r * 1.1, r * 0.4).fill({ color: 0xffe169, alpha: 0.9 });
+      flame.position.set(b.pos.x, b.pos.y - 10);
+      over.addChild(flame);
+      for (let i = 0; i < 5; i++) {
+        const e = new Graphics();
+        const ex = (Math.random() - 0.5) * 60;
+        const ey = -Math.random() * 55 - 8;
+        e.circle(0, 0, 2).fill({ color: 0xffc64b, alpha: 0.7 });
+        e.position.set(b.pos.x + ex, b.pos.y + ey);
+        over.addChild(e);
+      }
+    }
+  } else if (world.event.kind === 'taiko_festival') {
+    for (const b of world.buildings) {
+      if (b.defId !== 'taiko') continue;
+      const g = new Graphics();
+      const r = 40 + Math.sin(world.timeSec * 5) * 14;
+      g.circle(0, 0, r).fill({ color: 0xc05a3a, alpha: 0.45 });
+      g.circle(0, 0, r * 0.6).fill({ color: 0xffd35a, alpha: 0.4 });
+      g.position.set(b.pos.x, b.pos.y);
+      under.addChild(g);
+    }
+    const t = new Text({
+      text: '🥁 太鼓祭 🥁',
+      style: new TextStyle({
+        fontFamily: 'sans-serif',
+        fontSize: 15,
+        fontWeight: 'bold',
+        fill: 0xc05a3a,
+      }),
+    });
+    t.anchor.set(0.5, 0);
+    t.position.set(world.bounds.w / 2, 8);
+    over.addChild(t);
+  }
 }
 
 function calcScale(lib: SpriteLibrary): number {

@@ -131,3 +131,48 @@ if (INTERACT) {
   }
   console.log('');
 }
+
+// =========================================================================
+// Assertions — run with --strict to exit(1) on failure (for CI).
+// Targets reflect the balance plan signed off in ultraplan.
+// =========================================================================
+const STRICT = process.argv.includes('--strict');
+const sortedForAssertion = (Object.keys(DEATH_CAUSES) as DeathCauseId[])
+  .map((id) => ({ id, count: w.dex[id].count, rare: DEATH_CAUSES[id]!.rare }))
+  .sort((a, b) => b.count - a.count);
+const discovered = sortedForAssertion.filter((r) => r.count > 0);
+const topShare = discovered.length > 0 ? discovered[0]!.count / w.totalDeaths : 0;
+const lastNonRare = discovered.filter((r) => !r.rare).slice(-1)[0];
+const bottomShare = lastNonRare ? lastNonRare.count / w.totalDeaths : 0;
+const allDiscovered = uniqueDexFound(w) === totalDexCount();
+const firstDexValues = Object.values(firstDex).filter((v): v is number => typeof v === 'number');
+const lastDexTime = allDiscovered && firstDexValues.length > 0 ? Math.max(...firstDexValues) : Infinity;
+const capFinal = w.baseCap + w.buildings.reduce((a, b) => {
+  const def = BUILDINGS[b.defId];
+  const m = def?.effect.match(/pop\+(\d+)/);
+  return a + (m ? Number(m[1]) * b.level : 0);
+}, 0);
+const alivePct = capFinal > 0 ? w.chibis.length / capFinal : 0;
+
+interface Check { label: string; pass: boolean; value: string; }
+const checks: Check[] = [
+  { label: 'top share ≤ 22%', pass: topShare <= 0.22, value: `${(topShare * 100).toFixed(1)}%` },
+  { label: 'bottom non-rare ≥ 3%', pass: bottomShare >= 0.03, value: `${(bottomShare * 100).toFixed(2)}%` },
+  { label: 'all 16 dex discovered', pass: allDiscovered, value: `${uniqueDexFound(w)}/${totalDexCount()}` },
+  { label: 'last dex within 30min', pass: lastDexTime <= 1800, value: `${lastDexTime === Infinity ? 'n/a' : lastDexTime + 's'}` },
+  { label: 'alive 30–90% of cap', pass: alivePct >= 0.3 && alivePct <= 0.9, value: `${(alivePct * 100).toFixed(0)}%` },
+];
+
+console.log('--- Balance assertions ---');
+let failed = 0;
+for (const c of checks) {
+  console.log(`   ${c.pass ? '✓' : '✗'}  ${c.label.padEnd(30)}  ${c.value}`);
+  if (!c.pass) failed += 1;
+}
+console.log('');
+if (failed > 0) {
+  console.log(`   ${failed} assertion(s) failed.${STRICT ? '' : ' (use --strict for exit code)'}`);
+  if (STRICT) process.exit(1);
+} else {
+  console.log('   all balance checks passed ✓');
+}
