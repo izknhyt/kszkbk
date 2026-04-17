@@ -7,7 +7,11 @@ export type ChibiState =
   | 'dazed'
   | 'hurt'
   | 'exhausted'
-  | 'dead';
+  | 'dead'
+  // --- P5: 生活ステート ---------------------------------------------------
+  | 'chatting'   // すれ違い立ち話（移動停止）
+  | 'staring'    // 浮世離れが空を見上げる
+  | 'eating';    // 石パン岩／泥水池で飲食
 
 export interface Vec2 {
   x: number;
@@ -29,6 +33,18 @@ export interface Chibiwafu {
   maxAgeSec: number;
   faceLeft: boolean;
   traits: TraitId[];
+  // --- P5: 生活 --------------------------------------------------------
+  // 最近誰と話したか等、個体のイベントログ。死亡時に墓碑として見せる。
+  lifeLog: LifeEvent[];
+  // 立ち話再発生までのクールダウン秒
+  chatCooldown: number;
+  // 目的地の種類（ランドマーク由来の場合、ランドマークID）
+  targetLandmarkId: string | null;
+}
+
+export interface LifeEvent {
+  sec: number;
+  text: string;
 }
 
 export type DeathCauseId =

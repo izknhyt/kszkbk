@@ -30,6 +30,8 @@ import {
 import { spawnBubble, updateBubbles, type Bubble } from './bubbles';
 import { rollTraits } from './traits';
 import { computeRank, maxBuildingLevel, upgradeCostFor, type RankContext } from './rank';
+import { landmarkList, type Landmark } from './landmarks';
+import { maybeStartChat } from './chats';
 
 export interface DeathLogEntry {
   tick: number;
@@ -74,6 +76,7 @@ export interface WorldState {
   lastSeason: Season;
   npcs: NpcState[];
   bubbles: Bubble[];
+  landmarks: Landmark[];
 }
 
 function createDex(): Record<DeathCauseId, DexEntry> {
@@ -119,6 +122,7 @@ export function createWorld(): WorldState {
     lastSeason: 'spring',
     npcs: createNpcs(bounds),
     bubbles: [],
+    landmarks: landmarkList(bounds),
   };
 }
 
@@ -423,6 +427,7 @@ function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone
 function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone[]) {
   if (!isAlive(c)) return;
   c.ageSec += dt;
+  c.chatCooldown -= dt;
   if (c.ageSec >= c.maxAgeSec) {
     kill(w, c, 'roushuai');
     return;
@@ -433,12 +438,68 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     if (roll < 0.05) setState(c, 'cry', 0.8);
     else if (roll < 0.08) setState(c, 'dazed', 0.6);
     else if (roll < 0.10) setState(c, 'sleep', 1.5);
+    // 浮世離れ：哲学石を目指してたらそこで立ち止まって空を見る
+    else if (
+      c.traits.includes('ukiyo') &&
+      c.targetLandmarkId === 'philosophy' &&
+      c.target &&
+      distance(c.pos, c.target) < 10 &&
+      Math.random() < 0.4
+    ) {
+      setState(c, 'staring', 2.5);
+    }
+    // 食いしん坊：石パン岩／泥水池に着いたら食事モーション
+    else if (
+      c.traits.includes('gourmand') &&
+      (c.targetLandmarkId === 'stonebread' || c.targetLandmarkId === 'mudpool' || c.targetLandmarkId === 'beer') &&
+      c.target &&
+      distance(c.pos, c.target) < 10 &&
+      Math.random() < 0.5
+    ) {
+      setState(c, 'eating', 1.8);
+    }
     else setState(c, 'idle', 0.4 + Math.random());
   }
+  // 移動（止まってるステート中は動かない）
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
-    wanderStep(c, dt, w.bounds);
+    const cocoon = w.npcs.find((n) => n.id === 'cocoon');
+    wanderStep(c, dt, w.bounds, {
+      landmarks: w.landmarks,
+      season: w.season,
+      furana: w.furanaPos,
+      cocoonPos: cocoon ? cocoon.pos : null,
+      noukouPositions: w.buildings.filter((b) => b.defId === 'noukou').map((b) => b.pos),
+    });
   }
   runHazards(w, c, dt, hazards);
+}
+
+// 立ち話：近接2体をO(n²)で検査（人口数十までは無視できるコスト）
+function processChats(w: WorldState, dt: number) {
+  for (let i = 0; i < w.chibis.length; i++) {
+    const a = w.chibis[i]!;
+    if (!isAlive(a) || a.state === 'chatting' || a.chatCooldown > 0) continue;
+    for (let j = i + 1; j < w.chibis.length; j++) {
+      const b = w.chibis[j]!;
+      if (!isAlive(b) || b.state === 'chatting' || b.chatCooldown > 0) continue;
+      if (distance(a.pos, b.pos) > 28) continue;
+      const chat = maybeStartChat(a, b);
+      if (!chat) continue;
+      // 両者を chatting 状態に、向き合わせる、吹き出しを出す
+      setState(a, 'chatting', chat.duration);
+      setState(b, 'chatting', chat.duration);
+      a.chatCooldown = 8 + Math.random() * 6;
+      b.chatCooldown = 8 + Math.random() * 6;
+      a.faceLeft = b.pos.x < a.pos.x;
+      b.faceLeft = a.pos.x < b.pos.x;
+      // A が先に喋る（長めTTL）。B は少し遅れて喋る（短めTTL＋位置が動いてないので即座に表示OK）
+      spawnBubble(w.bubbles, a.pos, chat.lineA, 'speech', chat.duration * 0.6);
+      spawnBubble(w.bubbles, { x: b.pos.x, y: b.pos.y + 6 }, chat.lineB, 'speech', chat.duration * 0.4);
+      break; // a は1人と話せば十分
+    }
+  }
+  // 雑に dt を使った減衰は updateChibi 側で実施済み
+  void dt;
 }
 
 function compactCorpses(w: WorldState) {
@@ -554,6 +615,7 @@ export function tickWorld(w: WorldState, dt: number) {
   resolveEvent(w, dt);
   const hazards = getActiveHazards(w);
   for (const c of w.chibis) updateChibi(w, c, dt, hazards);
+  processChats(w, dt);
   compactCorpses(w);
   updateNpcs(w, dt);
   updateStomps(w, dt);

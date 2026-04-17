@@ -6,6 +6,7 @@ import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
 import type { Bubble } from '../sim/bubbles';
 import { TRAIT_DEFS } from '../sim/traits';
 import { CONFIG } from '../config';
+import { landmarkActive, type Landmark } from '../sim/landmarks';
 import { frameFor, loadSpriteLibrary, type SpriteLibrary } from './sprites';
 
 const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number; accents: number }> = {
@@ -55,6 +56,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   app.stage.addChild(cameraLayer);
 
   const bgLayer = new Container();
+  const landmarkLayer = new Container();
   const buildingLayer = new Container();
   const eventUnderLayer = new Container(); // 下レイヤ（ring／disk）
   const corpseLayer = new Container();
@@ -63,7 +65,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const fxLayer = new Container();
   const eventOverLayer = new Container(); // 上レイヤ（火炎／粉塵）
   cameraLayer.addChild(
-    bgLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, fxLayer, eventOverLayer,
+    bgLayer, landmarkLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, fxLayer, eventOverLayer,
   );
 
   const lib = await loadSpriteLibrary('/chibiwafu.png');
@@ -181,6 +183,13 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   function draw(world: WorldState) {
     setSeason(world.season);
     furana.position.set(world.furanaPos.x, world.furanaPos.y);
+
+    // landmarks (描き直しは季節が変わった時のみ。ここでは常時再描画して単純化)
+    landmarkLayer.removeChildren();
+    for (const lm of world.landmarks) {
+      if (!landmarkActive(lm, world.season)) continue;
+      landmarkLayer.addChild(drawLandmark(lm));
+    }
 
     // buildings
     while (buildingViews.length < world.buildings.length) {
@@ -512,6 +521,65 @@ function drawBackground(layer: Container, w: number, h: number, season: Season) 
     tuft.circle(x, y, 3 + Math.random() * 5).fill({ color: palette.accents, alpha: 0.45 });
     layer.addChild(tuft);
   }
+}
+
+function drawLandmark(lm: Landmark): Container {
+  const c = new Container();
+  c.position.set(lm.pos.x, lm.pos.y);
+  const g = new Graphics();
+  switch (lm.kind) {
+    case 'stonebread_rock': {
+      // ゴツゴツの岩＋乗った石パン
+      g.ellipse(0, 0, 22, 14).fill({ color: 0x888077 }).stroke({ color: 0x3a2a1a, width: 2 });
+      g.ellipse(-6, -8, 10, 6).fill({ color: 0x7a6a55 }).stroke({ color: 0x3a2a1a, width: 1 });
+      g.rect(-7, -16, 14, 6).fill({ color: 0xc9a36b }).stroke({ color: 0x3a2a1a, width: 1 });
+      break;
+    }
+    case 'philosophy_stone': {
+      // 背の高い縦長の石（哲学的）
+      g.rect(-8, -24, 16, 28).fill({ color: 0x666677 }).stroke({ color: 0x3a2a1a, width: 2 });
+      g.rect(-4, -20, 8, 4).fill({ color: 0x333344 });
+      break;
+    }
+    case 'mudwater_pool': {
+      g.ellipse(0, 0, 28, 10).fill({ color: 0x5c4422, alpha: 0.9 }).stroke({ color: 0x3a2a1a, width: 1 });
+      g.ellipse(-5, -3, 8, 2).fill({ color: 0x8a6a42, alpha: 0.5 });
+      break;
+    }
+    case 'beer_barrel': {
+      g.rect(-10, -14, 20, 22).fill({ color: 0x8a5a2b }).stroke({ color: 0x3a2a1a, width: 2 });
+      g.rect(-10, -10, 20, 2).fill({ color: 0x3a2a1a });
+      g.rect(-10, 2, 20, 2).fill({ color: 0x3a2a1a });
+      g.ellipse(0, -14, 10, 3).fill({ color: 0x4a3422 });
+      break;
+    }
+    case 'flower_patch': {
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const x = Math.cos(a) * 8;
+        const y = Math.sin(a) * 6;
+        g.circle(x, y, 3).fill({ color: 0xf5b6c0 });
+        g.circle(x, y, 1).fill({ color: 0xffd35a });
+      }
+      break;
+    }
+    case 'kusozako_totem': {
+      // 中央にぽつんと立つ棒（村の象徴）
+      g.rect(-2, -30, 4, 34).fill({ color: 0x6b4a2b }).stroke({ color: 0x3a2a1a, width: 1 });
+      g.rect(-8, -30, 16, 6).fill({ color: 0xe8735a }).stroke({ color: 0x3a2a1a, width: 1 });
+      break;
+    }
+  }
+  c.addChild(g);
+  const label = new Text({
+    text: lm.label,
+    style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 9, fill: 0x3a2a1a, fontStyle: 'italic' }),
+  });
+  label.anchor.set(0.5, 0);
+  label.position.set(0, 12);
+  label.alpha = 0.6;
+  c.addChild(label);
+  return c;
 }
 
 function drawFurana(): Container {

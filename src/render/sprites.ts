@@ -11,6 +11,10 @@ const STATE_INDEX: Record<ChibiState, number> = {
   hurt: 6,
   exhausted: 7,
   dead: 8,
+  // P5: 生活ステートは既存フレームを再利用（チャット=idle、空見=surprised、食=angry）
+  chatting: 0,
+  staring: 2,
+  eating: 3,
 };
 
 export interface SpriteLibrary {
