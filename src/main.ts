@@ -8,7 +8,10 @@ import {
   triggerBokaigi,
   triggerFire,
   triggerOndo,
+  upgradeOne,
 } from './sim/world';
+import { RANK_DEFS } from './sim/rank';
+import type { VillageRank } from './types';
 import { clearSave, load, save } from './meta/save';
 import { CONFIG, type TimeScale } from './config';
 import { DEATH_CAUSES } from './sim/deaths';
@@ -28,6 +31,9 @@ async function start() {
   const cb: UICallbacks = {
     onBuild: (id) => {
       if (buildAt(world, id)) refreshUI(world, cb);
+    },
+    onUpgrade: (id) => {
+      if (upgradeOne(world, id)) refreshUI(world, cb);
     },
     onOndo: () => triggerOndo(world),
     onBokaigi: () => triggerBokaigi(world),
@@ -51,6 +57,7 @@ async function start() {
 
   let lastSave = 0;
   let uiTimer = 0;
+  let lastRank: VillageRank = world.villageRank;
   const dtFixed = CONFIG.TICK_DT;
   let acc = 0;
   let prev = performance.now();
@@ -77,6 +84,13 @@ async function start() {
       }
       world.newDiscoveries = [];
       flashTabHighlight('dex');
+    }
+
+    // detect rank promotion
+    if (world.villageRank !== lastRank) {
+      const nextDef = RANK_DEFS[world.villageRank];
+      flashToast(`村が「${nextDef.name}」になった`, 'discovery');
+      lastRank = world.villageRank;
     }
 
     uiTimer += dtReal;

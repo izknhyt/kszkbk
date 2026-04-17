@@ -197,15 +197,24 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const def = BUILDINGS[b.defId];
       const v = buildingViews[i]!;
       v.removeChildren();
+      const s = 1 + (b.level - 1) * 0.2; // Lv2 = 1.2x, Lv3 = 1.4x
       const g = new Graphics();
-      g.rect(-24, -20, 48, 40).fill({ color: buildingColor(b.defId) }).stroke({ color: 0x3a2a1a, width: 2 });
-      g.poly([-28, -20, 0, -36, 28, -20]).fill({ color: 0x8b5a2b }).stroke({ color: 0x3a2a1a, width: 2 });
+      g.rect(-24 * s, -20 * s, 48 * s, 40 * s).fill({ color: buildingColor(b.defId) }).stroke({ color: 0x3a2a1a, width: 2 });
+      g.poly([-28 * s, -20 * s, 0, -36 * s, 28 * s, -20 * s]).fill({ color: 0x8b5a2b }).stroke({ color: 0x3a2a1a, width: 2 });
+      // Lv2+ は旗、Lv3 は二段の屋根
+      if (b.level >= 2) {
+        g.rect(0, -36 * s - 12, 2, 12).fill({ color: 0x3a2a1a });
+        g.rect(2, -36 * s - 12, 10, 7).fill({ color: 0xe8735a });
+      }
+      if (b.level >= 3) {
+        g.poly([-20 * s, -36 * s, 0, -46 * s, 20 * s, -36 * s]).fill({ color: 0xc05a3a }).stroke({ color: 0x3a2a1a, width: 1 });
+      }
       const t = new Text({
-        text: def?.name.split('（')[0] ?? b.defId,
+        text: `${def?.name.split('（')[0] ?? b.defId} Lv${b.level}`,
         style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 10, fill: 0x3a2a1a }),
       });
       t.anchor.set(0.5, 0);
-      t.position.set(0, 22);
+      t.position.set(0, 22 * s);
       v.addChild(g, t);
       v.position.set(b.pos.x, b.pos.y);
     }

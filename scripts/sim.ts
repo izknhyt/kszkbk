@@ -6,6 +6,8 @@ import {
   tickWorld,
   buildAt,
   buildingCost,
+  getUpgradeInfo,
+  upgradeOne,
   uniqueDexFound,
   totalDexCount,
   triggerOndo,
@@ -16,7 +18,8 @@ import { BUILDINGS } from '../src/city/buildings';
 import { DEATH_CAUSES } from '../src/sim/deaths';
 import { CONFIG } from '../src/config';
 import { TRAIT_DEFS } from '../src/sim/traits';
-import type { DeathCauseId, TraitId } from '../src/types';
+import { RANK_DEFS } from '../src/sim/rank';
+import type { DeathCauseId, TraitId, VillageRank } from '../src/types';
 
 const SIM_MINUTES = 60;
 const INTERACT = process.argv.includes('--interact');
@@ -34,8 +37,24 @@ const traitCounts: Record<TraitId, number> = {
 let noTraitBirths = 0;
 const traitsPerChibi: number[] = [];
 const seenChibiIds = new Set<number>();
+const rankTimes: Partial<Record<VillageRank, number>> = {};
+let lastRank: VillageRank = w.villageRank;
+rankTimes[lastRank] = 0;
 
 function tryAutoBuild() {
+  // 1. 建物アップグレードが買える場合はそちらを優先（同じ定義を重ねるよりも効率が良い）。
+  const upgradeCandidates = Object.values(BUILDINGS)
+    .map((def) => ({ id: def.id, info: getUpgradeInfo(w, def.id) }))
+    .filter((x) => x.info && x.info.possible && !x.info.capped)
+    .sort((a, b) => (a.info!.cost - b.info!.cost));
+  const topUpgrade = upgradeCandidates[0];
+  if (topUpgrade && topUpgrade.info) {
+    if (upgradeOne(w, topUpgrade.id)) {
+      buildingsBought.push({ sec: Math.floor(w.timeSec), id: `${topUpgrade.id}↑Lv${topUpgrade.info.targetLevel}`, cost: topUpgrade.info.cost });
+      return;
+    }
+  }
+  // 2. それ以外は最安の新規建物を買う。
   const candidates = Object.values(BUILDINGS).map((def) => ({
     id: def.id,
     cost: buildingCost(w, def.id),
@@ -61,6 +80,11 @@ for (let t = 0; t < totalTicks; t++) {
     if (!(id in firstDex)) firstDex[id] = Math.floor(w.timeSec);
   }
   w.newDiscoveries = [];
+
+  if (w.villageRank !== lastRank) {
+    rankTimes[w.villageRank] = Math.floor(w.timeSec);
+    lastRank = w.villageRank;
+  }
 
   // newly-seen chibis: record trait distribution
   for (const c of w.chibis) {
@@ -147,6 +171,22 @@ if (INTERACT) {
   }
   console.log('');
 }
+
+console.log('--- Village rank progression ---');
+for (const r of Object.keys(rankTimes) as VillageRank[]) {
+  console.log(`   ${String(rankTimes[r]).padStart(5)}s   ${r.padEnd(8)}  (${RANK_DEFS[r].name})`);
+}
+const buildingsByLevel: Record<string, number[]> = {};
+for (const b of w.buildings) {
+  buildingsByLevel[b.defId] ??= [];
+  buildingsByLevel[b.defId]!.push(b.level);
+}
+for (const [id, levels] of Object.entries(buildingsByLevel)) {
+  const avg = (levels.reduce((a, l) => a + l, 0) / levels.length).toFixed(2);
+  const hist = levels.sort((a, b) => a - b).join(',');
+  console.log(`   ${id.padEnd(10)} x${levels.length}  Lv ${hist}  (avg ${avg})`);
+}
+console.log('');
 
 console.log('--- Trait distribution (across all births) ---');
 const totalBirthsSeen = traitsPerChibi.length;

@@ -58,7 +58,58 @@ html, body {
   font-size: 16px;
   font-weight: 700;
   color: var(--accent);
+}
+
+.hud-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 4px;
+}
+
+.rank-badge {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  background: var(--ink);
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.rank-badge b { font-size: 14px; }
+
+.rank-progress-row {
+  font-size: 10px;
+  color: #666;
+  margin-bottom: 6px;
+}
+.rank-bar {
+  height: 4px;
+  background: #e0d4b0;
+  border-radius: 2px;
+  margin-top: 2px;
+  overflow: hidden;
+}
+.rank-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #e8735a, #f2a030);
+  width: 0%;
+  transition: width 0.4s;
+}
+
+.build-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.build-actions button { margin: 0; padding: 4px 8px; font-size: 11px; min-height: 26px; }
+.build-actions .upgrade-btn {
+  background: #7aa65e;
+}
+.build-actions .upgrade-btn:disabled {
+  background: #bbb;
 }
 
 .stat-grid {

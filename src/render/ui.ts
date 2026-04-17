@@ -1,13 +1,15 @@
 import { BUILDINGS } from '../city/buildings';
 import { DEATH_CAUSES } from '../sim/deaths';
 import type { WorldState } from '../sim/world';
-import { buildingCost, populationCap, totalDexCount, uniqueDexFound } from '../sim/world';
+import { buildingCost, getUpgradeInfo, populationCap, totalDexCount, uniqueDexFound } from '../sim/world';
 import { SEASON_LABEL } from '../sim/events';
+import { RANK_DEFS, nextRank } from '../sim/rank';
 import type { DeathCauseId } from '../types';
 import { CONFIG, type TimeScale } from '../config';
 
 export interface UICallbacks {
   onBuild: (defId: string) => void;
+  onUpgrade: (defId: string) => void;
   onOndo: () => void;
   onBokaigi: () => void;
   onFire: () => void;
@@ -73,6 +75,25 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   byId('stat-tick').textContent = String(w.tick);
   byId('stat-time').textContent = `${Math.floor(w.timeSec)}s`;
 
+  // 村ランク表示と次ランクへの進捗
+  const rankDef = RANK_DEFS[w.villageRank];
+  byId('stat-rank').textContent = rankDef.name;
+  const next = nextRank(w.villageRank);
+  if (next) {
+    const nextDef = RANK_DEFS[next];
+    const progress = nextDef.progress({
+      totalDeaths: w.totalDeaths,
+      uniqueDexFound: uniqueDexFound(w),
+      stompCount: w.stompCount,
+    });
+    byId('rank-progress').textContent = `${nextDef.name} まで：${nextDef.requirement}（${Math.floor(progress * 100)}%）`;
+    const bar = byId('rank-bar-fill');
+    bar.style.width = `${Math.floor(progress * 100)}%`;
+  } else {
+    byId('rank-progress').textContent = '最終ランク到達。全要素解禁済み。';
+    byId('rank-bar-fill').style.width = '100%';
+  }
+
   const speed = cb.getSpeed();
   const host = byId('speed-buttons');
   for (const btn of host.querySelectorAll<HTMLButtonElement>('button')) {
@@ -85,17 +106,40 @@ function renderBuildList(w: WorldState, cb: UICallbacks) {
   host.innerHTML = '';
   for (const def of Object.values(BUILDINGS)) {
     const cost = buildingCost(w, def.id);
-    const owned = w.buildings.filter((b) => b.defId === def.id).length;
+    const owned = w.buildings.filter((b) => b.defId === def.id);
+    const upgrade = getUpgradeInfo(w, def.id);
     const row = document.createElement('div');
     row.className = 'build-row';
+
+    // Lv 表示（平均Lv or "Lv1,1,2" 列）
+    let lvText = '';
+    if (owned.length > 0) {
+      const lvs = owned.map((b) => b.level).sort((a, b) => a - b);
+      lvText = ` <small>Lv ${lvs.join(',')}</small>`;
+    }
+
+    const buildBtn = `<button class="build-btn" ${w.points < cost ? 'disabled' : ''}>建${cost}P</button>`;
+    let upgradeBtn = '';
+    if (upgrade) {
+      if (upgrade.capped) {
+        upgradeBtn = `<button class="upgrade-btn" disabled title="村ランクで頭打ち">Max</button>`;
+      } else {
+        upgradeBtn = `<button class="upgrade-btn" ${upgrade.possible ? '' : 'disabled'} title="Lv${upgrade.targetLevel} へ強化">▲${upgrade.cost}P</button>`;
+      }
+    }
+
     row.innerHTML = `
       <div>
-        <div class="name">${escape(def.name)} <small>x${owned}</small></div>
+        <div class="name">${escape(def.name)} <small>x${owned.length}</small>${lvText}</div>
         <div class="desc">${escape(def.desc)}</div>
       </div>
-      <button ${w.points < cost ? 'disabled' : ''}>建${cost}P</button>
+      <div class="build-actions">${buildBtn}${upgradeBtn}</div>
     `;
-    row.querySelector('button')!.addEventListener('click', () => cb.onBuild(def.id));
+    row.querySelector<HTMLButtonElement>('.build-btn')!.addEventListener('click', () => cb.onBuild(def.id));
+    const ub = row.querySelector<HTMLButtonElement>('.upgrade-btn');
+    if (ub && upgrade && !upgrade.capped) {
+      ub.addEventListener('click', () => cb.onUpgrade(def.id));
+    }
     host.appendChild(row);
   }
 }

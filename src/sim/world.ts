@@ -1,4 +1,4 @@
-import type { Chibiwafu, DeathCauseId, DexEntry, PlacedBuilding, Season, Vec2 } from '../types';
+import type { Chibiwafu, DeathCauseId, DexEntry, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -29,6 +29,7 @@ import {
 } from './npcs';
 import { spawnBubble, updateBubbles, type Bubble } from './bubbles';
 import { rollTraits } from './traits';
+import { computeRank, maxBuildingLevel, upgradeCostFor, type RankContext } from './rank';
 
 export interface DeathLogEntry {
   tick: number;
@@ -54,6 +55,7 @@ export interface WorldState {
   dex: Record<DeathCauseId, DexEntry>;
   recentDeaths: DeathLogEntry[];
   newDiscoveries: DeathCauseId[]; // 前フレームで新規発見された図鑑ID
+  villageRank: VillageRank; // 4段階のランク。tickWorld で計算される
   nameSet: Set<string>;
   bounds: { w: number; h: number };
   spawnCooldown: number;
@@ -101,6 +103,7 @@ export function createWorld(): WorldState {
     dex: createDex(),
     recentDeaths: [],
     newDiscoveries: [],
+    villageRank: 'mura',
     nameSet: new Set(),
     bounds,
     spawnCooldown: 2,
@@ -542,6 +545,7 @@ export function tickWorld(w: WorldState, dt: number) {
   w.timeSec += dt;
   const prevSeason = w.season;
   w.season = seasonFromTime(w.timeSec, w.secondsPerSeason);
+  w.villageRank = computeRank(rankContext(w));
   applyBuildingMods(w);
   spawnIfRoom(w);
   maybeStartTaikoFestival(w);
@@ -563,6 +567,50 @@ export function buildingCost(w: WorldState, defId: string): number {
   if (!def) return Infinity;
   const count = w.buildings.filter((b) => b.defId === defId).length;
   return Math.round(def.cost * Math.pow(def.costGrowth, count));
+}
+
+export function rankContext(w: WorldState): RankContext {
+  return {
+    totalDeaths: w.totalDeaths,
+    uniqueDexFound: uniqueDexFound(w),
+    stompCount: w.stompCount,
+  };
+}
+
+// 指定種の建物のうち、Lv最小のものを1段階アップグレードする。
+// ランクで解禁されている Lv までしか上がらない。成功時 true。
+export function upgradeOne(w: WorldState, defId: string): boolean {
+  const def = BUILDINGS[defId];
+  if (!def) return false;
+  const info = getUpgradeInfo(w, defId);
+  if (!info || !info.possible || !info.target) return false;
+  w.points -= info.cost;
+  info.target.level += 1;
+  return true;
+}
+
+export interface UpgradeInfo {
+  possible: boolean;
+  cost: number;
+  targetLevel: number; // 成功時の新Lv
+  target: PlacedBuilding | null;
+  capped: boolean; // ランクのLv上限で全個体が頭打ち
+}
+
+export function getUpgradeInfo(w: WorldState, defId: string): UpgradeInfo | null {
+  const def = BUILDINGS[defId];
+  if (!def) return null;
+  const maxLv = maxBuildingLevel(w.villageRank);
+  const owned = w.buildings.filter((b) => b.defId === defId);
+  if (owned.length === 0) return null;
+  const upgradeable = owned.filter((b) => b.level < maxLv);
+  if (upgradeable.length === 0) {
+    return { possible: false, cost: 0, targetLevel: maxLv, target: null, capped: true };
+  }
+  upgradeable.sort((a, b) => a.level - b.level);
+  const target = upgradeable[0]!;
+  const cost = upgradeCostFor(def, target.level);
+  return { possible: w.points >= cost, cost, targetLevel: target.level + 1, target, capped: false };
 }
 
 export function buildAt(w: WorldState, defId: string): boolean {

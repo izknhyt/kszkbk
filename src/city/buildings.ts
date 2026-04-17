@@ -67,21 +67,26 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   },
 } as const;
 
-export function buildingsToHazards(placed: { defId: string; pos: Vec2 }[]): HazardZone[] {
+export function buildingsToHazards(placed: { defId: string; pos: Vec2; level: number }[]): HazardZone[] {
   const out: HazardZone[] = [];
   for (let i = 0; i < placed.length; i++) {
     const p = placed[i]!;
     const def = BUILDINGS[p.defId];
     if (!def?.hazard) continue;
+    // Lv で危険度が伸びる：Lv1=1.0×, Lv2=1.2×, Lv3=1.4× レート。
+    // 半径も微増（視覚的にも大きくなった建物が広く影響する）。
+    // ※ Lv3 複数スタックで特定死因が支配的にならないよう、スケールは穏やかに。
+    const lvMul = 0.8 + 0.2 * p.level;
+    const radiusMul = 0.95 + 0.05 * p.level;
     const zone: HazardZone = {
       id: `${def.id}-${i}`,
       kind: 'circle',
       center: { ...p.pos },
-      radius: def.hazard.radius,
-      ratePerSec: def.hazard.ratePerSec,
+      radius: def.hazard.radius * radiusMul,
+      ratePerSec: def.hazard.ratePerSec * lvMul,
       causeId: def.hazard.causeId as DeathCauseId,
       bypassSafeZone: true,
-      note: `${def.name}の危険地帯`,
+      note: `${def.name}の危険地帯 (Lv${p.level})`,
     };
     if (def.hazard.traitMultipliers) zone.traitMultipliers = { ...def.hazard.traitMultipliers };
     if (def.hazard.requiresAnyTrait) zone.requiresAnyTrait = [...def.hazard.requiresAnyTrait];
