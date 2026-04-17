@@ -59,6 +59,19 @@ export const CONFIG = {
   FIRE_INTERVAL_PER_KOUBA: -35,
   FIRE_INTERVAL_MIN_SEC: 80,
 
+  // --- 棒会議（自動発動の密度ベース）---------------------------------------
+  // 村の生存数がこの閾値以上＆CD 0で発動。ちびわふ 1〜N 匹を犠牲に選ぶ。
+  BOKAIGI_CLUSTER_MIN: 6,
+  BOKAIGI_VICTIMS_MAX: 3,
+  BOKAIGI_COOLDOWN_SEC: 45,
+
+  // --- 太鼓祭り（季節境界で発動、太鼓やぐら1つ以上で有効）-------------------
+  TAIKO_FESTIVAL_DURATION_SEC: 12,
+  TAIKO_FESTIVAL_KILL_RATE: 0.10,
+  // 祭り中、taiko ハザードはこの値にバーストする（通常は buildings.ts 側の値）。
+  TAIKO_FESTIVAL_RADIUS: 60,
+  TAIKO_FESTIVAL_RATE_PER_SEC: 0.08,
+
   // --- ハザード（詳細は hazards.ts）-----------------------------------------
   // Safe zone（フラナ周辺は即死ゾーン無効）
   SAFE_ZONE_R: 70,

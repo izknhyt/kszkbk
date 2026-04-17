@@ -63,6 +63,10 @@ export interface WorldState {
   // 次の音頭／火事までの秒カウントダウン（イベント発動中は Infinity）。
   ondoCooldown: number;
   fireCooldown: number;
+  // 棒会議の再発動まで秒。人口が閾値超えると棒会議が自動発動する。
+  bokaigiCooldown: number;
+  // 季節境界検出用。1tick前の季節。
+  lastSeason: Season;
   npcs: NpcState[];
   bubbles: Bubble[];
 }
@@ -103,6 +107,8 @@ export function createWorld(bounds: { w: number; h: number }): WorldState {
     // 最初の音頭／火事はフルインターバルを待たず「先行き短め」で1発目を見せる。
     ondoCooldown: CONFIG.ONDO_BASE_INTERVAL_SEC * 0.45,
     fireCooldown: CONFIG.FIRE_BASE_INTERVAL_SEC * 0.45,
+    bokaigiCooldown: CONFIG.BOKAIGI_COOLDOWN_SEC * 0.6,
+    lastSeason: 'spring',
     npcs: createNpcs(bounds),
     bubbles: [],
   };
@@ -178,7 +184,56 @@ function scheduleEvents(w: WorldState, dt: number) {
 }
 
 function getActiveHazards(w: WorldState): HazardZone[] {
-  return HAZARDS.concat(buildingsToHazards(w.buildings));
+  const zones = HAZARDS.concat(buildingsToHazards(w.buildings));
+  // 太鼓祭り中は taiko 関連ハザードの半径とレートを一時的にバースト。
+  if (w.event?.kind === 'taiko_festival') {
+    for (const z of zones) {
+      if (z.id.startsWith('taiko-')) {
+        z.radius = CONFIG.TAIKO_FESTIVAL_RADIUS;
+        z.ratePerSec = CONFIG.TAIKO_FESTIVAL_RATE_PER_SEC;
+      }
+    }
+  }
+  return zones;
+}
+
+// 棒会議：人口が閾値以上＆CDが切れてたら自動発動。1〜N人を即処刑する。
+function maybeTriggerBokaigi(w: WorldState, dt: number) {
+  if (w.event) return;
+  w.bokaigiCooldown -= dt;
+  if (w.bokaigiCooldown > 0) return;
+  const alive = w.chibis.filter(isAlive);
+  if (alive.length < CONFIG.BOKAIGI_CLUSTER_MIN) return;
+  const suzu = w.npcs.find((n) => n.id === 'suzu');
+  if (suzu) spawnBubble(w.bubbles, suzu.pos, '棒会議ひらくよ', 'speech', 2.2);
+  const victimCount = Math.min(alive.length, 1 + Math.floor(Math.random() * CONFIG.BOKAIGI_VICTIMS_MAX));
+  const picked = new Set<number>();
+  for (let i = 0; i < victimCount; i++) {
+    for (let t = 0; t < 10; t++) {
+      const idx = Math.floor(Math.random() * alive.length);
+      if (picked.has(idx)) continue;
+      picked.add(idx);
+      kill(w, alive[idx]!, 'bokaigi');
+      break;
+    }
+  }
+  w.bokaigiCooldown = CONFIG.BOKAIGI_COOLDOWN_SEC + Math.random() * 15;
+}
+
+// 太鼓祭り：太鼓やぐら所持＆季節が夏/秋に入る瞬間に発動。
+function maybeStartTaikoFestival(w: WorldState) {
+  if (w.event) return;
+  if (w.season === w.lastSeason) return;
+  if (w.season !== 'summer' && w.season !== 'autumn') return;
+  if (countBuildingLevels(w, 'taiko') <= 0) return;
+  w.event = {
+    kind: 'taiko_festival',
+    duration: CONFIG.TAIKO_FESTIVAL_DURATION_SEC,
+    remaining: CONFIG.TAIKO_FESTIVAL_DURATION_SEC,
+    intensity: CONFIG.TAIKO_FESTIVAL_KILL_RATE,
+  };
+  const suzu = w.npcs.find((n) => n.id === 'suzu');
+  if (suzu) spawnBubble(w.bubbles, suzu.pos, '太鼓祭〜！', 'speech', 2.5);
 }
 
 function logDeath(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
@@ -261,6 +316,15 @@ function resolveEvent(w: WorldState, dt: number) {
     } else if (w.event.kind === 'fire') {
       if (Math.random() < rate * dt) kill(w, c, 'fire');
       else if (Math.random() < 0.08) setState(c, 'hurt', 1);
+    } else if (w.event.kind === 'taiko_festival') {
+      // 太鼓やぐら近くのちびわふを眩惑状態に。実際のkillは taiko_crush ハザードに任せる。
+      for (const b of w.buildings) {
+        if (b.defId !== 'taiko') continue;
+        if (distance(c.pos, b.pos) < 70) {
+          setState(c, 'dazed', 0.4);
+          break;
+        }
+      }
     }
   }
   if (w.event.remaining <= 0) {
@@ -268,6 +332,7 @@ function resolveEvent(w: WorldState, dt: number) {
     w.event = null;
     if (ended === 'ondo') w.ondoCooldown = computeOndoInterval(w);
     else if (ended === 'fire') w.fireCooldown = computeFireInterval(w);
+    // taiko_festival はクールダウン再設定不要（次の季節境界で再発動）。
   }
 }
 
@@ -416,9 +481,12 @@ function updateStomps(w: WorldState, dt: number) {
 export function tickWorld(w: WorldState, dt: number) {
   w.tick += 1;
   w.timeSec += dt;
+  const prevSeason = w.season;
   w.season = seasonFromTime(w.timeSec, w.secondsPerSeason);
   applyBuildingMods(w);
   spawnIfRoom(w);
+  maybeStartTaikoFestival(w);
+  maybeTriggerBokaigi(w, dt);
   scheduleEvents(w, dt);
   resolveEvent(w, dt);
   const hazards = getActiveHazards(w);
@@ -427,6 +495,7 @@ export function tickWorld(w: WorldState, dt: number) {
   updateNpcs(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
+  w.lastSeason = prevSeason;
 }
 
 export function buildingCost(w: WorldState, defId: string): number {

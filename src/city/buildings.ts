@@ -25,7 +25,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     effect: 'pop+4',
     hazard: {
       causeId: 'noukou_mud',
-      ratePerSec: 0.02,
+      ratePerSec: 0.06,
       radius: 38,
     },
   },
@@ -60,7 +60,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     hazard: {
       causeId: 'taiko_crush',
       ratePerSec: 0.03,
-      radius: 28,
+      radius: 40,
     },
   },
 } as const;

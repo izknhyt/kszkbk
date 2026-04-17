@@ -43,9 +43,9 @@ export const HAZARDS: HazardZone[] = [
     id: 'bridge',
     causeId: 'bridge',
     kind: 'rect',
-    rect: { x: 182, y: 390, w: 30, h: 50 },
-    ratePerSec: 0.28,
-    note: '丸太橋 — 渡ろうとすると落ちる',
+    rect: { x: 178, y: 385, w: 34, h: 58 },
+    ratePerSec: 4.0,
+    note: '丸太橋 — 渡ろうとすると落ちる（通過時間が短いので rate を高く）',
   },
   {
     id: 'stonebread',
