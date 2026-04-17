@@ -28,6 +28,7 @@ import {
   type NpcState,
 } from './npcs';
 import { spawnBubble, updateBubbles, type Bubble } from './bubbles';
+import { rollTraits } from './traits';
 
 export interface DeathLogEntry {
   tick: number;
@@ -295,11 +296,19 @@ export function forceSpawn(w: WorldState) {
   const name = generateName(w.nameSet);
   w.nameSet.add(name);
   const jitter = () => (Math.random() - 0.5) * 40;
+  const cocoon = w.npcs.find((n) => n.id === 'cocoon');
+  const traits = rollTraits({
+    buildingsNearFurana: w.buildings.filter((b) => distance(b.pos, w.furanaPos) < 120).length,
+    koubaLevel: countBuildingLevels(w, 'kouba'),
+    cocoonNearFurana: cocoon ? distance(cocoon.pos, w.furanaPos) < 100 : false,
+    event: w.event?.kind ?? null,
+  });
   const child = spawnChibiwafu({
     name,
     birthTick: w.tick,
     pos: { x: w.furanaPos.x + jitter(), y: w.furanaPos.y + 30 + Math.abs(jitter()) },
     maxAgeSec: CONFIG.CHIBI_MAX_AGE_MIN_SEC + Math.random() * CONFIG.CHIBI_MAX_AGE_RANGE_SEC,
+    traits,
   });
   setState(child, 'surprised', 1.5);
   w.chibis.push(child);

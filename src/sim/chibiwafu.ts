@@ -1,4 +1,4 @@
-import type { ChibiState, Chibiwafu, Vec2 } from '../types';
+import type { ChibiState, Chibiwafu, TraitId, Vec2 } from '../types';
 import { CONFIG } from '../config';
 
 let nextId = 1;
@@ -11,6 +11,7 @@ export interface SpawnArgs {
   birthTick: number;
   pos: Vec2;
   maxAgeSec: number;
+  traits: TraitId[];
 }
 
 export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
@@ -28,6 +29,7 @@ export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
     speed: CONFIG.CHIBI_SPEED_MIN + Math.random() * CONFIG.CHIBI_SPEED_RANGE,
     maxAgeSec: args.maxAgeSec,
     faceLeft: Math.random() < 0.5,
+    traits: [...args.traits],
   };
 }
 

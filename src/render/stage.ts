@@ -4,6 +4,7 @@ import type { Chibiwafu, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
 import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
 import type { Bubble } from '../sim/bubbles';
+import { TRAIT_DEFS } from '../sim/traits';
 import { frameFor, loadSpriteLibrary, type SpriteLibrary } from './sprites';
 
 const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number; accents: number }> = {
@@ -307,6 +308,20 @@ function createChibiView(c: Chibiwafu, lib: SpriteLibrary): ChibiView {
   label.anchor.set(0.5, 1);
   label.position.set(0, -36);
   container.addChild(sprite, label);
+  // 特性リング（足元、1個なら中央、2個なら横並び）。
+  if (c.traits.length > 0) {
+    const ring = new Graphics();
+    const step = 7;
+    const startX = -((c.traits.length - 1) * step) / 2;
+    for (let i = 0; i < c.traits.length; i++) {
+      const t = c.traits[i]!;
+      const color = TRAIT_DEFS[t].color;
+      ring.circle(startX + i * step, 3, 3.5)
+        .fill({ color, alpha: 0.9 })
+        .stroke({ color: 0x3a2a1a, width: 1 });
+    }
+    container.addChild(ring);
+  }
   return { sprite, label, container, lastState: c.state };
 }
 

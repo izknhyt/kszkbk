@@ -15,7 +15,8 @@ import {
 import { BUILDINGS } from '../src/city/buildings';
 import { DEATH_CAUSES } from '../src/sim/deaths';
 import { CONFIG } from '../src/config';
-import type { DeathCauseId } from '../src/types';
+import { TRAIT_DEFS } from '../src/sim/traits';
+import type { DeathCauseId, TraitId } from '../src/types';
 
 const SIM_MINUTES = 60;
 const INTERACT = process.argv.includes('--interact');
@@ -27,6 +28,12 @@ const totalTicks = Math.floor((SIM_MINUTES * 60) / dt);
 const firstDex: Partial<Record<DeathCauseId, number>> = {};
 const buildingsBought: Array<{ sec: number; id: string; cost: number }> = [];
 const secondaryInteractions: Array<{ sec: number; what: string }> = [];
+const traitCounts: Record<TraitId, number> = {
+  bouken: 0, gourmand: 0, shinpai: 0, ukiyo: 0, ikusa: 0, noumin: 0,
+};
+let noTraitBirths = 0;
+const traitsPerChibi: number[] = [];
+const seenChibiIds = new Set<number>();
 
 function tryAutoBuild() {
   const candidates = Object.values(BUILDINGS).map((def) => ({
@@ -54,6 +61,15 @@ for (let t = 0; t < totalTicks; t++) {
     if (!(id in firstDex)) firstDex[id] = Math.floor(w.timeSec);
   }
   w.newDiscoveries = [];
+
+  // newly-seen chibis: record trait distribution
+  for (const c of w.chibis) {
+    if (seenChibiIds.has(c.id)) continue;
+    seenChibiIds.add(c.id);
+    traitsPerChibi.push(c.traits.length);
+    if (c.traits.length === 0) noTraitBirths += 1;
+    for (const tr of c.traits) traitCounts[tr] += 1;
+  }
 
   if (t % 20 === 0) tryAutoBuild();
 
@@ -131,6 +147,18 @@ if (INTERACT) {
   }
   console.log('');
 }
+
+console.log('--- Trait distribution (across all births) ---');
+const totalBirthsSeen = traitsPerChibi.length;
+const avgTraits = totalBirthsSeen > 0 ? traitsPerChibi.reduce((a, b) => a + b, 0) / totalBirthsSeen : 0;
+console.log(`   births observed : ${totalBirthsSeen}`);
+console.log(`   avg traits/chibi: ${avgTraits.toFixed(2)}`);
+console.log(`   no-trait births : ${noTraitBirths} (${((noTraitBirths / Math.max(1, totalBirthsSeen)) * 100).toFixed(0)}%)`);
+for (const [id, count] of Object.entries(traitCounts).sort((a, b) => b[1] - a[1])) {
+  const pct = ((count / Math.max(1, totalBirthsSeen)) * 100).toFixed(1);
+  console.log(`   ${id.padEnd(10)} ${String(count).padStart(4)}  (${pct}% of chibis)  [${TRAIT_DEFS[id as TraitId].name}]`);
+}
+console.log('');
 
 // =========================================================================
 // Assertions — run with --strict to exit(1) on failure (for CI).

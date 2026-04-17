@@ -2,9 +2,16 @@ import type { WorldState } from '../sim/world';
 import { peekNextId, resetIdCounter } from '../sim/chibiwafu';
 
 const KEY = 'kszkbk:save:v1';
+const CURRENT_VERSION = 2;
+
+// v1: P2-a 前。16 dex。
+// v2: P2-a 以降。24 dex（Uncommon 含む）。live chibis は persist しないので
+//     trait フィールドのマイグレーションは不要。未知の dex id は createDex()
+//     側で 0 埋めされる（load は id ごとに上書き、欠けたものはそのまま残る）。
+type SaveVersion = 1 | 2;
 
 interface SaveData {
-  version: 1;
+  version: SaveVersion;
   nextId: number;
   points: number;
   totalDeaths: number;
@@ -18,7 +25,7 @@ interface SaveData {
 
 export function save(w: WorldState) {
   const data: SaveData = {
-    version: 1,
+    version: CURRENT_VERSION,
     nextId: peekNextId(),
     points: w.points,
     totalDeaths: w.totalDeaths,
@@ -41,7 +48,7 @@ export function load(w: WorldState): boolean {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw) as SaveData;
-    if (data.version !== 1) return false;
+    if (data.version !== 1 && data.version !== 2) return false;
     resetIdCounter(data.nextId || 1);
     w.points = data.points;
     w.totalDeaths = data.totalDeaths;

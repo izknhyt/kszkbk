@@ -28,6 +28,7 @@ export interface Chibiwafu {
   speed: number;
   maxAgeSec: number;
   faceLeft: boolean;
+  traits: TraitId[];
 }
 
 export type DeathCauseId =
@@ -80,3 +81,15 @@ export interface PlacedBuilding {
 }
 
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
+
+// =========================================================================
+// ちびわふ個性（特性）。生まれた瞬間に 0〜2 個が付与される。
+//   追加するときは types.ts → traits.ts → stage.ts のリング色、の3箇所。
+// =========================================================================
+export type TraitId =
+  | 'bouken'    // 冒険家
+  | 'gourmand'  // 食いしん坊
+  | 'shinpai'   // 心配性
+  | 'ukiyo'     // 浮世離れ
+  | 'ikusa'     // 戦闘狂
+  | 'noumin';   // 農民気質
