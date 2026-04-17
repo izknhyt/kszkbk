@@ -57,6 +57,34 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 25,
     template: (n) => `${n}は「なぜわふ…」と立ち止まり、そのまま三日干からびた。`,
   },
+  summer_boil: {
+    id: 'summer_boil',
+    title: '夏／沸騰池で煮え',
+    rare: false,
+    points: 14,
+    template: (n) => `${n}は温泉と勘違いして沸騰寸前の泥水池に入り、そのまま出汁になった。`,
+  },
+  winter_snow: {
+    id: 'winter_snow',
+    title: '冬／雪を食べてそのまま',
+    rare: false,
+    points: 11,
+    template: (n) => `${n}は雪を甘いと信じて食べ続け、内側から凍って動かなくなった。`,
+  },
+  spring_drunk: {
+    id: 'spring_drunk',
+    title: '春／泥水ビールで泥酔転倒',
+    rare: false,
+    points: 9,
+    template: (n) => `${n}は花見のつもりで泥水ビールを一気飲みし、踊り出して即転倒した。`,
+  },
+  autumn_harvest: {
+    id: 'autumn_harvest',
+    title: '秋／棒会議農法で掘り出され',
+    rare: false,
+    points: 13,
+    template: (n) => `${n}は収穫の最中、棒会議農法の一振りで根ごと掘り返された。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;

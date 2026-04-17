@@ -24,6 +24,23 @@
         <section class="panel actions">
           <button id="btn-ondo" title="くそざこ音頭をかける">音頭を流す</button>
           <button id="btn-bokai" title="棒会議を開催する">棒会議</button>
+          <button id="btn-fire" title="火事を発生させる">火事</button>
+        </section>
+        <section class="panel debug">
+          <h3>デバッグ <small id="stat-gen">gen 0</small></h3>
+          <div class="debug-row">
+            <span>速度</span>
+            <div class="speed-buttons" id="speed-buttons"></div>
+          </div>
+          <div class="debug-row">
+            <button id="btn-spawn" title="強制的に1体産む">+1体</button>
+            <button id="btn-save">即セーブ</button>
+            <button id="btn-reset" title="セーブ消去＆リロード">リセット</button>
+          </div>
+          <div class="debug-row small">
+            <span>tick <b id="stat-tick">0</b></span>
+            <span>時刻 <b id="stat-time">0s</b></span>
+          </div>
         </section>
         <section class="panel log">
           <h3>最近の死</h3>

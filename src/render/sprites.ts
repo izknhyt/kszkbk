@@ -1,4 +1,4 @@
-import { Assets, Rectangle, Texture, type TextureSource } from 'pixi.js';
+import { Rectangle, Texture } from 'pixi.js';
 import type { ChibiState } from '../types';
 
 const STATE_INDEX: Record<ChibiState, number> = {
@@ -18,27 +18,60 @@ export interface SpriteLibrary {
   hasSheet: boolean;
 }
 
+// 白背景のPNGをロード時にクロマキーして透過させる閾値。
+// 255に近いほど背景のみ抜く。アンチエイリアス混じりのピクセルまで抜くなら少し下げる。
+const CHROMA_THRESHOLD = 240;
+
 export async function loadSpriteLibrary(sheetUrl: string): Promise<SpriteLibrary> {
   try {
-    const base: Texture = await Assets.load(sheetUrl);
-    const source: TextureSource = base.source;
-    const cellW = Math.floor(base.width / 3);
-    const cellH = Math.floor(base.height / 3);
+    const img = await loadImage(sheetUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('2d context unavailable');
+    ctx.drawImage(img, 0, 0);
+    chromaKeyWhite(ctx, img.width, img.height);
+    const base = Texture.from(canvas);
+    const cellW = Math.floor(img.width / 3);
+    const cellH = Math.floor(img.height / 3);
     const frames: Texture[] = [];
     for (let r = 0; r < 3; r++) {
       for (let c = 0; c < 3; c++) {
         frames.push(
           new Texture({
-            source,
+            source: base.source,
             frame: new Rectangle(c * cellW, r * cellH, cellW, cellH),
           }),
         );
       }
     }
     return { frames, hasSheet: true };
-  } catch {
+  } catch (err) {
+    console.warn('[sprites] sheet load failed, using procedural fallback', err);
     return { frames: procedural(), hasSheet: false };
   }
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`image load failed: ${url}`));
+    img.src = url;
+  });
+}
+
+function chromaKeyWhite(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  const id = ctx.getImageData(0, 0, w, h);
+  const d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i]! >= CHROMA_THRESHOLD && d[i + 1]! >= CHROMA_THRESHOLD && d[i + 2]! >= CHROMA_THRESHOLD) {
+      d[i + 3] = 0;
+    }
+  }
+  ctx.putImageData(id, 0, 0);
 }
 
 function procedural(): Texture[] {

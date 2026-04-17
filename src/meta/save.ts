@@ -8,6 +8,7 @@ interface SaveData {
   nextId: number;
   points: number;
   totalDeaths: number;
+  totalBirths: number;
   timeSec: number;
   dex: WorldState['dex'];
   buildings: WorldState['buildings'];
@@ -20,6 +21,7 @@ export function save(w: WorldState) {
     nextId: peekNextId(),
     points: w.points,
     totalDeaths: w.totalDeaths,
+    totalBirths: w.totalBirths,
     timeSec: w.timeSec,
     dex: w.dex,
     buildings: w.buildings,
@@ -41,6 +43,7 @@ export function load(w: WorldState): boolean {
     resetIdCounter(data.nextId || 1);
     w.points = data.points;
     w.totalDeaths = data.totalDeaths;
+    w.totalBirths = data.totalBirths ?? 0;
     w.timeSec = data.timeSec;
     if (data.dex) {
       for (const k of Object.keys(data.dex) as Array<keyof typeof data.dex>) {

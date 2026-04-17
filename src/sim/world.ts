@@ -12,6 +12,8 @@ import {
 } from './chibiwafu';
 import { generateName } from './naming';
 import { SEASONS, seasonFromTime, type GlobalEvent } from './events';
+import { HAZARDS, hazardActiveInSeason, pointInZone } from './hazards';
+import { CONFIG } from '../config';
 
 export interface DeathLogEntry {
   tick: number;
@@ -32,6 +34,7 @@ export interface WorldState {
   buildings: PlacedBuilding[];
   points: number;
   totalDeaths: number;
+  totalBirths: number; // 世代カウンタ的指標
   dex: Record<DeathCauseId, DexEntry>;
   recentDeaths: DeathLogEntry[];
   nameSet: Set<string>;
@@ -45,10 +48,6 @@ export interface WorldState {
   ondoChance: number;
 }
 
-const SAFE_ZONE = { x: 350, y: 180, r: 90 };
-const MUD_RIVER_Y = 420;
-const BRIDGE_X = 200;
-
 function createDex(): Record<DeathCauseId, DexEntry> {
   const out = {} as Record<DeathCauseId, DexEntry>;
   for (const id of Object.keys(DEATH_CAUSES) as DeathCauseId[]) {
@@ -61,26 +60,27 @@ export function createWorld(bounds: { w: number; h: number }): WorldState {
   return {
     tick: 0,
     timeSec: 0,
-    secondsPerSeason: 60,
+    secondsPerSeason: CONFIG.SECONDS_PER_SEASON,
     season: 'spring',
     furanaPos: { x: bounds.w / 2, y: 200 },
     chibis: [],
     corpses: [],
-    maxCorpses: 40,
+    maxCorpses: CONFIG.MAX_CORPSES_VISIBLE,
     buildings: [],
     points: 0,
     totalDeaths: 0,
+    totalBirths: 0,
     dex: createDex(),
     recentDeaths: [],
     nameSet: new Set(),
     bounds,
     spawnCooldown: 2,
-    baseSpawnInterval: 4,
-    baseCap: 8,
+    baseSpawnInterval: CONFIG.BASE_SPAWN_INTERVAL_SEC,
+    baseCap: CONFIG.BASE_POP_CAP,
     event: null,
-    pointMultiplier: 1.0,
-    fireChance: 0,
-    ondoChance: 0,
+    pointMultiplier: CONFIG.GLOBAL_POINT_MULT_BASE,
+    fireChance: CONFIG.FIRE_CHANCE_BASE,
+    ondoChance: CONFIG.ONDO_CHANCE_BASE,
   };
 }
 
@@ -89,18 +89,16 @@ export function populationCap(w: WorldState): number {
   for (const b of w.buildings) {
     const def = BUILDINGS[b.defId];
     if (!def) continue;
-    if (def.effect.includes('pop+')) {
-      const m = /pop\+(\d+)/.exec(def.effect);
-      if (m) cap += Number(m[1]) * b.level;
-    }
+    const m = /pop\+(\d+)/.exec(def.effect);
+    if (m) cap += Number(m[1]) * b.level;
   }
   return cap;
 }
 
 function applyBuildingMods(w: WorldState) {
-  let mult = 1.0;
-  let fire = 0;
-  let ondo = 0;
+  let mult = CONFIG.GLOBAL_POINT_MULT_BASE;
+  let fire = CONFIG.FIRE_CHANCE_BASE;
+  let ondo = CONFIG.ONDO_CHANCE_BASE;
   for (const b of w.buildings) {
     const def = BUILDINGS[b.defId];
     if (!def) continue;
@@ -132,7 +130,7 @@ function logDeath(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   w.totalDeaths += 1;
 }
 
-function kill(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
+export function kill(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   if (!isAlive(c)) return;
   c.state = 'dead';
   c.deathTick = w.tick;
@@ -144,8 +142,13 @@ function spawnIfRoom(w: WorldState) {
   const living = w.chibis.filter(isAlive).length;
   const cap = populationCap(w);
   if (living >= cap) return;
-  w.spawnCooldown -= 1;
+  w.spawnCooldown -= CONFIG.TICK_DT;
   if (w.spawnCooldown > 0) return;
+  forceSpawn(w);
+  w.spawnCooldown = w.baseSpawnInterval + Math.random() * CONFIG.SPAWN_INTERVAL_JITTER_SEC;
+}
+
+export function forceSpawn(w: WorldState) {
   const name = generateName(w.nameSet);
   w.nameSet.add(name);
   const jitter = () => (Math.random() - 0.5) * 40;
@@ -153,24 +156,24 @@ function spawnIfRoom(w: WorldState) {
     name,
     birthTick: w.tick,
     pos: { x: w.furanaPos.x + jitter(), y: w.furanaPos.y + 30 + Math.abs(jitter()) },
-    maxAgeSec: 40 + Math.random() * 80,
+    maxAgeSec: CONFIG.CHIBI_MAX_AGE_MIN_SEC + Math.random() * CONFIG.CHIBI_MAX_AGE_RANGE_SEC,
   });
   setState(child, 'surprised', 1.5);
   w.chibis.push(child);
-  w.spawnCooldown = w.baseSpawnInterval + Math.random() * 2;
+  w.totalBirths += 1;
 }
 
 function maybeTriggerOndo(w: WorldState) {
   if (w.event) return;
   if (Math.random() < w.ondoChance) {
-    w.event = { kind: 'ondo', remaining: 6, intensity: 0.35 };
+    w.event = { kind: 'ondo', remaining: CONFIG.ONDO_DURATION_SEC, intensity: CONFIG.ONDO_KILL_RATE };
   }
 }
 
 function maybeTriggerFire(w: WorldState) {
   if (w.event) return;
   if (Math.random() < w.fireChance) {
-    w.event = { kind: 'fire', remaining: 5, intensity: 0.2 };
+    w.event = { kind: 'fire', remaining: CONFIG.FIRE_DURATION_SEC, intensity: CONFIG.FIRE_KILL_RATE };
   }
 }
 
@@ -199,7 +202,7 @@ function resolveEvent(w: WorldState, dt: number) {
 }
 
 export function triggerOndo(w: WorldState) {
-  w.event = { kind: 'ondo', remaining: 6, intensity: 0.4 };
+  w.event = { kind: 'ondo', remaining: CONFIG.ONDO_DURATION_SEC, intensity: CONFIG.ONDO_KILL_RATE + 0.05 };
 }
 
 export function triggerBokaigi(w: WorldState) {
@@ -212,23 +215,22 @@ export function triggerBokaigi(w: WorldState) {
   }
 }
 
-function ambientHazards(w: WorldState, c: Chibiwafu, dt: number) {
-  const insideSafe = distance(c.pos, { x: SAFE_ZONE.x, y: SAFE_ZONE.y }) < SAFE_ZONE.r;
-  if (!insideSafe) {
-    if (c.pos.y > MUD_RIVER_Y - 6) {
-      if (Math.random() < 0.1 * dt) { kill(w, c, 'mudriver'); return; }
+export function triggerFire(w: WorldState) {
+  w.event = { kind: 'fire', remaining: CONFIG.FIRE_DURATION_SEC, intensity: CONFIG.FIRE_KILL_RATE + 0.05 };
+}
+
+function runHazards(w: WorldState, c: Chibiwafu, dt: number): boolean {
+  const insideSafe = distance(c.pos, w.furanaPos) < CONFIG.SAFE_ZONE_R;
+  for (const zone of HAZARDS) {
+    if (!hazardActiveInSeason(zone, w.season)) continue;
+    if (insideSafe && !zone.bypassSafeZone) continue;
+    if (!pointInZone(zone, c.pos)) continue;
+    if (Math.random() < zone.ratePerSec * dt) {
+      kill(w, c, zone.causeId);
+      return true;
     }
-    if (c.pos.y > MUD_RIVER_Y - 30 && Math.abs(c.pos.x - BRIDGE_X) < 18) {
-      if (Math.random() < 0.08 * dt) { kill(w, c, 'bridge'); return; }
-    }
   }
-  if (Math.random() < 0.003 * dt) {
-    kill(w, c, 'stonebread');
-    return;
-  }
-  if (Math.random() < 0.0008 * dt) {
-    kill(w, c, 'philosophy');
-  }
+  return false;
 }
 
 function updateChibi(w: WorldState, c: Chibiwafu, dt: number) {
@@ -249,7 +251,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number) {
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
     wanderStep(c, dt, w.bounds);
   }
-  ambientHazards(w, c, dt);
+  runHazards(w, c, dt);
 }
 
 function compactCorpses(w: WorldState) {

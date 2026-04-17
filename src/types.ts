@@ -38,7 +38,11 @@ export type DeathCauseId =
   | 'bridge'
   | 'fire'
   | 'roushuai'
-  | 'philosophy';
+  | 'philosophy'
+  | 'summer_boil'
+  | 'winter_snow'
+  | 'spring_drunk'
+  | 'autumn_harvest';
 
 export interface DeathCause {
   id: DeathCauseId;

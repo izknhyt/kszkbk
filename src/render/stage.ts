@@ -1,13 +1,21 @@
 import { Application, Container, Graphics, Sprite, Text, TextStyle } from 'pixi.js';
 import type { WorldState } from '../sim/world';
-import type { Chibiwafu } from '../types';
+import type { Chibiwafu, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
 import { frameFor, loadSpriteLibrary, type SpriteLibrary } from './sprites';
+
+const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number; accents: number }> = {
+  spring: { grass: 0xc8b383, dirt: 0xddcca0, river: 0x8a6a42, accents: 0xf5b6c0 },
+  summer: { grass: 0xb2c66f, dirt: 0xd3c37c, river: 0x6a5028, accents: 0xffd35a },
+  autumn: { grass: 0xc18a4d, dirt: 0xb77338, river: 0x7a5222, accents: 0xd8572a },
+  winter: { grass: 0xd8d8de, dirt: 0xc2c0c6, river: 0x556680, accents: 0xffffff },
+};
 
 export interface StageHandle {
   app: Application;
   resize: (w: number, h: number) => void;
   draw: (world: WorldState) => void;
+  setSeason: (s: Season) => void;
 }
 
 interface ChibiView {
@@ -37,7 +45,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   const lib = await loadSpriteLibrary('/chibiwafu.png');
 
-  drawBackground(bgLayer, app.renderer.width, app.renderer.height);
+  let currentSeason: Season = 'spring';
+  drawBackground(bgLayer, app.renderer.width, app.renderer.height, currentSeason);
   const furana = drawFurana();
   fxLayer.addChild(furana);
 
@@ -47,10 +56,18 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   function resize(w: number, h: number) {
     bgLayer.removeChildren();
-    drawBackground(bgLayer, w, h);
+    drawBackground(bgLayer, w, h, currentSeason);
+  }
+
+  function setSeason(s: Season) {
+    if (s === currentSeason) return;
+    currentSeason = s;
+    bgLayer.removeChildren();
+    drawBackground(bgLayer, app.renderer.width, app.renderer.height, currentSeason);
   }
 
   function draw(world: WorldState) {
+    setSeason(world.season);
     furana.position.set(world.furanaPos.x, world.furanaPos.y);
 
     // buildings
@@ -128,7 +145,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     corpseLayer.children.sort((a, b) => a.y - b.y);
   }
 
-  return { app, resize, draw };
+  return { app, resize, draw, setSeason };
 }
 
 function calcScale(lib: SpriteLibrary): number {
@@ -153,30 +170,31 @@ function createChibiView(c: Chibiwafu, lib: SpriteLibrary): ChibiView {
   return { sprite, label, container, lastState: c.state };
 }
 
-function drawBackground(layer: Container, w: number, h: number) {
+function drawBackground(layer: Container, w: number, h: number, season: Season) {
   layer.removeChildren();
+  const palette = SEASON_COLORS[season];
   const grass = new Graphics();
-  grass.rect(0, 0, w, h).fill({ color: 0xc8b383 });
+  grass.rect(0, 0, w, h).fill({ color: palette.grass });
   layer.addChild(grass);
 
   const dirt = new Graphics();
-  dirt.ellipse(w * 0.55, h * 0.35, w * 0.45, h * 0.3).fill({ color: 0xd9c497 });
+  dirt.ellipse(w * 0.55, h * 0.35, w * 0.45, h * 0.3).fill({ color: palette.dirt });
   layer.addChild(dirt);
 
   const river = new Graphics();
-  river.rect(0, 420, w, h - 420).fill({ color: 0x8a6a42 });
-  river.rect(0, 420, w, 4).fill({ color: 0x6a4a22 });
+  river.rect(0, 420, w, h - 420).fill({ color: palette.river });
+  river.rect(0, 420, w, 4).fill({ color: 0x3a2a1a, alpha: 0.35 });
   layer.addChild(river);
 
   const bridge = new Graphics();
   bridge.rect(188, 414, 24, 80).fill({ color: 0x8b5a2b }).stroke({ color: 0x3a2a1a, width: 1 });
   layer.addChild(bridge);
 
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 18; i++) {
     const tuft = new Graphics();
     const x = Math.random() * w;
     const y = Math.random() * 400;
-    tuft.circle(x, y, 4 + Math.random() * 4).fill({ color: 0xb5a070, alpha: 0.5 });
+    tuft.circle(x, y, 3 + Math.random() * 5).fill({ color: palette.accents, alpha: 0.45 });
     layer.addChild(tuft);
   }
 }

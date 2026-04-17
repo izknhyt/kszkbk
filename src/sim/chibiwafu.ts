@@ -1,4 +1,5 @@
 import type { ChibiState, Chibiwafu, Vec2 } from '../types';
+import { CONFIG } from '../config';
 
 let nextId = 1;
 
@@ -24,7 +25,7 @@ export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
     stateTimer: 0,
     deathTick: null,
     deathCauseId: null,
-    speed: 18 + Math.random() * 10,
+    speed: CONFIG.CHIBI_SPEED_MIN + Math.random() * CONFIG.CHIBI_SPEED_RANGE,
     maxAgeSec: args.maxAgeSec,
     faceLeft: Math.random() < 0.5,
   };

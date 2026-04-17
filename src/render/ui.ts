@@ -4,38 +4,68 @@ import type { WorldState } from '../sim/world';
 import { buildingCost, populationCap, totalDexCount, uniqueDexFound } from '../sim/world';
 import { SEASON_LABEL } from '../sim/events';
 import type { DeathCauseId } from '../types';
+import { CONFIG, type TimeScale } from '../config';
 
 export interface UICallbacks {
   onBuild: (defId: string) => void;
   onOndo: () => void;
   onBokaigi: () => void;
+  onFire: () => void;
+  onSpawn: () => void;
+  onSave: () => void;
+  onReset: () => void;
+  onSpeed: (n: TimeScale) => void;
+  getSpeed: () => number;
 }
 
 export function bindUI(world: WorldState, cb: UICallbacks) {
-  const ondoBtn = document.getElementById('btn-ondo') as HTMLButtonElement;
-  const bokaiBtn = document.getElementById('btn-bokai') as HTMLButtonElement;
-  ondoBtn.addEventListener('click', () => cb.onOndo());
-  bokaiBtn.addEventListener('click', () => cb.onBokaigi());
+  byBtn('btn-ondo').addEventListener('click', () => cb.onOndo());
+  byBtn('btn-bokai').addEventListener('click', () => cb.onBokaigi());
+  byBtn('btn-fire').addEventListener('click', () => cb.onFire());
+  byBtn('btn-spawn').addEventListener('click', () => cb.onSpawn());
+  byBtn('btn-save').addEventListener('click', () => cb.onSave());
+  byBtn('btn-reset').addEventListener('click', () => {
+    if (confirm('セーブを消してリロードしますか？')) cb.onReset();
+  });
+
+  const speedHost = byId('speed-buttons');
+  speedHost.innerHTML = '';
+  for (const n of CONFIG.DEFAULT_TIME_SCALES) {
+    const b = document.createElement('button');
+    b.textContent = `×${n}`;
+    b.dataset.speed = String(n);
+    b.addEventListener('click', () => cb.onSpeed(n));
+    speedHost.appendChild(b);
+  }
 
   renderBuildList(world, cb);
   renderDex(world);
   renderRecent(world);
-  renderStats(world);
+  renderStats(world, cb);
 }
 
 export function refreshUI(world: WorldState, cb: UICallbacks) {
-  renderStats(world);
+  renderStats(world, cb);
   renderBuildList(world, cb);
   renderRecent(world);
   renderDex(world);
 }
 
-function renderStats(w: WorldState) {
+function renderStats(w: WorldState, cb: UICallbacks) {
   byId('stat-points').textContent = String(w.points);
   byId('stat-pop').textContent = String(w.chibis.length);
   byId('stat-cap').textContent = String(populationCap(w));
   byId('stat-deaths').textContent = String(w.totalDeaths);
   byId('stat-season').textContent = SEASON_LABEL[w.season];
+  byId('stat-gen').textContent = `gen ${w.totalBirths}`;
+  byId('stat-tick').textContent = String(w.tick);
+  byId('stat-time').textContent = `${Math.floor(w.timeSec)}s`;
+
+  const speed = cb.getSpeed();
+  const host = byId('speed-buttons');
+  for (const btn of host.querySelectorAll<HTMLButtonElement>('button')) {
+    btn.classList.toggle('active', Number(btn.dataset.speed) === speed);
+  }
 }
 
 function renderBuildList(w: WorldState, cb: UICallbacks) {
@@ -91,6 +121,10 @@ function byId(id: string): HTMLElement {
   const el = document.getElementById(id);
   if (!el) throw new Error(`missing #${id}`);
   return el;
+}
+
+function byBtn(id: string): HTMLButtonElement {
+  return byId(id) as HTMLButtonElement;
 }
 
 function escape(s: string): string {
