@@ -23,6 +23,8 @@ export interface StageHandle {
   setSeason: (s: Season) => void;
   // カメラ状態（HUDからの操作用に露出）
   resetCamera: () => void;
+  // 画面座標（client）→ ワールド座標に変換
+  screenToWorld: (cx: number, cy: number) => { x: number; y: number };
 }
 
 interface ChibiView {
@@ -137,10 +139,10 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     { passive: false },
   );
 
-  let dragState: { lastX: number; lastY: number; pointerId: number } | null = null;
+  let dragState: { lastX: number; lastY: number; pointerId: number; startX: number; startY: number; moved: boolean } | null = null;
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
-    dragState = { lastX: e.clientX, lastY: e.clientY, pointerId: e.pointerId };
+    dragState = { lastX: e.clientX, lastY: e.clientY, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false };
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!dragState || dragState.pointerId !== e.pointerId) return;
@@ -148,13 +150,21 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     cameraY += e.clientY - dragState.lastY;
     dragState.lastX = e.clientX;
     dragState.lastY = e.clientY;
+    if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > 4) dragState.moved = true;
     clampCamera();
     applyCamera();
   });
   const endDrag = (e: PointerEvent) => {
     if (dragState && dragState.pointerId === e.pointerId) {
       canvas.releasePointerCapture(e.pointerId);
+      const wasClick = !dragState.moved;
+      const startX = dragState.startX;
+      const startY = dragState.startY;
       dragState = null;
+      if (wasClick) {
+        const ev = new CustomEvent('kszk-click', { detail: { clientX: startX, clientY: startY } });
+        canvas.dispatchEvent(ev);
+      }
     }
   };
   canvas.addEventListener('pointerup', endDrag);
@@ -312,12 +322,20 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     corpseLayer.children.sort((a, b) => a.y - b.y);
   }
 
+  function screenToWorld(cx: number, cy: number): { x: number; y: number } {
+    const rect = canvas.getBoundingClientRect();
+    const lx = cx - rect.left;
+    const ly = cy - rect.top;
+    return { x: (lx - cameraX) / cameraScale, y: (ly - cameraY) / cameraScale };
+  }
+
   return {
     app,
     resize,
     draw,
     setSeason,
     resetCamera: fitCameraToViewport,
+    screenToWorld,
   };
 }
 

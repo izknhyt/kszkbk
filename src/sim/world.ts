@@ -32,6 +32,7 @@ import { rollTraits } from './traits';
 import { computeRank, maxBuildingLevel, upgradeCostFor, type RankContext } from './rank';
 import { landmarkList, type Landmark } from './landmarks';
 import { maybeStartChat } from './chats';
+import { TRAIT_DEFS } from './traits';
 
 export interface DeathLogEntry {
   tick: number;
@@ -273,9 +274,18 @@ export function kill(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   c.state = 'dead';
   c.deathTick = w.tick;
   c.deathCauseId = causeId;
+  pushLife(c, Math.floor(c.ageSec), `死んだ（${DEATH_CAUSES[causeId]!.title}）`);
   logDeath(w, c, causeId);
   reactNpcsToDeath(w, c);
 }
+
+// lifeLog に1行追加。上限30件（古いものから削除）。
+const LIFE_LOG_MAX = 30;
+function pushLife(c: Chibiwafu, sec: number, text: string) {
+  c.lifeLog.push({ sec, text });
+  if (c.lifeLog.length > LIFE_LOG_MAX) c.lifeLog.shift();
+}
+export { pushLife };
 
 // 出産：人口不足率に応じてインターバル短縮。空に近ければ burst 出産。
 function spawnIfRoom(w: WorldState) {
@@ -325,6 +335,8 @@ export function forceSpawn(w: WorldState) {
   if (traits.includes('bouken')) child.speed *= 1.2;
   if (traits.includes('ukiyo')) child.speed *= 0.7;
   setState(child, 'surprised', 1.5);
+  const traitLabel = traits.length > 0 ? `（${traits.map((t) => TRAIT_DEFS[t].name).join('・')}）` : '';
+  pushLife(child, 0, `生まれた${traitLabel}`);
   w.chibis.push(child);
   w.totalBirths += 1;
   reactNpcsToBirth(w);
@@ -447,6 +459,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       Math.random() < 0.4
     ) {
       setState(c, 'staring', 2.5);
+      pushLife(c, Math.floor(c.ageSec), '哲学石で空を見た');
     }
     // 食いしん坊：石パン岩／泥水池に着いたら食事モーション
     else if (
@@ -457,6 +470,8 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       Math.random() < 0.5
     ) {
       setState(c, 'eating', 1.8);
+      const where = c.targetLandmarkId === 'stonebread' ? '石パン岩' : c.targetLandmarkId === 'mudpool' ? '泥水池' : '泥水ビール樽';
+      pushLife(c, Math.floor(c.ageSec), `${where}で食べた`);
     }
     else setState(c, 'idle', 0.4 + Math.random());
   }
@@ -495,6 +510,8 @@ function processChats(w: WorldState, dt: number) {
       // A が先に喋る（長めTTL）。B は少し遅れて喋る（短めTTL＋位置が動いてないので即座に表示OK）
       spawnBubble(w.bubbles, a.pos, chat.lineA, 'speech', chat.duration * 0.6);
       spawnBubble(w.bubbles, { x: b.pos.x, y: b.pos.y + 6 }, chat.lineB, 'speech', chat.duration * 0.4);
+      pushLife(a, Math.floor(a.ageSec), `${b.name} と話した`);
+      pushLife(b, Math.floor(b.ageSec), `${a.name} と話した`);
       break; // a は1人と話せば十分
     }
   }
@@ -528,6 +545,7 @@ function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
   if (n.abuseCooldown > 0) return;
   const candidates = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 70);
   if (candidates.length === 0) return;
+  // 立ち話セットアップはこの前に行う（下で）
   // 特性でターゲット優先度を重み付け：
   //   心配性は狙われやすい（ビビってるので）。
   //   戦闘狂はあえて絡みに行くので、出会うと衝突率も高い（1.5倍）。
@@ -547,6 +565,7 @@ function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
   n.abuseCooldown = 5 + Math.random() * 6;
   spawnBubble(w.bubbles, n.pos, pickLine(COCOON_LINES_ABUSE), 'speech', 1.8);
   setState(target, 'cry', 1);
+  pushLife(target, Math.floor(target.ageSec), 'ココンに棒で突かれた');
   // 戦闘狂が対象で70%、棒を奪おうとして相討ち
   if (target.traits.includes('ikusa') && Math.random() < 0.7) {
     kill(w, target, 'ikusa_taezetsu');

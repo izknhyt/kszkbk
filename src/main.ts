@@ -11,7 +11,9 @@ import {
   upgradeOne,
 } from './sim/world';
 import { RANK_DEFS } from './sim/rank';
-import type { VillageRank } from './types';
+import { TRAIT_DEFS } from './sim/traits';
+import { DEATH_CAUSES as DEATHS } from './sim/deaths';
+import type { Chibiwafu, VillageRank } from './types';
 import { clearSave, load, save } from './meta/save';
 import { CONFIG, type TimeScale } from './config';
 import { DEATH_CAUSES } from './sim/deaths';
@@ -62,6 +64,39 @@ async function start() {
   let acc = 0;
   let prev = performance.now();
 
+  // --- 個体クリック → life log モーダル --------------------------------
+  let pinnedId: number | null = null;
+  stage.app.canvas.addEventListener('kszk-click', (e) => {
+    const detail = (e as CustomEvent).detail as { clientX: number; clientY: number };
+    const wp = stage.screenToWorld(detail.clientX, detail.clientY);
+    // 近い living chibi を探す
+    let best: Chibiwafu | null = null;
+    let bestDist = 26; // クリック許容距離（ワールド座標）
+    for (const c of world.chibis) {
+      const d = Math.hypot(c.pos.x - wp.x, c.pos.y - wp.y);
+      if (d < bestDist) { best = c; bestDist = d; }
+    }
+    if (best) {
+      pinnedId = best.id;
+      showChibiModal(best, false);
+    } else {
+      // 死体にヒットしたら epitaph モードで表示
+      for (const corpse of world.corpses) {
+        const d = Math.hypot(corpse.pos.x - wp.x, corpse.pos.y - wp.y);
+        if (d < 26) {
+          showChibiModal(corpse, true);
+          return;
+        }
+      }
+      closeChibiModal();
+      pinnedId = null;
+    }
+  });
+
+  const modal = document.getElementById('chibi-modal')!;
+  modal.querySelector('.chibi-modal-backdrop')!.addEventListener('click', closeChibiModal);
+  document.getElementById('modal-close')!.addEventListener('click', closeChibiModal);
+
   function loop(now: number) {
     const dtReal = Math.min(0.2, (now - prev) / 1000);
     prev = now;
@@ -91,6 +126,23 @@ async function start() {
       const nextDef = RANK_DEFS[world.villageRank];
       flashToast(`村が「${nextDef.name}」になった`, 'discovery');
       lastRank = world.villageRank;
+    }
+
+    // ピンした個体が死んだら自動で epitaph モーダルに切り替え
+    if (pinnedId != null) {
+      const living = world.chibis.find((c) => c.id === pinnedId);
+      if (!living) {
+        const corpse = world.corpses.find((c) => c.id === pinnedId);
+        if (corpse) {
+          showChibiModal(corpse, true);
+        } else {
+          pinnedId = null;
+        }
+      } else {
+        // Liveで開きっぱなしなら内容を更新
+        const isOpen = !modal.classList.contains('hidden');
+        if (isOpen) showChibiModal(living, false);
+      }
     }
 
     uiTimer += dtReal;
@@ -131,6 +183,68 @@ function flashToast(msg: string, kind: ToastKind = 'info') {
     el.style.transform = 'translateX(-50%) translateY(-10px)';
   }, 1600);
   setTimeout(() => el.remove(), 2100);
+}
+
+function showChibiModal(c: Chibiwafu, isEpitaph: boolean) {
+  const modal = document.getElementById('chibi-modal')!;
+  modal.classList.remove('hidden');
+
+  const nameEl = document.getElementById('modal-name')!;
+  const ageEl = document.getElementById('modal-age')!;
+  const traitsEl = document.getElementById('modal-traits')!;
+  const epitaphEl = document.getElementById('modal-epitaph')!;
+  const lifeEl = document.getElementById('modal-life')!;
+
+  nameEl.textContent = c.name;
+  ageEl.textContent = isEpitaph
+    ? `${Math.floor(c.ageSec)}秒生きた`
+    : `${Math.floor(c.ageSec)}秒目`;
+
+  traitsEl.innerHTML = '';
+  if (c.traits.length === 0) {
+    const chip = document.createElement('span');
+    chip.className = 'trait-chip';
+    chip.style.background = '#888';
+    chip.textContent = '無特性';
+    traitsEl.appendChild(chip);
+  } else {
+    for (const t of c.traits) {
+      const def = TRAIT_DEFS[t];
+      const chip = document.createElement('span');
+      chip.className = 'trait-chip';
+      chip.style.background = '#' + def.color.toString(16).padStart(6, '0');
+      chip.textContent = def.name;
+      traitsEl.appendChild(chip);
+    }
+  }
+
+  if (isEpitaph && c.deathCauseId) {
+    const cause = DEATHS[c.deathCauseId as keyof typeof DEATHS];
+    if (cause) {
+      epitaphEl.textContent = `💀 ${cause.title} — ${cause.template(c.name)}`;
+      epitaphEl.classList.add('show');
+    }
+  } else {
+    epitaphEl.classList.remove('show');
+    epitaphEl.textContent = '';
+  }
+
+  lifeEl.innerHTML = '';
+  for (const ev of c.lifeLog) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="sec">${ev.sec}s</span><span>${escapeHtml(ev.text)}</span>`;
+    lifeEl.appendChild(li);
+  }
+}
+
+function closeChibiModal() {
+  document.getElementById('chibi-modal')!.classList.add('hidden');
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c] ?? c));
 }
 
 function flashTabHighlight(tab: string) {
