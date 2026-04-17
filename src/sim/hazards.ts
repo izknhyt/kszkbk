@@ -1,4 +1,5 @@
-import type { DeathCauseId, Season, Vec2 } from '../types';
+import type { DeathCauseId, Season, TraitId, Vec2 } from '../types';
+import type { GlobalEvent } from './events';
 
 // =========================================================================
 // ハザード＝データ定義
@@ -12,6 +13,12 @@ import type { DeathCauseId, Season, Vec2 } from '../types';
 //   seasons: 未指定なら全季節でアクティブ
 //   ratePerSec: 1秒あたりの死亡確率（個体ごと）。tick内で dt を掛けて評価。
 //   bypassSafeZone: true なら安全ゾーン無視（＝どこでも発動）。
+//
+// --- Trait-aware 拡張（P2-b）---------------------------------------------
+//   requiresAnyTrait : いずれかの特性を持つちびわふにしか発動しない
+//   traitMultipliers : 特性ごとの rate 倍率（全員発動、一部だけ倍率UP/DOWN）
+//   requiresEvent    : 指定 kind の global event 中だけ発動
+//   requiresYoungSec : 生後この秒数未満のちびわふのみ対象
 // =========================================================================
 
 export interface HazardZone {
@@ -28,16 +35,35 @@ export interface HazardZone {
   seasons?: Season[];
   bypassSafeZone?: boolean;
   note?: string;
+  // trait / event gates
+  requiresAnyTrait?: TraitId[];
+  traitMultipliers?: Partial<Record<TraitId, number>>;
+  requiresEvent?: GlobalEvent['kind'];
+  requiresYoungSec?: number;
 }
 
 export const HAZARDS: HazardZone[] = [
+  // 特性ゲート付きのゾーンは先に評価する（共通ゾーンに吸収されないよう順序を前に）。
+  // runHazards は「最初に判定が通ったゾーン」で kill するため、trait 特化のものを優先。
+  {
+    id: 'bouken_cliff',
+    causeId: 'bouken_cliff',
+    kind: 'rect',
+    rect: { x: 0, y: 420, w: 9999, h: 9999 },
+    ratePerSec: 3.0, // bridge (4.0) と競合するので高めに設定
+    seasons: ['spring'],
+    bypassSafeZone: true,
+    requiresAnyTrait: ['bouken'],
+    note: '春の川奥を覗く冒険家が墜落（bridge/mudriver と競合、順序で先に評価）',
+  },
   {
     id: 'mudriver',
     causeId: 'mudriver',
     kind: 'rect',
     rect: { x: 0, y: 414, w: 9999, h: 9999 },
     ratePerSec: 0.35,
-    note: '泥川 — 踏み込んだちびわふは溺れる',
+    traitMultipliers: { bouken: 1.5 },
+    note: '泥川 — 冒険家は1.5倍の確率で溺れる',
   },
   {
     id: 'bridge',
@@ -45,6 +71,7 @@ export const HAZARDS: HazardZone[] = [
     kind: 'rect',
     rect: { x: 178, y: 385, w: 34, h: 58 },
     ratePerSec: 4.0,
+    traitMultipliers: { bouken: 1.5 },
     note: '丸太橋 — 渡ろうとすると落ちる（通過時間が短いので rate を高く）',
   },
   {
@@ -53,7 +80,8 @@ export const HAZARDS: HazardZone[] = [
     kind: 'random',
     ratePerSec: 0.006,
     bypassSafeZone: true,
-    note: '拾った石パンで歯折れ',
+    traitMultipliers: { gourmand: 2.0, shinpai: 0.5 },
+    note: '拾った石パンで歯折れ（食いしん坊2倍／心配性は避ける）',
   },
   {
     id: 'philosophy',
@@ -61,7 +89,8 @@ export const HAZARDS: HazardZone[] = [
     kind: 'random',
     ratePerSec: 0.0015,
     bypassSafeZone: true,
-    note: '「なぜわふ…」で静止→干からび',
+    traitMultipliers: { ukiyo: 2.0, shinpai: 0.5 },
+    note: '「なぜわふ…」で静止→干からび（浮世離れ2倍）',
   },
   // --- 季節ゲート -----------------------------------------------------------
   {
@@ -71,6 +100,7 @@ export const HAZARDS: HazardZone[] = [
     ratePerSec: 0.006,
     seasons: ['summer'],
     bypassSafeZone: true,
+    traitMultipliers: { gourmand: 2.0, shinpai: 0.5 },
     note: '夏 — 沸騰寸前の泥水池で煮え',
   },
   {
@@ -80,6 +110,7 @@ export const HAZARDS: HazardZone[] = [
     ratePerSec: 0.005,
     seasons: ['winter'],
     bypassSafeZone: true,
+    traitMultipliers: { gourmand: 2.0, shinpai: 0.5 },
     note: '冬 — 雪を食べて倒れる',
   },
   {
@@ -89,6 +120,7 @@ export const HAZARDS: HazardZone[] = [
     ratePerSec: 0.004,
     seasons: ['spring'],
     bypassSafeZone: true,
+    traitMultipliers: { shinpai: 0.5 },
     note: '春 — 泥水ビールで泥酔転倒',
   },
   {
@@ -98,7 +130,70 @@ export const HAZARDS: HazardZone[] = [
     ratePerSec: 0.005,
     seasons: ['autumn'],
     bypassSafeZone: true,
+    traitMultipliers: { shinpai: 0.5 },
     note: '秋 — 棒会議農法で根ごと掘り返され巻添え',
+  },
+
+  // =========================================================================
+  // Uncommon 死因 — 特性 × 状況で解禁されるゾーン
+  //   bouken_cliff は配列先頭に移動済み（mudriver との順序優先）。
+  // =========================================================================
+  {
+    id: 'gourmand_choke',
+    causeId: 'gourmand_choke',
+    kind: 'random',
+    ratePerSec: 0.009,
+    bypassSafeZone: true,
+    requiresAnyTrait: ['gourmand'],
+    note: '食いしん坊の早食い事故',
+  },
+  {
+    id: 'shinpai_kashou',
+    causeId: 'shinpai_kashou',
+    kind: 'random',
+    ratePerSec: 0.025,
+    bypassSafeZone: true,
+    requiresAnyTrait: ['shinpai'],
+    requiresEvent: 'ondo',
+    note: '音頭中の心配性が過呼吸',
+  },
+  {
+    id: 'ukiyo_shoushitsu',
+    causeId: 'ukiyo_shoushitsu',
+    kind: 'random',
+    ratePerSec: 0.003,
+    bypassSafeZone: true,
+    requiresAnyTrait: ['ukiyo'],
+    note: '浮世離れが輪郭を失う',
+  },
+  {
+    id: 'noumin_umore',
+    causeId: 'noumin_umore',
+    kind: 'random',
+    ratePerSec: 0.012,
+    seasons: ['autumn'],
+    bypassSafeZone: true,
+    requiresAnyTrait: ['noumin'],
+    note: '秋の収穫祭で農民気質が自ら埋まる',
+  },
+  {
+    id: 'taiko_tobikomi',
+    causeId: 'taiko_tobikomi',
+    kind: 'random',
+    ratePerSec: 0.05,
+    bypassSafeZone: true,
+    requiresAnyTrait: ['bouken', 'ikusa'],
+    requiresEvent: 'taiko_festival',
+    note: '太鼓祭にテンション上がった冒険家／戦闘狂がやぐらに飛び込む',
+  },
+  {
+    id: 'suzu_kazoe_shikujiri',
+    causeId: 'suzu_kazoe_shikujiri',
+    kind: 'random',
+    ratePerSec: 0.012,
+    bypassSafeZone: true,
+    requiresYoungSec: 4,
+    note: '生後4秒以内に消えてしまい、スズの点呼に間に合わない',
   },
 ];
 

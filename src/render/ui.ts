@@ -114,18 +114,32 @@ function renderDex(w: WorldState) {
   const host = byId('dex-list');
   host.innerHTML = '';
   byId('dex-count').textContent = `${uniqueDexFound(w)}/${totalDexCount()}`;
-  for (const id of Object.keys(DEATH_CAUSES) as DeathCauseId[]) {
-    const entry = w.dex[id];
-    const def = DEATH_CAUSES[id]!;
-    const row = document.createElement('div');
-    const locked = entry.count === 0;
-    row.className = `dex-row ${locked ? 'locked' : ''}`;
-    const label = locked ? '???' : escape(def.title);
-    row.innerHTML = `<span>${label}</span><span class="count">${entry.count}</span>`;
-    if (!locked && entry.firstContext) {
-      row.title = `初発見: ${entry.firstVictim}\n${entry.firstContext}`;
+  const allIds = Object.keys(DEATH_CAUSES) as DeathCauseId[];
+  const buckets: Array<{ title: string; ids: DeathCauseId[] }> = [
+    { title: 'Common', ids: allIds.filter((id) => !DEATH_CAUSES[id]!.rare && !DEATH_CAUSES[id]!.uncommon) },
+    { title: 'Uncommon（特性条件）', ids: allIds.filter((id) => DEATH_CAUSES[id]!.uncommon) },
+    { title: 'Rare', ids: allIds.filter((id) => DEATH_CAUSES[id]!.rare) },
+  ];
+  for (const bucket of buckets) {
+    if (bucket.ids.length === 0) continue;
+    const foundInBucket = bucket.ids.filter((id) => w.dex[id].count > 0).length;
+    const header = document.createElement('div');
+    header.className = 'dex-bucket-header';
+    header.innerHTML = `<span>${escape(bucket.title)}</span><span class="count">${foundInBucket}/${bucket.ids.length}</span>`;
+    host.appendChild(header);
+    for (const id of bucket.ids) {
+      const entry = w.dex[id];
+      const def = DEATH_CAUSES[id]!;
+      const row = document.createElement('div');
+      const locked = entry.count === 0;
+      row.className = `dex-row ${locked ? 'locked' : ''}`;
+      const label = locked ? '???' : escape(def.title);
+      row.innerHTML = `<span>${label}</span><span class="count">${entry.count}</span>`;
+      if (!locked && entry.firstContext) {
+        row.title = `初発見: ${entry.firstVictim}\n${entry.firstContext}`;
+      }
+      host.appendChild(row);
     }
-    host.appendChild(row);
   }
 }
 

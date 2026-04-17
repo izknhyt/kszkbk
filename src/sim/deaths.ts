@@ -113,6 +113,74 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 15,
     template: (n) => `${n}はココンに棒で突かれ続け、最後には動かなくなった。`,
   },
+
+  // =========================================================================
+  // Uncommon — 特性 × 状況ゲートで解禁される死因。通常プレイの後半で徐々に埋まる。
+  // =========================================================================
+  bouken_cliff: {
+    id: 'bouken_cliff',
+    title: '冒険家の墜落',
+    rare: false,
+    uncommon: true,
+    points: 22,
+    template: (n) => `${n}はまだ誰も渡っていない泥川の奥を覗こうとして戻って来なかった。`,
+  },
+  gourmand_choke: {
+    id: 'gourmand_choke',
+    title: '食いしん坊の詰まり',
+    rare: false,
+    uncommon: true,
+    points: 18,
+    template: (n) => `${n}は石パンを三口で飲み込もうとして喉が鳴らなくなった。`,
+  },
+  shinpai_kashou: {
+    id: 'shinpai_kashou',
+    title: '心配性の過呼吸',
+    rare: false,
+    uncommon: true,
+    points: 19,
+    template: (n) => `${n}は音頭の足音で息ができなくなり、まもりんごと膝をついた。`,
+  },
+  ukiyo_shoushitsu: {
+    id: 'ukiyo_shoushitsu',
+    title: '浮世離れの消失',
+    rare: false,
+    uncommon: true,
+    points: 24,
+    template: (n) => `${n}は「わふ…とは…」と呟いてそのまま輪郭が薄くなっていった。`,
+  },
+  ikusa_taezetsu: {
+    id: 'ikusa_taezetsu',
+    title: '戦闘狂の相討ち',
+    rare: false,
+    uncommon: true,
+    points: 26,
+    template: (n) => `${n}はココンの棒を奪おうとして、両方とも泥に転がった。`,
+  },
+  noumin_umore: {
+    id: 'noumin_umore',
+    title: '農民気質の自埋め',
+    rare: false,
+    uncommon: true,
+    points: 20,
+    template: (n) => `${n}は収穫祭の一番乗りを目指して自分から畝に飛び込んだ。`,
+  },
+  suzu_kazoe_shikujiri: {
+    id: 'suzu_kazoe_shikujiri',
+    title: 'スズの点呼に数えられず',
+    rare: false,
+    uncommon: true,
+    points: 17,
+    template: (n) => `${n}はスズが点呼を終える前に消え、記録簿から名前だけが残った。`,
+  },
+  taiko_tobikomi: {
+    id: 'taiko_tobikomi',
+    title: '祭りのやぐら飛び込み',
+    rare: false,
+    uncommon: true,
+    points: 28,
+    template: (n) => `${n}は太鼓の真ん中に飛び込むのが一番目立つと信じた。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;

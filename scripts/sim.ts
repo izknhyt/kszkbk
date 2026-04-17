@@ -166,12 +166,20 @@ console.log('');
 // =========================================================================
 const STRICT = process.argv.includes('--strict');
 const sortedForAssertion = (Object.keys(DEATH_CAUSES) as DeathCauseId[])
-  .map((id) => ({ id, count: w.dex[id].count, rare: DEATH_CAUSES[id]!.rare }))
+  .map((id) => ({
+    id,
+    count: w.dex[id].count,
+    rare: DEATH_CAUSES[id]!.rare,
+    uncommon: !!DEATH_CAUSES[id]!.uncommon,
+  }))
   .sort((a, b) => b.count - a.count);
 const discovered = sortedForAssertion.filter((r) => r.count > 0);
+// top share はコモン＋アンコモン全体で見る（上位が1つに偏らないか）
 const topShare = discovered.length > 0 ? discovered[0]!.count / w.totalDeaths : 0;
-const lastNonRare = discovered.filter((r) => !r.rare).slice(-1)[0];
-const bottomShare = lastNonRare ? lastNonRare.count / w.totalDeaths : 0;
+// bottom share はコモン死因だけで見る（アンコモンは設計上 rare でよい）
+const discoveredCommon = discovered.filter((r) => !r.rare && !r.uncommon);
+const lastCommon = discoveredCommon.slice(-1)[0];
+const bottomShare = lastCommon ? lastCommon.count / w.totalDeaths : 0;
 const allDiscovered = uniqueDexFound(w) === totalDexCount();
 const firstDexValues = Object.values(firstDex).filter((v): v is number => typeof v === 'number');
 const lastDexTime = allDiscovered && firstDexValues.length > 0 ? Math.max(...firstDexValues) : Infinity;
@@ -185,8 +193,8 @@ const alivePct = capFinal > 0 ? w.chibis.length / capFinal : 0;
 interface Check { label: string; pass: boolean; value: string; }
 const checks: Check[] = [
   { label: 'top share ≤ 22%', pass: topShare <= 0.22, value: `${(topShare * 100).toFixed(1)}%` },
-  { label: 'bottom non-rare ≥ 3%', pass: bottomShare >= 0.03, value: `${(bottomShare * 100).toFixed(2)}%` },
-  { label: 'all 16 dex discovered', pass: allDiscovered, value: `${uniqueDexFound(w)}/${totalDexCount()}` },
+  { label: 'bottom common ≥ 3%', pass: bottomShare >= 0.03, value: `${(bottomShare * 100).toFixed(2)}%` },
+  { label: `all ${totalDexCount()} dex discovered`, pass: allDiscovered, value: `${uniqueDexFound(w)}/${totalDexCount()}` },
   { label: 'last dex within 30min', pass: lastDexTime <= 1800, value: `${lastDexTime === Infinity ? 'n/a' : lastDexTime + 's'}` },
   { label: 'alive 30–90% of cap', pass: alivePct >= 0.3 && alivePct <= 0.9, value: `${(alivePct * 100).toFixed(0)}%` },
 ];

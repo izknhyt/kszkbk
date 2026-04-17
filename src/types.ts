@@ -47,13 +47,24 @@ export type DeathCauseId =
   | 'noukou_mud'
   | 'kouba_spark'
   | 'taiko_crush'
-  | 'cocoon_abuse';
+  | 'cocoon_abuse'
+  // --- Uncommon（特性×状況で解禁）-----------------------------------------
+  | 'bouken_cliff'
+  | 'gourmand_choke'
+  | 'shinpai_kashou'
+  | 'ukiyo_shoushitsu'
+  | 'ikusa_taezetsu'
+  | 'noumin_umore'
+  | 'suzu_kazoe_shikujiri'
+  | 'taiko_tobikomi';
 
 export interface DeathCause {
   id: DeathCauseId;
   title: string;
   template: (name: string) => string;
   rare: boolean;
+  // Uncommon 死因は特定の特性 × 状況で解禁される。図鑑UIでバケット分け。
+  uncommon?: boolean;
   points: number;
 }
 

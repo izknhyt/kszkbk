@@ -303,13 +303,19 @@ export function forceSpawn(w: WorldState) {
     cocoonNearFurana: cocoon ? distance(cocoon.pos, w.furanaPos) < 100 : false,
     event: w.event?.kind ?? null,
   });
+  // 特性でライフスパン調整：心配性は寿命半分（老衰が2倍早く来る）。
+  let maxAge = CONFIG.CHIBI_MAX_AGE_MIN_SEC + Math.random() * CONFIG.CHIBI_MAX_AGE_RANGE_SEC;
+  if (traits.includes('shinpai')) maxAge *= 0.5;
   const child = spawnChibiwafu({
     name,
     birthTick: w.tick,
     pos: { x: w.furanaPos.x + jitter(), y: w.furanaPos.y + 30 + Math.abs(jitter()) },
-    maxAgeSec: CONFIG.CHIBI_MAX_AGE_MIN_SEC + Math.random() * CONFIG.CHIBI_MAX_AGE_RANGE_SEC,
+    maxAgeSec: maxAge,
     traits,
   });
+  // 特性で移動速度調整：冒険家 +20%、浮世離れ -30%。
+  if (traits.includes('bouken')) child.speed *= 1.2;
+  if (traits.includes('ukiyo')) child.speed *= 0.7;
   setState(child, 'surprised', 1.5);
   w.chibis.push(child);
   w.totalBirths += 1;
@@ -320,13 +326,17 @@ function resolveEvent(w: WorldState, dt: number) {
   if (!w.event) return;
   w.event.remaining -= dt;
   const elapsed = w.event.duration - w.event.remaining;
-  const rate = intensityAt(w.event.intensity, elapsed, w.event.duration);
+  const peak = intensityAt(w.event.intensity, elapsed, w.event.duration);
   for (const c of w.chibis) {
     if (!isAlive(c)) continue;
     if (w.event.kind === 'ondo') {
+      // 浮世離れは音頭に反応しない（免疫）。
+      if (c.traits.includes('ukiyo')) continue;
       setState(c, 'dazed', 0.5);
-      if (Math.random() < rate * dt) kill(w, c, 'ondo');
+      if (Math.random() < peak * dt) kill(w, c, 'ondo');
     } else if (w.event.kind === 'fire') {
+      // 農民気質は火に強い（-30%）。
+      const rate = c.traits.includes('noumin') ? peak * 0.7 : peak;
       if (Math.random() < rate * dt) kill(w, c, 'fire');
       else if (Math.random() < 0.08) setState(c, 'hurt', 1);
     } else if (w.event.kind === 'taiko_festival') {
@@ -384,7 +394,21 @@ function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone
     if (!hazardActiveInSeason(zone, w.season)) continue;
     if (insideSafe && !zone.bypassSafeZone) continue;
     if (!pointInZone(zone, c.pos)) continue;
-    if (Math.random() < zone.ratePerSec * dt) {
+    // trait gate
+    if (zone.requiresAnyTrait && !zone.requiresAnyTrait.some((t) => c.traits.includes(t))) continue;
+    // event gate
+    if (zone.requiresEvent && zone.requiresEvent !== w.event?.kind) continue;
+    // age gate
+    if (zone.requiresYoungSec != null && c.ageSec >= zone.requiresYoungSec) continue;
+    // trait multipliers
+    let rate = zone.ratePerSec;
+    if (zone.traitMultipliers) {
+      for (const t of c.traits) {
+        const m = zone.traitMultipliers[t];
+        if (m != null) rate *= m;
+      }
+    }
+    if (Math.random() < rate * dt) {
       kill(w, c, zone.causeId);
       return true;
     }
@@ -437,13 +461,34 @@ function updateNpcs(w: WorldState, dt: number) {
 function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
   n.abuseCooldown -= dt;
   if (n.abuseCooldown > 0) return;
-  const near = w.chibis.find((c) => isAlive(c) && distance(c.pos, n.pos) < 70);
-  if (!near) return;
+  const candidates = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 70);
+  if (candidates.length === 0) return;
+  // 特性でターゲット優先度を重み付け：
+  //   心配性は狙われやすい（ビビってるので）。
+  //   戦闘狂はあえて絡みに行くので、出会うと衝突率も高い（1.5倍）。
+  const weights = candidates.map((c) => {
+    if (c.traits.includes('shinpai')) return 2.0;
+    if (c.traits.includes('ikusa')) return 1.5;
+    return 1.0;
+  });
+  const total = weights.reduce((a, b) => a + b, 0);
+  let roll = Math.random() * total;
+  let target: Chibiwafu | undefined;
+  for (let i = 0; i < candidates.length; i++) {
+    roll -= weights[i]!;
+    if (roll < 0) { target = candidates[i]!; break; }
+  }
+  if (!target) return;
   n.abuseCooldown = 5 + Math.random() * 6;
   spawnBubble(w.bubbles, n.pos, pickLine(COCOON_LINES_ABUSE), 'speech', 1.8);
-  setState(near, 'cry', 1);
+  setState(target, 'cry', 1);
+  // 戦闘狂が対象で70%、棒を奪おうとして相討ち
+  if (target.traits.includes('ikusa') && Math.random() < 0.7) {
+    kill(w, target, 'ikusa_taezetsu');
+    return;
+  }
   if (Math.random() < 0.35) {
-    kill(w, near, 'cocoon_abuse');
+    kill(w, target, 'cocoon_abuse');
   }
 }
 

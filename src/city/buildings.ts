@@ -27,6 +27,7 @@ export const BUILDINGS: Record<string, BuildingDef> = {
       causeId: 'noukou_mud',
       ratePerSec: 0.06,
       radius: 38,
+      traitMultipliers: { noumin: 1.5 },
     },
   },
   kouba: {
@@ -38,8 +39,9 @@ export const BUILDINGS: Record<string, BuildingDef> = {
     effect: 'pop+3',
     hazard: {
       causeId: 'kouba_spark',
-      ratePerSec: 0.025,
-      radius: 32,
+      ratePerSec: 0.04,
+      radius: 40,
+      traitMultipliers: { noumin: 0.7 },
     },
   },
   hakaba: {
@@ -71,7 +73,7 @@ export function buildingsToHazards(placed: { defId: string; pos: Vec2 }[]): Haza
     const p = placed[i]!;
     const def = BUILDINGS[p.defId];
     if (!def?.hazard) continue;
-    out.push({
+    const zone: HazardZone = {
       id: `${def.id}-${i}`,
       kind: 'circle',
       center: { ...p.pos },
@@ -80,7 +82,10 @@ export function buildingsToHazards(placed: { defId: string; pos: Vec2 }[]): Haza
       causeId: def.hazard.causeId as DeathCauseId,
       bypassSafeZone: true,
       note: `${def.name}の危険地帯`,
-    });
+    };
+    if (def.hazard.traitMultipliers) zone.traitMultipliers = { ...def.hazard.traitMultipliers };
+    if (def.hazard.requiresAnyTrait) zone.requiresAnyTrait = [...def.hazard.requiresAnyTrait];
+    out.push(zone);
   }
   return out;
 }
