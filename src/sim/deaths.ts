@@ -85,6 +85,34 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 13,
     template: (n) => `${n}は収穫の最中、棒会議農法の一振りで根ごと掘り返された。`,
   },
+  noukou_mud: {
+    id: 'noukou_mud',
+    title: '農業区の泥畑に埋もれ',
+    rare: false,
+    points: 11,
+    template: (n) => `${n}は種を逆さに植えようとして自分が埋まった。`,
+  },
+  kouba_spark: {
+    id: 'kouba_spark',
+    title: '鍛冶場の火花で発火',
+    rare: false,
+    points: 13,
+    template: (n) => `${n}は鍛冶場の火花に引火、まもりんから燃え尽きた。`,
+  },
+  taiko_crush: {
+    id: 'taiko_crush',
+    title: 'わふ太鼓やぐらで圧死',
+    rare: false,
+    points: 14,
+    template: (n) => `${n}は太鼓の真下を覗き込み、次の一打で平たくなった。`,
+  },
+  cocoon_abuse: {
+    id: 'cocoon_abuse',
+    title: 'ココンのいじめで死亡',
+    rare: false,
+    points: 15,
+    template: (n) => `${n}はココンに棒で突かれ続け、最後には動かなくなった。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;

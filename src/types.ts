@@ -42,7 +42,11 @@ export type DeathCauseId =
   | 'summer_boil'
   | 'winter_snow'
   | 'spring_drunk'
-  | 'autumn_harvest';
+  | 'autumn_harvest'
+  | 'noukou_mud'
+  | 'kouba_spark'
+  | 'taiko_crush'
+  | 'cocoon_abuse';
 
 export interface DeathCause {
   id: DeathCauseId;

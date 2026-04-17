@@ -1,6 +1,6 @@
 import type { Chibiwafu, DeathCauseId, DexEntry, PlacedBuilding, Season, Vec2 } from '../types';
 import { DEATH_CAUSES } from './deaths';
-import { BUILDINGS } from '../city/buildings';
+import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
   distance,
   isAlive,
@@ -12,8 +12,22 @@ import {
 } from './chibiwafu';
 import { generateName } from './naming';
 import { SEASONS, seasonFromTime, type GlobalEvent } from './events';
-import { HAZARDS, hazardActiveInSeason, pointInZone } from './hazards';
+import { HAZARDS, hazardActiveInSeason, pointInZone, type HazardZone } from './hazards';
 import { CONFIG } from '../config';
+import {
+  COCOON_LINES_ABUSE,
+  COCOON_LINES_DEATH,
+  LOU_LINES,
+  NPC_DEFS,
+  SUZU_LINES_BIRTH,
+  SUZU_LINES_DEATH,
+  SUZU_LINES_ONDO,
+  createNpcs,
+  pickLine,
+  wanderNpc,
+  type NpcState,
+} from './npcs';
+import { spawnBubble, updateBubbles, type Bubble } from './bubbles';
 
 export interface DeathLogEntry {
   tick: number;
@@ -34,9 +48,11 @@ export interface WorldState {
   buildings: PlacedBuilding[];
   points: number;
   totalDeaths: number;
-  totalBirths: number; // 世代カウンタ的指標
+  totalBirths: number;
+  stompCount: number;
   dex: Record<DeathCauseId, DexEntry>;
   recentDeaths: DeathLogEntry[];
+  newDiscoveries: DeathCauseId[]; // 前フレームで新規発見された図鑑ID
   nameSet: Set<string>;
   bounds: { w: number; h: number };
   spawnCooldown: number;
@@ -46,6 +62,8 @@ export interface WorldState {
   pointMultiplier: number;
   fireChance: number;
   ondoChance: number;
+  npcs: NpcState[];
+  bubbles: Bubble[];
 }
 
 function createDex(): Record<DeathCauseId, DexEntry> {
@@ -70,8 +88,10 @@ export function createWorld(bounds: { w: number; h: number }): WorldState {
     points: 0,
     totalDeaths: 0,
     totalBirths: 0,
+    stompCount: 0,
     dex: createDex(),
     recentDeaths: [],
+    newDiscoveries: [],
     nameSet: new Set(),
     bounds,
     spawnCooldown: 2,
@@ -81,6 +101,8 @@ export function createWorld(bounds: { w: number; h: number }): WorldState {
     pointMultiplier: CONFIG.GLOBAL_POINT_MULT_BASE,
     fireChance: CONFIG.FIRE_CHANCE_BASE,
     ondoChance: CONFIG.ONDO_CHANCE_BASE,
+    npcs: createNpcs(bounds),
+    bubbles: [],
   };
 }
 
@@ -113,15 +135,21 @@ function applyBuildingMods(w: WorldState) {
   w.ondoChance = ondo;
 }
 
+function getActiveHazards(w: WorldState): HazardZone[] {
+  return HAZARDS.concat(buildingsToHazards(w.buildings));
+}
+
 function logDeath(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   const cause = DEATH_CAUSES[causeId]!;
   const text = cause.template(c.name);
   const entry = w.dex[causeId];
+  const wasNew = entry.count === 0;
   entry.count += 1;
-  if (entry.count === 1) {
+  if (wasNew) {
     entry.firstVictim = c.name;
     entry.firstContext = text;
     entry.firstDiscoveredTick = w.tick;
+    w.newDiscoveries.push(causeId);
   }
   w.recentDeaths.unshift({ tick: w.tick, name: c.name, causeId, text });
   if (w.recentDeaths.length > 24) w.recentDeaths.pop();
@@ -136,6 +164,7 @@ export function kill(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   c.deathTick = w.tick;
   c.deathCauseId = causeId;
   logDeath(w, c, causeId);
+  reactNpcsToDeath(w, c);
 }
 
 function spawnIfRoom(w: WorldState) {
@@ -161,12 +190,14 @@ export function forceSpawn(w: WorldState) {
   setState(child, 'surprised', 1.5);
   w.chibis.push(child);
   w.totalBirths += 1;
+  reactNpcsToBirth(w);
 }
 
 function maybeTriggerOndo(w: WorldState) {
   if (w.event) return;
   if (Math.random() < w.ondoChance) {
     w.event = { kind: 'ondo', remaining: CONFIG.ONDO_DURATION_SEC, intensity: CONFIG.ONDO_KILL_RATE };
+    reactNpcsToOndo(w);
   }
 }
 
@@ -203,6 +234,7 @@ function resolveEvent(w: WorldState, dt: number) {
 
 export function triggerOndo(w: WorldState) {
   w.event = { kind: 'ondo', remaining: CONFIG.ONDO_DURATION_SEC, intensity: CONFIG.ONDO_KILL_RATE + 0.05 };
+  reactNpcsToOndo(w);
 }
 
 export function triggerBokaigi(w: WorldState) {
@@ -219,9 +251,9 @@ export function triggerFire(w: WorldState) {
   w.event = { kind: 'fire', remaining: CONFIG.FIRE_DURATION_SEC, intensity: CONFIG.FIRE_KILL_RATE + 0.05 };
 }
 
-function runHazards(w: WorldState, c: Chibiwafu, dt: number): boolean {
+function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone[]): boolean {
   const insideSafe = distance(c.pos, w.furanaPos) < CONFIG.SAFE_ZONE_R;
-  for (const zone of HAZARDS) {
+  for (const zone of hazards) {
     if (!hazardActiveInSeason(zone, w.season)) continue;
     if (insideSafe && !zone.bypassSafeZone) continue;
     if (!pointInZone(zone, c.pos)) continue;
@@ -233,7 +265,7 @@ function runHazards(w: WorldState, c: Chibiwafu, dt: number): boolean {
   return false;
 }
 
-function updateChibi(w: WorldState, c: Chibiwafu, dt: number) {
+function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone[]) {
   if (!isAlive(c)) return;
   c.ageSec += dt;
   if (c.ageSec >= c.maxAgeSec) {
@@ -251,7 +283,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number) {
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
     wanderStep(c, dt, w.bounds);
   }
-  runHazards(w, c, dt);
+  runHazards(w, c, dt, hazards);
 }
 
 function compactCorpses(w: WorldState) {
@@ -260,6 +292,75 @@ function compactCorpses(w: WorldState) {
     w.corpses.push(...newlyDead);
     w.chibis = w.chibis.filter((c) => c.state !== 'dead');
     while (w.corpses.length > w.maxCorpses) w.corpses.shift();
+  }
+}
+
+// --- NPC reactions --------------------------------------------------------
+
+function updateNpcs(w: WorldState, dt: number) {
+  for (const n of w.npcs) {
+    wanderNpc(n, dt);
+    if (n.id === 'cocoon') updateCocoonAbuse(w, n, dt);
+    if (n.id === 'lou' && Math.random() < 0.0007) {
+      spawnBubble(w.bubbles, n.pos, pickLine(LOU_LINES), 'speech', 1.6);
+    }
+  }
+}
+
+function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
+  n.abuseCooldown -= dt;
+  if (n.abuseCooldown > 0) return;
+  const near = w.chibis.find((c) => isAlive(c) && distance(c.pos, n.pos) < 70);
+  if (!near) return;
+  n.abuseCooldown = 5 + Math.random() * 6;
+  spawnBubble(w.bubbles, n.pos, pickLine(COCOON_LINES_ABUSE), 'speech', 1.8);
+  setState(near, 'cry', 1);
+  if (Math.random() < 0.35) {
+    kill(w, near, 'cocoon_abuse');
+  }
+}
+
+function reactNpcsToBirth(w: WorldState) {
+  const suzu = w.npcs.find((n) => n.id === 'suzu');
+  if (!suzu) return;
+  if (Math.random() < 0.3) {
+    spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_BIRTH), 'speech', 2);
+  }
+}
+
+function reactNpcsToDeath(w: WorldState, _c: Chibiwafu) {
+  for (const n of w.npcs) {
+    const def = NPC_DEFS[n.id];
+    if (!def.reactOnDeath) continue;
+    if (Math.random() < 0.35) {
+      const pool = n.id === 'suzu' ? SUZU_LINES_DEATH : COCOON_LINES_DEATH;
+      spawnBubble(w.bubbles, n.pos, pickLine(pool), 'speech', 2);
+    }
+  }
+}
+
+function reactNpcsToOndo(w: WorldState) {
+  for (const n of w.npcs) {
+    if (!NPC_DEFS[n.id].reactOnOndo) continue;
+    spawnBubble(w.bubbles, n.pos, pickLine(SUZU_LINES_ONDO), 'speech', 2.2);
+  }
+}
+
+// --- Corpse stomp gag -----------------------------------------------------
+
+function updateStomps(w: WorldState, dt: number) {
+  if (w.corpses.length === 0) return;
+  // sparse sampling: 5% of frames only checks
+  if (Math.random() > 0.05) return;
+  const c = w.chibis[Math.floor(Math.random() * w.chibis.length)];
+  if (!c || !isAlive(c)) return;
+  const corpse = w.corpses[Math.floor(Math.random() * w.corpses.length)];
+  if (!corpse) return;
+  if (distance(c.pos, corpse.pos) < 14) {
+    if (Math.random() < 0.5 * dt * 20) {
+      spawnBubble(w.bubbles, corpse.pos, 'ぺちっ', 'stomp', 0.8);
+      w.stompCount += 1;
+    }
   }
 }
 
@@ -272,8 +373,12 @@ export function tickWorld(w: WorldState, dt: number) {
   maybeTriggerOndo(w);
   maybeTriggerFire(w);
   resolveEvent(w, dt);
-  for (const c of w.chibis) updateChibi(w, c, dt);
+  const hazards = getActiveHazards(w);
+  for (const c of w.chibis) updateChibi(w, c, dt, hazards);
   compactCorpses(w);
+  updateNpcs(w, dt);
+  updateStomps(w, dt);
+  updateBubbles(w.bubbles, dt);
 }
 
 export function buildingCost(w: WorldState, defId: string): number {

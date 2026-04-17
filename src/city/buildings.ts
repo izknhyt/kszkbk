@@ -1,26 +1,51 @@
-import type { BuildingDef } from '../types';
+import type { DeathCauseId, Vec2 } from '../types';
+import type { HazardZone } from '../sim/hazards';
+
+export interface BuildingDef {
+  id: string;
+  name: string;
+  desc: string;
+  cost: number;
+  costGrowth: number;
+  effect: string;
+  // 建物の周囲に発生するハザードを指定する。1建物1ゾーン。
+  // 建てるたびに個別ゾーンが追加され、指数関数的に死に場所が増える。
+  hazard?: Omit<HazardZone, 'id' | 'kind' | 'center' | 'radius' | 'rect'> & {
+    radius: number;
+  };
+}
 
 export const BUILDINGS: Record<string, BuildingDef> = {
   noukou: {
     id: 'noukou',
     name: '農業区（泥畑）',
-    desc: '人口キャップ +4、石パン食中毒率 UP',
+    desc: '人口キャップ +4／自区画で「泥畑に埋もれ」事故発生',
     cost: 40,
     costGrowth: 1.7,
-    effect: 'pop+4, eat+',
+    effect: 'pop+4',
+    hazard: {
+      causeId: 'noukou_mud',
+      ratePerSec: 0.02,
+      radius: 38,
+    },
   },
   kouba: {
     id: 'kouba',
     name: '鍛冶場（くそざこ工業）',
-    desc: '人口キャップ +3、火事の発生率 UP',
+    desc: '人口キャップ +3／火事の発生率UP／自区画で「火花発火」事故',
     cost: 90,
     costGrowth: 1.8,
-    effect: 'pop+3, fire+',
+    effect: 'pop+3',
+    hazard: {
+      causeId: 'kouba_spark',
+      ratePerSec: 0.025,
+      radius: 32,
+    },
   },
   hakaba: {
     id: 'hakaba',
     name: '墓地の拡張',
-    desc: 'くそざこP獲得 +10%／建てるほど村の敬意が深まる',
+    desc: 'くそざこP獲得 +10%／村の敬意が深まる（ハザードなし）',
     cost: 60,
     costGrowth: 1.9,
     effect: 'pmult+0.10',
@@ -28,9 +53,34 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   taiko: {
     id: 'taiko',
     name: 'わふ太鼓やぐら',
-    desc: '音頭イベント発生率 UP、人口キャップ +2',
+    desc: '音頭の発生率UP／人口キャップ +2／真下で「圧死」事故',
     cost: 130,
     costGrowth: 2.0,
-    effect: 'pop+2, ondo+',
+    effect: 'pop+2',
+    hazard: {
+      causeId: 'taiko_crush',
+      ratePerSec: 0.03,
+      radius: 28,
+    },
   },
 } as const;
+
+export function buildingsToHazards(placed: { defId: string; pos: Vec2 }[]): HazardZone[] {
+  const out: HazardZone[] = [];
+  for (let i = 0; i < placed.length; i++) {
+    const p = placed[i]!;
+    const def = BUILDINGS[p.defId];
+    if (!def?.hazard) continue;
+    out.push({
+      id: `${def.id}-${i}`,
+      kind: 'circle',
+      center: { ...p.pos },
+      radius: def.hazard.radius,
+      ratePerSec: def.hazard.ratePerSec,
+      causeId: def.hazard.causeId as DeathCauseId,
+      bypassSafeZone: true,
+      note: `${def.name}の危険地帯`,
+    });
+  }
+  return out;
+}

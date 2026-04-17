@@ -2,7 +2,8 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6efe0" />
     <title>くそざこ村 — idle</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
@@ -10,24 +11,45 @@
     <div id="app">
       <div id="stage"></div>
       <aside id="hud">
-        <header class="hud-title">くそざこ村</header>
-        <section class="panel">
-          <div class="stat"><span>くそざこP</span><b id="stat-points">0</b></div>
-          <div class="stat"><span>人口</span><b id="stat-pop">0</b> / <b id="stat-cap">0</b></div>
-          <div class="stat"><span>累計死亡</span><b id="stat-deaths">0</b></div>
-          <div class="stat"><span>季節</span><b id="stat-season">春</b></div>
-        </section>
-        <section class="panel">
-          <h3>建物</h3>
+        <header id="hud-header">
+          <div class="hud-title">くそざこ村</div>
+          <div class="stat-grid">
+            <div class="stat"><span>P</span><b id="stat-points">0</b></div>
+            <div class="stat"><span>人口</span><b><span id="stat-pop">0</span>/<span id="stat-cap">0</span></b></div>
+            <div class="stat"><span>死</span><b id="stat-deaths">0</b></div>
+            <div class="stat"><span>季節</span><b id="stat-season">春</b></div>
+          </div>
+        </header>
+
+        <nav id="tabs" class="tabs">
+          <button class="tab active" data-tab="build">建物</button>
+          <button class="tab" data-tab="dex">図鑑 <small id="dex-count">0/0</small></button>
+          <button class="tab" data-tab="log">記録</button>
+          <button class="tab" data-tab="debug">デバッグ</button>
+        </nav>
+
+        <section class="tab-panel active" data-panel="build">
           <div id="build-list"></div>
+          <div class="actions">
+            <button id="btn-ondo" title="くそざこ音頭をかける">音頭</button>
+            <button id="btn-bokai" title="棒会議を開催する">棒会議</button>
+            <button id="btn-fire" title="火事を発生させる">火事</button>
+          </div>
         </section>
-        <section class="panel actions">
-          <button id="btn-ondo" title="くそざこ音頭をかける">音頭を流す</button>
-          <button id="btn-bokai" title="棒会議を開催する">棒会議</button>
-          <button id="btn-fire" title="火事を発生させる">火事</button>
+
+        <section class="tab-panel" data-panel="dex">
+          <div id="dex-list"></div>
         </section>
-        <section class="panel debug">
-          <h3>デバッグ <small id="stat-gen">gen 0</small></h3>
+
+        <section class="tab-panel" data-panel="log">
+          <div class="log-stats">
+            <div><span>世代</span><b id="stat-gen">0</b></div>
+            <div><span>踏まれた数</span><b id="stat-stomp">0</b></div>
+          </div>
+          <ol id="recent-deaths"></ol>
+        </section>
+
+        <section class="tab-panel debug" data-panel="debug">
           <div class="debug-row">
             <span>速度</span>
             <div class="speed-buttons" id="speed-buttons"></div>
@@ -41,14 +63,6 @@
             <span>tick <b id="stat-tick">0</b></span>
             <span>時刻 <b id="stat-time">0s</b></span>
           </div>
-        </section>
-        <section class="panel log">
-          <h3>最近の死</h3>
-          <ol id="recent-deaths"></ol>
-        </section>
-        <section class="panel">
-          <h3>死因図鑑 <small id="dex-count">0/0</small></h3>
-          <div id="dex-list"></div>
         </section>
       </aside>
     </div>

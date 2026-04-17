@@ -11,6 +11,7 @@ import {
 } from './sim/world';
 import { clearSave, load, save } from './meta/save';
 import { CONFIG, type TimeScale } from './config';
+import { DEATH_CAUSES } from './sim/deaths';
 
 async function start() {
   const host = document.getElementById('stage') as HTMLElement;
@@ -36,7 +37,7 @@ async function start() {
     onSpawn: () => forceSpawn(world),
     onSave: () => {
       save(world);
-      flashToast('セーブしました');
+      flashToast('セーブしました', 'info');
     },
     onReset: () => {
       clearSave();
@@ -60,7 +61,6 @@ async function start() {
     const dtReal = Math.min(0.2, (now - prev) / 1000);
     prev = now;
     acc += dtReal * timeScale;
-    // cap ticks per frame so huge timeScales don't freeze the browser
     let steps = 0;
     const maxSteps = 256;
     while (acc >= dtFixed && steps < maxSteps) {
@@ -70,6 +70,16 @@ async function start() {
     }
     if (acc > dtFixed * maxSteps) acc = 0;
     stage.draw(world);
+
+    // drain new dex discoveries → toast
+    if (world.newDiscoveries.length > 0) {
+      for (const id of world.newDiscoveries) {
+        const def = DEATH_CAUSES[id];
+        if (def) flashToast(`新図鑑: ${def.title}`, 'discovery');
+      }
+      world.newDiscoveries = [];
+      flashTabHighlight('dex');
+    }
 
     uiTimer += dtReal;
     if (uiTimer >= CONFIG.UI_REFRESH_SEC) {
@@ -88,13 +98,40 @@ async function start() {
   window.addEventListener('beforeunload', () => save(world));
 }
 
-function flashToast(msg: string) {
+type ToastKind = 'info' | 'discovery';
+
+function flashToast(msg: string, kind: ToastKind = 'info') {
   const el = document.createElement('div');
   el.textContent = msg;
+  const bg = kind === 'discovery' ? '#e8735a' : '#3a2a1a';
   el.style.cssText =
-    'position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#3a2a1a;color:#fff;padding:6px 12px;border-radius:4px;z-index:9999;font-size:12px;';
+    `position:fixed;top:10px;left:50%;transform:translateX(-50%) translateY(0);` +
+    `background:${bg};color:#fff;padding:8px 14px;border-radius:4px;z-index:9999;` +
+    `font-size:12px;font-weight:700;box-shadow:0 2px 4px #0004;` +
+    `transition:opacity 0.4s, transform 0.4s;pointer-events:none;`;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1400);
+  // stagger by existing toasts count
+  const existing = document.querySelectorAll('.kszk-toast').length;
+  el.classList.add('kszk-toast');
+  el.style.top = `${10 + existing * 40}px`;
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(-50%) translateY(-10px)';
+  }, 1600);
+  setTimeout(() => el.remove(), 2100);
+}
+
+function flashTabHighlight(tab: string) {
+  const t = document.querySelector<HTMLElement>(`.tab[data-tab="${tab}"]`);
+  if (!t) return;
+  t.animate(
+    [
+      { background: 'transparent' },
+      { background: '#ffe4b8' },
+      { background: 'transparent' },
+    ],
+    { duration: 900, iterations: 1 },
+  );
 }
 
 start().catch((err) => {

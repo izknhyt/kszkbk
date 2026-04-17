@@ -2,6 +2,8 @@ import { Application, Container, Graphics, Sprite, Text, TextStyle } from 'pixi.
 import type { WorldState } from '../sim/world';
 import type { Chibiwafu, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
+import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
+import type { Bubble } from '../sim/bubbles';
 import { frameFor, loadSpriteLibrary, type SpriteLibrary } from './sprites';
 
 const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number; accents: number }> = {
@@ -25,6 +27,12 @@ interface ChibiView {
   lastState: string;
 }
 
+interface BubbleView {
+  text: Text;
+  bg: Graphics;
+  container: Container;
+}
+
 export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const app = new Application();
   await app.init({
@@ -40,8 +48,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const buildingLayer = new Container();
   const corpseLayer = new Container();
   const chibiLayer = new Container();
+  const npcLayer = new Container();
   const fxLayer = new Container();
-  app.stage.addChild(bgLayer, buildingLayer, corpseLayer, chibiLayer, fxLayer);
+  app.stage.addChild(bgLayer, buildingLayer, corpseLayer, chibiLayer, npcLayer, fxLayer);
 
   const lib = await loadSpriteLibrary('/chibiwafu.png');
 
@@ -53,6 +62,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const views = new Map<number, ChibiView>();
   const corpseViews = new Map<number, Sprite>();
   const buildingViews: Container[] = [];
+  const npcViews = new Map<NpcId, Container>();
+  const bubbleViews = new Map<number, BubbleView>();
 
   function resize(w: number, h: number) {
     bgLayer.removeChildren();
@@ -140,6 +151,36 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
     }
 
+    // npcs
+    for (const n of world.npcs) {
+      let v = npcViews.get(n.id);
+      if (!v) {
+        v = drawNpc(n);
+        npcLayer.addChild(v);
+        npcViews.set(n.id, v);
+      }
+      v.position.set(n.pos.x, n.pos.y);
+    }
+
+    // bubbles
+    const bubbleIds = new Set(world.bubbles.map((b) => b.id));
+    for (const [id, v] of bubbleViews) {
+      if (!bubbleIds.has(id)) {
+        v.container.destroy({ children: true });
+        bubbleViews.delete(id);
+      }
+    }
+    for (const b of world.bubbles) {
+      let v = bubbleViews.get(b.id);
+      if (!v) {
+        v = createBubbleView(b);
+        fxLayer.addChild(v.container);
+        bubbleViews.set(b.id, v);
+      }
+      v.container.position.set(b.pos.x, b.pos.y);
+      v.container.alpha = Math.min(1, b.ttl / Math.max(0.2, b.maxTtl * 0.35));
+    }
+
     // depth sort by y
     chibiLayer.children.sort((a, b) => a.y - b.y);
     corpseLayer.children.sort((a, b) => a.y - b.y);
@@ -151,7 +192,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 function calcScale(lib: SpriteLibrary): number {
   if (!lib.hasSheet) return 1;
   const t = lib.frames[0]!;
-  const target = 42;
+  const target = 48;
   return target / Math.max(t.width, 1);
 }
 
@@ -168,6 +209,55 @@ function createChibiView(c: Chibiwafu, lib: SpriteLibrary): ChibiView {
   label.position.set(0, -36);
   container.addChild(sprite, label);
   return { sprite, label, container, lastState: c.state };
+}
+
+function createBubbleView(b: Bubble): BubbleView {
+  const container = new Container();
+  const text = new Text({
+    text: b.text,
+    style: new TextStyle({
+      fontFamily: 'sans-serif',
+      fontSize: b.kind === 'stomp' ? 10 : 11,
+      fill: b.kind === 'stomp' ? 0x6a4a22 : 0x3a2a1a,
+      fontWeight: 'bold',
+    }),
+  });
+  text.anchor.set(0.5, 1);
+  const bg = new Graphics();
+  const w = text.width + 10;
+  const h = text.height + 6;
+  bg.roundRect(-w / 2, -h - 2, w, h, 4)
+    .fill({ color: b.kind === 'stomp' ? 0xfff1c8 : 0xffffff, alpha: 0.9 })
+    .stroke({ color: 0x3a2a1a, width: 1 });
+  text.position.set(0, -4);
+  container.addChild(bg, text);
+  return { text, bg, container };
+}
+
+function drawNpc(n: NpcState): Container {
+  const def = NPC_DEFS[n.id];
+  const c = new Container();
+  const body = new Graphics();
+  const s = def.scale;
+  body.ellipse(0, 0, 22 * s, 28 * s).fill({ color: def.color }).stroke({ color: 0x3a2a1a, width: 2 });
+  body.ellipse(-14 * s, -16 * s, 5 * s, 8 * s).fill({ color: def.color }).stroke({ color: 0x3a2a1a, width: 1 });
+  body.ellipse(14 * s, -16 * s, 5 * s, 8 * s).fill({ color: def.color }).stroke({ color: 0x3a2a1a, width: 1 });
+  body.circle(-6 * s, -4 * s, 2.5 * s).fill({ color: 0x3a2a1a });
+  body.circle(6 * s, -4 * s, 2.5 * s).fill({ color: 0x3a2a1a });
+  // accent: suzu gets a ribbon, cocoon gets a stick, lou gets nothing extra
+  if (n.id === 'suzu') {
+    body.rect(-4 * s, -22 * s, 8 * s, 4 * s).fill({ color: def.secondaryColor });
+  } else if (n.id === 'cocoon') {
+    body.rect(14 * s, -4 * s, 16 * s, 2).fill({ color: 0x6b4a2b });
+  }
+  const label = new Text({
+    text: def.name,
+    style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 11, fontWeight: 'bold', fill: 0x3a2a1a }),
+  });
+  label.anchor.set(0.5, 1);
+  label.position.set(0, -28);
+  c.addChild(body, label);
+  return c;
 }
 
 function drawBackground(layer: Container, w: number, h: number, season: Season) {

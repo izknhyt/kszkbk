@@ -38,6 +38,17 @@ export function bindUI(world: WorldState, cb: UICallbacks) {
     speedHost.appendChild(b);
   }
 
+  // tab switching
+  const tabs = document.querySelectorAll<HTMLElement>('.tab');
+  const panels = document.querySelectorAll<HTMLElement>('.tab-panel');
+  for (const t of tabs) {
+    t.addEventListener('click', () => {
+      const target = t.dataset.tab;
+      for (const tt of tabs) tt.classList.toggle('active', tt === t);
+      for (const p of panels) p.classList.toggle('active', p.dataset.panel === target);
+    });
+  }
+
   renderBuildList(world, cb);
   renderDex(world);
   renderRecent(world);
@@ -57,7 +68,8 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   byId('stat-cap').textContent = String(populationCap(w));
   byId('stat-deaths').textContent = String(w.totalDeaths);
   byId('stat-season').textContent = SEASON_LABEL[w.season];
-  byId('stat-gen').textContent = `gen ${w.totalBirths}`;
+  byId('stat-gen').textContent = String(w.totalBirths);
+  byId('stat-stomp').textContent = String(w.stompCount);
   byId('stat-tick').textContent = String(w.tick);
   byId('stat-time').textContent = `${Math.floor(w.timeSec)}s`;
 
@@ -91,7 +103,7 @@ function renderBuildList(w: WorldState, cb: UICallbacks) {
 function renderRecent(w: WorldState) {
   const host = byId('recent-deaths');
   host.innerHTML = '';
-  for (const e of w.recentDeaths.slice(0, 12)) {
+  for (const e of w.recentDeaths.slice(0, 20)) {
     const li = document.createElement('li');
     li.innerHTML = `<span class="name">${escape(e.name)}</span> — <span class="cause">${escape(DEATH_CAUSES[e.causeId]!.title)}</span>`;
     host.appendChild(li);
