@@ -11,7 +11,7 @@ import {
   wanderStep,
 } from './chibiwafu';
 import { generateName } from './naming';
-import { SEASONS, seasonFromTime, type GlobalEvent } from './events';
+import { SEASONS, seasonFromTime, intensityAt, type GlobalEvent } from './events';
 import { HAZARDS, hazardActiveInSeason, pointInZone, type HazardZone } from './hazards';
 import { CONFIG } from '../config';
 import {
@@ -60,8 +60,9 @@ export interface WorldState {
   baseCap: number;
   event: GlobalEvent | null;
   pointMultiplier: number;
-  fireChance: number;
-  ondoChance: number;
+  // 次の音頭／火事までの秒カウントダウン（イベント発動中は Infinity）。
+  ondoCooldown: number;
+  fireCooldown: number;
   npcs: NpcState[];
   bubbles: Bubble[];
 }
@@ -99,8 +100,9 @@ export function createWorld(bounds: { w: number; h: number }): WorldState {
     baseCap: CONFIG.BASE_POP_CAP,
     event: null,
     pointMultiplier: CONFIG.GLOBAL_POINT_MULT_BASE,
-    fireChance: CONFIG.FIRE_CHANCE_BASE,
-    ondoChance: CONFIG.ONDO_CHANCE_BASE,
+    // 最初の音頭／火事はフルインターバルを待たず「先行き短め」で1発目を見せる。
+    ondoCooldown: CONFIG.ONDO_BASE_INTERVAL_SEC * 0.45,
+    fireCooldown: CONFIG.FIRE_BASE_INTERVAL_SEC * 0.45,
     npcs: createNpcs(bounds),
     bubbles: [],
   };
@@ -117,22 +119,62 @@ export function populationCap(w: WorldState): number {
   return cap;
 }
 
+function countBuildingLevels(w: WorldState, defId: string): number {
+  return w.buildings.filter((b) => b.defId === defId).reduce((a, b) => a + b.level, 0);
+}
+
 function applyBuildingMods(w: WorldState) {
   let mult = CONFIG.GLOBAL_POINT_MULT_BASE;
-  let fire = CONFIG.FIRE_CHANCE_BASE;
-  let ondo = CONFIG.ONDO_CHANCE_BASE;
   for (const b of w.buildings) {
     const def = BUILDINGS[b.defId];
     if (!def) continue;
     const m = /pmult\+([0-9.]+)/.exec(def.effect);
     if (m) mult += Number(m[1]) * b.level;
-    if (def.id === 'kouba') fire += 0.0015 * b.level;
-    if (def.id === 'noukou') fire += 0.0003 * b.level;
-    if (def.id === 'taiko') ondo += 0.002 * b.level;
   }
   w.pointMultiplier = mult;
-  w.fireChance = fire;
-  w.ondoChance = ondo;
+}
+
+// --- Event scheduling -----------------------------------------------------
+// 建物の数でインターバルが短くなる。下限あり。±10秒のランダム揺らぎ。
+function computeOndoInterval(w: WorldState): number {
+  const taiko = countBuildingLevels(w, 'taiko');
+  const base = CONFIG.ONDO_BASE_INTERVAL_SEC + CONFIG.ONDO_INTERVAL_PER_TAIKO * taiko;
+  const floored = Math.max(CONFIG.ONDO_INTERVAL_MIN_SEC, base);
+  return floored + (Math.random() - 0.5) * 20;
+}
+
+function computeFireInterval(w: WorldState): number {
+  const kouba = countBuildingLevels(w, 'kouba');
+  const base = CONFIG.FIRE_BASE_INTERVAL_SEC + CONFIG.FIRE_INTERVAL_PER_KOUBA * kouba;
+  const floored = Math.max(CONFIG.FIRE_INTERVAL_MIN_SEC, base);
+  return floored + (Math.random() - 0.5) * 20;
+}
+
+function scheduleEvents(w: WorldState, dt: number) {
+  if (w.event) return;
+  w.ondoCooldown -= dt;
+  w.fireCooldown -= dt;
+  const ondoReady = w.ondoCooldown <= 0;
+  const fireReady = w.fireCooldown <= 0;
+  if (!ondoReady && !fireReady) return;
+  // 両方来たら先に来てたほう（より負のほう）を選ぶ
+  const pickOndo = ondoReady && (!fireReady || w.ondoCooldown <= w.fireCooldown);
+  if (pickOndo) {
+    w.event = {
+      kind: 'ondo',
+      duration: CONFIG.ONDO_DURATION_SEC,
+      remaining: CONFIG.ONDO_DURATION_SEC,
+      intensity: CONFIG.ONDO_KILL_RATE,
+    };
+    reactNpcsToOndo(w);
+  } else {
+    w.event = {
+      kind: 'fire',
+      duration: CONFIG.FIRE_DURATION_SEC,
+      remaining: CONFIG.FIRE_DURATION_SEC,
+      intensity: CONFIG.FIRE_KILL_RATE,
+    };
+  }
 }
 
 function getActiveHazards(w: WorldState): HazardZone[] {
@@ -167,14 +209,27 @@ export function kill(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   reactNpcsToDeath(w, c);
 }
 
+// 出産：人口不足率に応じてインターバル短縮。空に近ければ burst 出産。
 function spawnIfRoom(w: WorldState) {
   const living = w.chibis.filter(isAlive).length;
   const cap = populationCap(w);
   if (living >= cap) return;
   w.spawnCooldown -= CONFIG.TICK_DT;
   if (w.spawnCooldown > 0) return;
-  forceSpawn(w);
-  w.spawnCooldown = w.baseSpawnInterval + Math.random() * CONFIG.SPAWN_INTERVAL_JITTER_SEC;
+
+  const deficitRatio = cap > 0 ? 1 - living / cap : 1;
+  const scale = 1 + (CONFIG.BIRTH_DEFICIT_BOOST_MIN - 1) * deficitRatio;
+
+  let burst = 1;
+  if (living / cap < CONFIG.BIRTH_BURST_THRESHOLD) {
+    burst = 1 + Math.floor(Math.random() * CONFIG.BIRTH_BURST_MAX);
+  }
+  for (let i = 0; i < burst; i++) {
+    if (w.chibis.filter(isAlive).length >= cap) break;
+    forceSpawn(w);
+  }
+  const nextInterval = (w.baseSpawnInterval + Math.random() * CONFIG.SPAWN_INTERVAL_JITTER_SEC) * scale;
+  w.spawnCooldown = nextInterval;
 }
 
 export function forceSpawn(w: WorldState) {
@@ -193,47 +248,36 @@ export function forceSpawn(w: WorldState) {
   reactNpcsToBirth(w);
 }
 
-function maybeTriggerOndo(w: WorldState) {
-  if (w.event) return;
-  if (Math.random() < w.ondoChance) {
-    w.event = { kind: 'ondo', remaining: CONFIG.ONDO_DURATION_SEC, intensity: CONFIG.ONDO_KILL_RATE };
-    reactNpcsToOndo(w);
-  }
-}
-
-function maybeTriggerFire(w: WorldState) {
-  if (w.event) return;
-  if (Math.random() < w.fireChance) {
-    w.event = { kind: 'fire', remaining: CONFIG.FIRE_DURATION_SEC, intensity: CONFIG.FIRE_KILL_RATE };
-  }
-}
-
 function resolveEvent(w: WorldState, dt: number) {
   if (!w.event) return;
   w.event.remaining -= dt;
-  const intensity = w.event.intensity;
+  const elapsed = w.event.duration - w.event.remaining;
+  const rate = intensityAt(w.event.intensity, elapsed, w.event.duration);
   for (const c of w.chibis) {
     if (!isAlive(c)) continue;
     if (w.event.kind === 'ondo') {
       setState(c, 'dazed', 0.5);
-      if (Math.random() < intensity * dt) {
-        kill(w, c, 'ondo');
-      }
+      if (Math.random() < rate * dt) kill(w, c, 'ondo');
     } else if (w.event.kind === 'fire') {
-      if (Math.random() < intensity * dt) {
-        kill(w, c, 'fire');
-      } else if (Math.random() < 0.1) {
-        setState(c, 'hurt', 1);
-      }
+      if (Math.random() < rate * dt) kill(w, c, 'fire');
+      else if (Math.random() < 0.08) setState(c, 'hurt', 1);
     }
   }
   if (w.event.remaining <= 0) {
+    const ended = w.event.kind;
     w.event = null;
+    if (ended === 'ondo') w.ondoCooldown = computeOndoInterval(w);
+    else if (ended === 'fire') w.fireCooldown = computeFireInterval(w);
   }
 }
 
 export function triggerOndo(w: WorldState) {
-  w.event = { kind: 'ondo', remaining: CONFIG.ONDO_DURATION_SEC, intensity: CONFIG.ONDO_KILL_RATE + 0.05 };
+  w.event = {
+    kind: 'ondo',
+    duration: CONFIG.ONDO_DURATION_SEC,
+    remaining: CONFIG.ONDO_DURATION_SEC,
+    intensity: CONFIG.ONDO_KILL_RATE + 0.05,
+  };
   reactNpcsToOndo(w);
 }
 
@@ -248,7 +292,12 @@ export function triggerBokaigi(w: WorldState) {
 }
 
 export function triggerFire(w: WorldState) {
-  w.event = { kind: 'fire', remaining: CONFIG.FIRE_DURATION_SEC, intensity: CONFIG.FIRE_KILL_RATE + 0.05 };
+  w.event = {
+    kind: 'fire',
+    duration: CONFIG.FIRE_DURATION_SEC,
+    remaining: CONFIG.FIRE_DURATION_SEC,
+    intensity: CONFIG.FIRE_KILL_RATE + 0.05,
+  };
 }
 
 function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone[]): boolean {
@@ -370,8 +419,7 @@ export function tickWorld(w: WorldState, dt: number) {
   w.season = seasonFromTime(w.timeSec, w.secondsPerSeason);
   applyBuildingMods(w);
   spawnIfRoom(w);
-  maybeTriggerOndo(w);
-  maybeTriggerFire(w);
+  scheduleEvents(w, dt);
   resolveEvent(w, dt);
   const hazards = getActiveHazards(w);
   for (const c of w.chibis) updateChibi(w, c, dt, hazards);
