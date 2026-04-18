@@ -534,12 +534,16 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   }
   // おしゃべり：idle 中、相手がいなくても一人で喋る
   if (c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < 0.005) {
-    spawnBubble(w.bubbles, c.pos, pickOshaberiLine(c), 'speech', 1.3);
+    const line = pickOshaberiLine(c);
+    spawnBubble(w.bubbles, c.pos, line.text, 'speech', 1.3);
+    if (line.cheeky) maybePunishCheeky(w, c);
   }
   // 全員：社交 param に応じて独り言を漏らす（oshaberi 無くても少しは喋る）
   if (!c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < derivedSoloSpeakChance(c.params)) {
-    spawnBubble(w.bubbles, c.pos, pickOshaberiLine(c), 'speech', 1.2);
+    const line = pickOshaberiLine(c);
+    spawnBubble(w.bubbles, c.pos, line.text, 'speech', 1.2);
     c.chatCooldown = 3 + Math.random() * 3;
+    if (line.cheeky) maybePunishCheeky(w, c);
   }
   // 哲学者：場所関係なく突然立ち止まって空を見る（20-30秒に1回程度）
   if (c.traits.includes('tetsugakusha') && c.state === 'idle' && Math.random() < 0.0015) {
@@ -563,6 +567,24 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   runHazards(w, c, dt, hazards);
 }
 
+// 生意気セリフを吐いたちびわふへのお仕置き。
+// 近くにいる他のちびわふが「棒でボコボコにする」＝ 40% で hurt 状態 + 吹き出し、
+// さらに 35% で死亡（namaiki_boko）。近くに誰もいなければ黙認される。
+function maybePunishCheeky(w: WorldState, victim: Chibiwafu) {
+  const nearby = w.chibis.filter((o) => o !== victim && isAlive(o) && distance(o.pos, victim.pos) < 60);
+  if (nearby.length === 0) return;
+  const striker = nearby[Math.floor(Math.random() * nearby.length)]!;
+  spawnBubble(w.bubbles, striker.pos, 'なまいきわふ！', 'speech', 1.5);
+  spawnBubble(w.bubbles, victim.pos, 'ぎゃー', 'speech', 1);
+  setState(victim, 'hurt', 1.2);
+  setState(striker, 'angry', 0.8);
+  pushLife(victim, Math.floor(victim.ageSec), `生意気を言って ${striker.name} に殴られた`);
+  pushLife(striker, Math.floor(striker.ageSec), `生意気な ${victim.name} を殴った`);
+  if (Math.random() < 0.35) {
+    kill(w, victim, 'namaiki_boko');
+  }
+}
+
 // 立ち話：近接2体をO(n²)で検査（人口数十までは無視できるコスト）
 function processChats(w: WorldState, dt: number) {
   for (let i = 0; i < w.chibis.length; i++) {
@@ -583,12 +605,15 @@ function processChats(w: WorldState, dt: number) {
       a.faceLeft = b.pos.x < a.pos.x;
       b.faceLeft = a.pos.x < b.pos.x;
       // A が先に喋る（長めTTL）。B は少し遅れて喋る（短めTTL＋位置が動いてないので即座に表示OK）
-      spawnBubble(w.bubbles, a.pos, chat.lineA, 'speech', chat.duration * 0.6);
-      spawnBubble(w.bubbles, { x: b.pos.x, y: b.pos.y + 6 }, chat.lineB, 'speech', chat.duration * 0.4);
+      spawnBubble(w.bubbles, a.pos, chat.lineA.text, 'speech', chat.duration * 0.6);
+      spawnBubble(w.bubbles, { x: b.pos.x, y: b.pos.y + 6 }, chat.lineB.text, 'speech', chat.duration * 0.4);
       pushLife(a, Math.floor(a.ageSec), `${b.name} と話した`);
       pushLife(b, Math.floor(b.ageSec), `${a.name} と話した`);
       a.chatCooldown = derivedChatCooldown(a.params);
       b.chatCooldown = derivedChatCooldown(b.params);
+      // 生意気セリフは報復対象
+      if (chat.lineA.cheeky) maybePunishCheeky(w, a);
+      if (chat.lineB.cheeky) maybePunishCheeky(w, b);
       break; // a は1人と話せば十分
     }
   }

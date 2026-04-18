@@ -82,7 +82,8 @@ export type DeathCauseId =
   | 'oshaberi_choked'        // おしゃべりが音頭中に喋り過ぎて息切れ
   | 'tabikko_boundary'       // 旅っ子がワールドの端で行方不明
   | 'tetsugakusha_shoushitsu'// 哲学者が考えすぎて輪郭が消えた
-  | 'bo_meijin_tenka';       // 棒名人が棒会議でみんなを転倒させる
+  | 'bo_meijin_tenka'         // 棒名人が棒会議でみんなを転倒させる
+  | 'namaiki_boko';           // 生意気な発言をしてボコボコに殴られる
 
 export interface DeathCause {
   id: DeathCauseId;

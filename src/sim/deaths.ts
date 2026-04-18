@@ -223,6 +223,14 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 26,
     template: (n) => `${n}は棒名人の一閃を真横から受け、踊りながら退場した。`,
   },
+  namaiki_boko: {
+    id: 'namaiki_boko',
+    title: '生意気を言ってボコボコ',
+    rare: false,
+    uncommon: true,
+    points: 18,
+    template: (n) => `${n}はくそざこの分際で生意気を言い、周りから棒でボコボコにされた。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;
