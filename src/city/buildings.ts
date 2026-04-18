@@ -82,11 +82,10 @@ export function buildingsToHazards(placed: { defId: string; pos: Vec2; level: nu
     const p = placed[i]!;
     const def = BUILDINGS[p.defId];
     if (!def?.hazard) continue;
-    // Lv で危険度が伸びる：Lv1=1.0×, Lv2=1.2×, Lv3=1.4× レート。
-    // 半径も微増（視覚的にも大きくなった建物が広く影響する）。
-    // ※ Lv3 複数スタックで特定死因が支配的にならないよう、スケールは穏やかに。
-    const lvMul = 0.8 + 0.2 * p.level;
-    const radiusMul = 0.95 + 0.05 * p.level;
+    // Lv で危険度が伸びる。sqrt スケーリングで Lv99 でも ~2.5× 程度に抑える。
+    // Lv1=1.0×, Lv3=1.21×, Lv10=1.45×, Lv50=2.06×, Lv99=2.49×
+    const lvMul = 1 + Math.sqrt(Math.max(0, p.level - 1)) * 0.15;
+    const radiusMul = 1 + Math.sqrt(Math.max(0, p.level - 1)) * 0.05;
     const zone: HazardZone = {
       id: `${def.id}-${i}`,
       kind: 'circle',

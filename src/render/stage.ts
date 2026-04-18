@@ -216,17 +216,36 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const def = BUILDINGS[b.defId];
       const v = buildingViews[i]!;
       v.removeChildren();
-      const s = 1 + (b.level - 1) * 0.2; // Lv2 = 1.2x, Lv3 = 1.4x
+      // sqrt スケーリング：Lv1=1.0×, Lv5=1.3×, Lv10=1.45×, Lv99=2.49×
+      const s = 1 + Math.sqrt(Math.max(0, b.level - 1)) * 0.15;
       const g = new Graphics();
       g.rect(-24 * s, -20 * s, 48 * s, 40 * s).fill({ color: buildingColor(b.defId) }).stroke({ color: 0x3a2a1a, width: 2 });
       g.poly([-28 * s, -20 * s, 0, -36 * s, 28 * s, -20 * s]).fill({ color: 0x8b5a2b }).stroke({ color: 0x3a2a1a, width: 2 });
-      // Lv2+ は旗、Lv3 は二段の屋根
+      // Lv2+ は旗
       if (b.level >= 2) {
         g.rect(0, -36 * s - 12, 2, 12).fill({ color: 0x3a2a1a });
         g.rect(2, -36 * s - 12, 10, 7).fill({ color: 0xe8735a });
       }
-      if (b.level >= 3) {
+      // Lv5+ で二段屋根
+      if (b.level >= 5) {
         g.poly([-20 * s, -36 * s, 0, -46 * s, 20 * s, -36 * s]).fill({ color: 0xc05a3a }).stroke({ color: 0x3a2a1a, width: 1 });
+      }
+      // Lv10+ で屋根に金箔
+      if (b.level >= 10) {
+        g.circle(0, -46 * s, 4).fill({ color: 0xffd35a }).stroke({ color: 0x3a2a1a, width: 1 });
+      }
+      // Lv30+ で紫オーラ
+      if (b.level >= 30) {
+        g.circle(0, -20 * s, 8).fill({ color: 0x9b6de2, alpha: 0.5 });
+      }
+      // Lv50+ で複数の金飾り
+      if (b.level >= 50) {
+        g.circle(-14 * s, -36 * s, 3).fill({ color: 0xffd35a });
+        g.circle(14 * s, -36 * s, 3).fill({ color: 0xffd35a });
+      }
+      // Lv99 で虹色リング
+      if (b.level >= 99) {
+        g.circle(0, 0, 32 * s).stroke({ color: 0xff66aa, width: 2, alpha: 0.6 });
       }
       const t = new Text({
         text: `${def?.name.split('（')[0] ?? b.defId} Lv${b.level}`,

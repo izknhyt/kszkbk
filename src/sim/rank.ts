@@ -18,7 +18,7 @@ export interface RankDef {
   id: VillageRank;
   name: string;
   flavor: string;
-  maxBuildingLevel: 1 | 2 | 3;
+  maxBuildingLevel: number;
   check: (ctx: RankContext) => boolean;
   // 進捗ゲージ用：0〜1 の達成率を返す（1.0 で到達）
   progress: (ctx: RankContext) => number;
@@ -32,8 +32,8 @@ export const RANK_DEFS: Record<VillageRank, RankDef> = {
   mura: {
     id: 'mura',
     name: '村',
-    flavor: '始まりの集落。棒会議もまだ形だけ。',
-    maxBuildingLevel: 1,
+    flavor: '始まりの集落。建物は Lv3 まで。',
+    maxBuildingLevel: 3,
     check: () => true,
     progress: () => 1,
     requirement: '初期状態',
@@ -41,8 +41,8 @@ export const RANK_DEFS: Record<VillageRank, RankDef> = {
   shuraku: {
     id: 'shuraku',
     name: '集落',
-    flavor: '建物の Lv2 が解禁される。死因が増えて村の性格が出始める。',
-    maxBuildingLevel: 2,
+    flavor: '建物は Lv10 まで。',
+    maxBuildingLevel: 10,
     check: (c) => c.totalDeaths >= 50,
     progress: (c) => Math.min(1, c.totalDeaths / 50),
     requirement: '累計死亡 50',
@@ -50,8 +50,8 @@ export const RANK_DEFS: Record<VillageRank, RankDef> = {
   machi: {
     id: 'machi',
     name: '町',
-    flavor: '建物の Lv3 が解禁される。村の伝承が成立し始める。',
-    maxBuildingLevel: 3,
+    flavor: '建物は Lv30 まで。村の伝承が成立し始める。',
+    maxBuildingLevel: 30,
     check: (c) => c.totalDeaths >= 300 && c.uniqueDexFound >= 18,
     progress: (c) => Math.min(1, Math.min(c.totalDeaths / 300, c.uniqueDexFound / 18)),
     requirement: '累計死亡 300 & 図鑑 18 以上',
@@ -59,8 +59,8 @@ export const RANK_DEFS: Record<VillageRank, RankDef> = {
   to: {
     id: 'to',
     name: 'くそざこ都',
-    flavor: '完成形態。すべての死因を抱えた、くそざこの都。',
-    maxBuildingLevel: 3,
+    flavor: '完成形態。Lv99 解禁。',
+    maxBuildingLevel: 99,
     check: (c) => c.totalDeaths >= 1000 && c.uniqueDexFound >= 24 && c.stompCount >= 50,
     progress: (c) => Math.min(1, Math.min(c.totalDeaths / 1000, c.uniqueDexFound / 24, c.stompCount / 50)),
     requirement: '累計死亡 1000 & 全24図鑑 & 踏まれ 50',
@@ -75,7 +75,7 @@ export function computeRank(ctx: RankContext): VillageRank {
   return highest;
 }
 
-export function maxBuildingLevel(rank: VillageRank): 1 | 2 | 3 {
+export function maxBuildingLevel(rank: VillageRank): number {
   return RANK_DEFS[rank].maxBuildingLevel;
 }
 
@@ -84,8 +84,11 @@ export function nextRank(current: VillageRank): VillageRank | null {
   return idx >= 0 && idx < RANK_ORDER.length - 1 ? RANK_ORDER[idx + 1]! : null;
 }
 
-// 建物アップグレードのコスト。Lv1→Lv2 と Lv2→Lv3 で指数的に伸ばす。
-// cost = base * costGrowth^(current_level * 2)
+// 建物アップグレードのコスト。
+// 高レベル帯まで現実的にスケールするよう、level*0.6 の指数に緩和。
+// cost = base * costGrowth^((level) * 0.6)
+// 例 (noukou 40, growth 1.7):
+//   Lv1→2: 56 / Lv5→6: 147 / Lv10→11: 553 / Lv30→31: 89K / Lv99→100: 巨大
 export function upgradeCostFor(def: BuildingDef, currentLevel: number): number {
-  return Math.round(def.cost * Math.pow(def.costGrowth, currentLevel * 2));
+  return Math.round(def.cost * Math.pow(def.costGrowth, currentLevel * 0.6));
 }
