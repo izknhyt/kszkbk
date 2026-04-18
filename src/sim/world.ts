@@ -43,6 +43,7 @@ import {
   createNpcs,
   hurtLinesFor,
   pickLine,
+  pushNpcLife,
   reviveLinesFor,
   wanderNpc,
   type NpcState,
@@ -124,6 +125,8 @@ export interface WorldState {
   longestLifeName: string;
   shortestLifeSec: number;
   shortestLifeName: string;
+  // フラナがプレイヤーに掴まれている間だけ >0。mama 高めのちびわふが追いかける
+  furanaGrabbedTimer: number;
   dex: Record<DeathCauseId, DexEntry>;
   recentDeaths: DeathLogEntry[];
   newDiscoveries: DeathCauseId[]; // 前フレームで新規発見された図鑑ID
@@ -186,6 +189,7 @@ export function createWorld(): WorldState {
     longestLifeName: '—',
     shortestLifeSec: Infinity,
     shortestLifeName: '—',
+    furanaGrabbedTimer: 0,
     dex: createDex(),
     recentDeaths: [],
     newDiscoveries: [],
@@ -456,11 +460,13 @@ export function damageChibi(w: WorldState, c: Chibiwafu, amount: number, causeId
 export function damageNpc(w: WorldState, n: NpcState, amount: number): boolean {
   if (n.dead) return false;
   n.hp = Math.max(0, n.hp - amount);
+  pushNpcLife(n, Math.floor(w.timeSec), `殴られた（-${amount} HP）`);
   if (n.hp <= 0) {
     n.dead = true;
     n.state = 'dead';
     n.stateTimer = 0;
     n.respawnTimer = NPC_DEFS[n.id].respawnSec;
+    pushNpcLife(n, Math.floor(w.timeSec), '死んだ');
     // 死亡セリフ
     if (n.id === 'furana') {
       spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_DEATH), 'npc-speech', 3);
@@ -620,7 +626,7 @@ function resolveEvent(w: WorldState, dt: number) {
   if (w.event.remaining <= 0) {
     const ended = w.event.kind;
     w.event = null;
-    if (ended === 'ondo') w.ondoCooldown = computeOndoInterval(w);
+    if (ended === 'ondo') { w.ondoCooldown = computeOndoInterval(w); dampenFuranaMood(w, -8); }  // 音頭終わり → 解放感 +8
     else if (ended === 'fire') w.fireCooldown = computeFireInterval(w);
     // taiko_festival はクールダウン再設定不要（次の季節境界で再発動）。
   }
@@ -1093,6 +1099,7 @@ function updateNpcs(w: WorldState, dt: number) {
           n.stateTimer = 0;
           n.pos = { ...n.home };
           n.abuseCooldown = 4;
+          pushNpcLife(n, Math.floor(w.timeSec), 'なぜか蘇った');
           spawnBubble(w.bubbles, n.pos, pickLine(reviveLinesFor(n.id)), 'npc-speech', 2.5);
         }
       }
@@ -1194,8 +1201,11 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   const drift = (70 - n.mood) * 0.003 * dt * 20;  // dt*20 で tick 補正
   n.mood += drift;
   // 近くのちびわふが多すぎると徐々に不機嫌（まとわりつき疲れ）
-  const nearby = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 60).length;
-  if (nearby >= 5) n.mood -= dt * 0.3 * (nearby - 4);
+  const nearbyChibis = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 60);
+  if (nearbyChibis.length >= 5) n.mood -= dt * 0.3 * (nearbyChibis.length - 4);
+  // 近くで平和に食べてる／寝てる子がいると和む（+0.15 / 秒 per 子）
+  const peaceful = nearbyChibis.filter((c) => c.state === 'eating' || c.state === 'sleep').length;
+  if (peaceful > 0) n.mood += dt * 0.15 * peaceful;
   n.mood = Math.max(0, Math.min(100, n.mood));
 
   // 独り言：機嫌で使い分け（8秒に 1回くらい）
@@ -1234,17 +1244,27 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
 
   // 機嫌による挙動分岐
   if (n.mood < 20 && Math.random() < 0.4) {
-    // 激怒モード：ぶん投げて川へ（mudriver へ飛ばす）
+    // 激怒モード：ぶん投げる。50% 川へ／50% ランダムな方向へ遠投
     n.state = 'angry';
     n.stateTimer = 1.8;
     spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_THROW), 'npc-speech', 1.6);
-    // ちびわふを川の方へ投げ飛ばす
-    target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + (Math.random() - 0.5) * 200));
-    target.pos.y = 430 + Math.random() * 40;  // 川エリア
+    pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をぶん投げた`);
+    const toRiver = Math.random() < 0.5;
+    if (toRiver) {
+      target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + (Math.random() - 0.5) * 200));
+      target.pos.y = 430 + Math.random() * 40;
+      pushLife(target, Math.floor(target.ageSec), 'フラナに川へぶん投げられた');
+    } else {
+      // その辺にぶん投げ：ランダム方向 120-200px 先
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 120 + Math.random() * 80;
+      target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + Math.cos(ang) * dist));
+      target.pos.y = Math.max(40, Math.min(400, target.pos.y + Math.sin(ang) * dist));
+      pushLife(target, Math.floor(target.ageSec), 'フラナにぶん投げられた');
+    }
     target.target = null;
     setState(target, 'surprised', 0.6);
     spawnBubble(w.bubbles, target.pos, 'とんでるわふ〜！', 'speech', 1);
-    pushLife(target, Math.floor(target.ageSec), 'フラナに川へ投げ飛ばされた');
     return;
   }
 
@@ -1262,6 +1282,7 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     setState(target, 'hurt', 1.3);
     spawnBubble(w.bubbles, target.pos, 'ぎゃーわふ！', 'speech', 1.2);
     pushLife(target, Math.floor(target.ageSec), `フラナ(機嫌${Math.round(n.mood)})に殴られた`);
+    pushNpcLife(n, Math.floor(w.timeSec), `${target.name} を殴った`);
     damageChibi(w, target, dmg, 'cocoon_abuse');
   } else {
     // soft "めっ"
@@ -1269,6 +1290,7 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     setState(target, 'hurt', 0.8);
     spawnBubble(w.bubbles, target.pos, 'きゃんわふ！', 'speech', 1.1);
     pushLife(target, Math.floor(target.ageSec), 'フラナにめっされた');
+    pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をめっした`);
   }
 }
 
@@ -1282,6 +1304,31 @@ function dampenFuranaMood(w: WorldState, amount: number) {
 export function isFuranaAlive(w: WorldState): boolean {
   const f = w.npcs.find((n) => n.id === 'furana');
   return !!f && !f.dead;
+}
+
+// フラナがプレイヤーに掴まれて動いてる間、mama 高めの子が全力で追いかける。
+// tickWorld で furanaGrabbedTimer が >0 の時に呼ばれる。
+function applyFuranaChaseBehavior(w: WorldState) {
+  const furana = w.npcs.find((n) => n.id === 'furana');
+  if (!furana || furana.dead) return;
+  for (const c of w.chibis) {
+    if (!isAlive(c)) continue;
+    if (c.params.mama < 45) continue;
+    // 距離が遠ければ追跡 target を上書き
+    const d = distance(c.pos, furana.pos);
+    if (d > 20 && (c.state === 'idle' || c.state === 'surprised')) {
+      c.target = {
+        x: furana.pos.x + (Math.random() - 0.5) * 20,
+        y: furana.pos.y + (Math.random() - 0.5) * 14,
+      };
+    }
+    // 低頻度で "ママー！まって！" の悲痛な叫び
+    if (Math.random() < 0.006) {
+      const line = pickLine(['ママー！', 'まってわふ！', 'おいていかないでわふ！', 'どこいくのわふ！？', 'ママぁぁ！']);
+      spawnBubble(w.bubbles, c.pos, line, 'speech', 1.3);
+      if (c.state === 'idle') setState(c, 'cry', 1);
+    }
+  }
 }
 
 // パニック：フラナが死んで以降、ちびわふは徐々に心が折れる。
@@ -1355,6 +1402,7 @@ function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
   spawnBubble(w.bubbles, n.pos, pickLine(COCOON_LINES_ABUSE), 'npc-speech', 1.8);
   setState(target, 'cry', 1);
   pushLife(target, Math.floor(target.ageSec), 'ココンに棒で突かれた');
+  pushNpcLife(n, Math.floor(w.timeSec), `${target.name} を棒で突いた`);
 
   // 包囲カウンター：ココン周辺に 4匹以上いると 20% で逆襲され死亡
   if (candidates.length >= 4 && Math.random() < 0.2) {
@@ -1481,6 +1529,10 @@ export function tickWorld(w: WorldState, dt: number) {
   resolveEvent(w, dt);
   const hazards = getActiveHazards(w);
   for (const c of w.chibis) updateChibi(w, c, dt, hazards);
+  if (w.furanaGrabbedTimer > 0) {
+    w.furanaGrabbedTimer = Math.max(0, w.furanaGrabbedTimer - dt);
+    applyFuranaChaseBehavior(w);
+  }
   processChats(w, dt);
   compactCorpses(w);
   updateNpcs(w, dt);
@@ -1496,6 +1548,9 @@ export function tickWorld(w: WorldState, dt: number) {
 function onPhaseChange(w: WorldState, prev: DayPhase, next: DayPhase) {
   const suzu = w.npcs.find((n) => n.id === 'suzu');
   if (next === 'morning') {
+    // 朝はフラナの気分がリセット気味に（+10 mood）
+    const f = w.npcs.find((n) => n.id === 'furana');
+    if (f && !f.dead) f.mood = Math.min(100, f.mood + 10);
     // 朝礼：スズが全員を起こす
     if (suzu && !suzu.dead) {
       spawnBubble(w.bubbles, suzu.pos, 'あさだよ〜！', 'npc-speech', 2.6);

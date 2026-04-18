@@ -460,6 +460,21 @@ const ANGRY_BYSTANDER_LINES = [
   'こわいわふ…', 'ひぃぃわふ', 'はなれるわふ', 'どうしたわふ？',
   'ちかよらないわふ', 'きげんわるいわふ…',
 ];
+// 目の前で殴られた／投げられた子を見た時の反応
+const WITNESS_SHOCK_LINES = [
+  'えっ！わふ', 'きゃー！わふ', 'なんで！？わふ', 'ひどいわふ！',
+  'かみさまこわいわふ…', 'ぎゃっわふ', 'にげるわふ！', 'まもりんよ〜',
+];
+const WITNESS_LAUGH_LINES = [
+  'わははわふ', 'おもしろいわふ', 'どんくさいわふ', 'もっとわふ！',
+];
+export function pickWitnessShockLine(): string {
+  return WITNESS_SHOCK_LINES[Math.floor(Math.random() * WITNESS_SHOCK_LINES.length)]!;
+}
+export function pickWitnessLaughLine(): string {
+  return WITNESS_LAUGH_LINES[Math.floor(Math.random() * WITNESS_LAUGH_LINES.length)]!;
+}
+
 // 悪い子が死んだ時のざまあみろ系
 const SCHADENFREUDE_LINES = [
   'ざまあみろわふ', 'じごうじとくわふ', 'バチあたったわふ', 'いいきみわふ',

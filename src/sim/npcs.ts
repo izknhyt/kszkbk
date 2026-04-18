@@ -1,4 +1,4 @@
-import type { ChibiState, Vec2 } from '../types';
+import type { ChibiState, LifeEvent, Vec2 } from '../types';
 
 export type NpcId = 'suzu' | 'lou' | 'cocoon' | 'furana';
 
@@ -95,6 +95,8 @@ export interface NpcState {
   // フラナの機嫌 0-100。他NPCは未使用だが一応持たせる。
   // 殴られる/うるさい/イベントで下がり、時間経過で 70 に向けて戻る。
   mood: number;
+  // 最近の出来事（右クリックモーダル用、最大 20 件）
+  lifeLog: LifeEvent[];
 }
 
 export const SUZU_LINES_DEATH = [
@@ -157,7 +159,14 @@ function mkNpc(id: NpcId, home: Vec2, abuseCooldown = 0): NpcState {
     speed: id === 'furana' ? 22 : 0,
     faceLeft: false,
     mood: 70,
+    lifeLog: [],
   };
+}
+
+// NPC の lifeLog に 1 行追加（上限 20、古い物から削除）
+export function pushNpcLife(n: NpcState, sec: number, text: string) {
+  n.lifeLog.push({ sec, text });
+  if (n.lifeLog.length > 20) n.lifeLog.shift();
 }
 
 export function createNpcs(bounds: { w: number; h: number }): NpcState[] {

@@ -22,7 +22,10 @@ import {
   pickGodShakeLine,
   pickGodThrowLine,
   pickGrabReaction,
+  pickWitnessLaughLine,
+  pickWitnessShockLine,
 } from './sim/chats';
+import { distance as distVec } from './sim/chibiwafu';
 import type { WorldState } from './sim/world';
 import { RANK_DEFS } from './sim/rank';
 import { TRAIT_DEFS } from './sim/traits';
@@ -228,6 +231,8 @@ async function start() {
     dragSession.lastX = wx; dragSession.lastY = wy;
     dragSession.bubbleCooldown -= segment;
     n.pos.x = wx; n.pos.y = wy;
+    // フラナが引きずられている間、mama 高めの子が追いかける合図を 1.5秒セット
+    if (id === 'furana') world.furanaGrabbedTimer = 1.5;
     // NPC はちびわふより頑丈：振り回しダメージをさらに半分（120px 毎 1-2 HP）
     while (dragSession.swingDistAccum >= 120) {
       dragSession.swingDistAccum -= 120;
@@ -383,16 +388,49 @@ function punchChibi(world: WorldState, chibiId: number) {
   // 殴打ダメージ 8-18、HP 0 で kamisama_punch
   const dmg = 8 + Math.floor(Math.random() * 11);
   const died = damageChibi(world, c, dmg, 'kamisama_punch');
-  // 生き残ってても 10% で神の不興で追加即死（ドラマ用）
   if (!died && Math.random() < 0.1) {
     damageChibi(world, c, c.hp, 'kamisama_punch');
     return;
   }
-  // 殴られた後 25% で反抗（生きてる子のみ、怒り状態＋罵倒台詞）
   if (!died && Math.random() < 0.25) {
     setState(c, 'angry', 1.2);
     spawnBubble(world.bubbles, c.pos, pickGodDefianceLine(), 'speech', 1.6);
     pushLife(c, Math.floor(c.ageSec), '神様に怒った');
+  }
+  // 周囲 60px の目撃者が反応
+  spawnWitnessReactions(world, c.pos, c.id);
+}
+
+// 殴打／投げの近くで見ていた子達のリアクション。60px 以内の idle を 2人まで反応させる。
+function spawnWitnessReactions(world: WorldState, epicenter: { x: number; y: number }, excludeId?: number) {
+  const witnesses = world.chibis.filter(
+    (o) => isChibiAlive(o) && o.id !== excludeId && distVec(o.pos, epicenter) < 60 && o.state === 'idle',
+  );
+  if (witnesses.length === 0) return;
+  const count = Math.min(2, witnesses.length);
+  for (let i = 0; i < count; i++) {
+    const w = witnesses.splice(Math.floor(Math.random() * witnesses.length), 1)[0]!;
+    // zako が高い子はドライに笑う、それ以外は驚く
+    if (w.params.zako > 55 && Math.random() < 0.3) {
+      spawnBubble(world.bubbles, w.pos, pickWitnessLaughLine(), 'speech', 1.4);
+      pushLife(w, Math.floor(w.ageSec), '殴打を目撃して笑った');
+    } else {
+      spawnBubble(world.bubbles, w.pos, pickWitnessShockLine(), 'speech', 1.4);
+      if (Math.random() < 0.3) setState(w, 'dazed', 0.8);
+      pushLife(w, Math.floor(w.ageSec), '殴打を目撃した');
+    }
+  }
+  // NPC も近くにいたら反応（Suzu が特に）
+  for (const n of world.npcs) {
+    if (n.dead) continue;
+    if (distVec(n.pos, epicenter) > 80) continue;
+    if (n.id === 'suzu' && Math.random() < 0.5) {
+      spawnBubble(world.bubbles, n.pos, 'なにやってるの！？', 'npc-speech', 2);
+    } else if (n.id === 'cocoon' && Math.random() < 0.4) {
+      spawnBubble(world.bubbles, n.pos, 'ざまあみろ！', 'npc-speech', 1.8);
+    } else if (n.id === 'furana' && Math.random() < 0.6) {
+      spawnBubble(world.bubbles, n.pos, 'あらあらわふ…', 'npc-speech', 1.8);
+    }
   }
 }
 
@@ -401,9 +439,10 @@ function punchNpc(world: WorldState, id: NpcId) {
   const n = world.npcs.find((x) => x.id === id);
   if (!n || n.dead) return;
   spawnBubble(world.bubbles, { x: n.pos.x, y: n.pos.y - 30 }, '💥', 'stomp', 0.6);
-  // NPC は 3-8 のダメージ（ちびわふ 8-18 より軽め）
   const dmg = 3 + Math.floor(Math.random() * 6);
   damageNpc(world, n, dmg);
+  // 周囲の目撃者が反応
+  spawnWitnessReactions(world, n.pos);
 }
 
 function dropNpc(world: WorldState, id: NpcId, wx: number, wy: number, throwDist: number) {
@@ -427,6 +466,8 @@ function dropNpc(world: WorldState, id: NpcId, wx: number, wy: number, throwDist
   if (!died) {
     spawnBubble(world.bubbles, n.pos, pickNpcLandedLine(id), 'npc-speech', 1.2);
   }
+  // 着地点で目撃者が反応
+  spawnWitnessReactions(world, n.pos);
 }
 
 // NPC を掴んだ時の性格別リアクション（短く）
@@ -465,10 +506,24 @@ function showNpcModal(n: NpcState) {
   (document.getElementById('modal-params')!).innerHTML = paramsHtml;
   (document.getElementById('modal-flavors')!).innerHTML =
     n.id === 'furana' ? '<li>村の母。死ぬと出産停止＋ちびわふ大パニック。機嫌が悪くなると手加減しなくなる。</li>'
-    : n.id === 'cocoon' ? '<li>いじめっ子。ちびわふを叩く。</li>'
+    : n.id === 'cocoon' ? '<li>いじめっ子。ちびわふを叩く。たまに返り討ちで死ぬ。</li>'
     : n.id === 'suzu' ? '<li>村の点呼係。ママ想い。</li>'
-    : '<li>……</li>';
-  (document.getElementById('modal-life')!).innerHTML = '';
+    : '<li>……無口で何してるか分からない。</li>';
+  // 最近の出来事（新しい順に最大 12 件）
+  const lifeEl = document.getElementById('modal-life')!;
+  lifeEl.innerHTML = '';
+  const recent = n.lifeLog.slice(-12).reverse();
+  for (const ev of recent) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="sec">${ev.sec}s</span><span>${escapeHtml(ev.text)}</span>`;
+    lifeEl.appendChild(li);
+  }
+  if (recent.length === 0) {
+    const li = document.createElement('li');
+    li.textContent = 'まだ何も記録されていない';
+    li.style.color = '#aaa';
+    lifeEl.appendChild(li);
+  }
 }
 
 function dropChibi(world: WorldState, chibiId: number, wx: number, wy: number, throwDist: number) {
@@ -500,6 +555,8 @@ function dropChibi(world: WorldState, chibiId: number, wx: number, wy: number, t
     spawnBubble(world.bubbles, c.pos, pickGodLandedLine(), 'speech', 1.2);
     pushLife(c, Math.floor(c.ageSec), `神様に投げられ地面に激突（-${dmg}HP）`);
   }
+  // 着地点で目撃者反応
+  spawnWitnessReactions(world, c.pos, c.id);
 }
 
 function showChibiModal(c: Chibiwafu, isEpitaph: boolean) {
