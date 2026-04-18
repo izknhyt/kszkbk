@@ -1223,12 +1223,13 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   }
   n.abuseCooldown = 4 + Math.random() * 5;
 
-  // 機嫌で発動率と荒さが変わる
-  // 発動率: mood 90→0.15 / mood 70→0.3 / mood 30→0.55 / mood 0→0.8
-  const crowded = candidates.length >= 4;
-  let triggerChance = 0.3 + (60 - n.mood) * 0.008;
-  if (crowded) triggerChance += 0.2;
-  triggerChance = Math.max(0.05, Math.min(0.85, triggerChance));
+  // 発動率：機嫌悪いほど行動したがる（unhappy = キレやすい）
+  //   mood 90→0.2  (ごきげんで手を出さない)
+  //   mood 70→0.35 (平常)
+  //   mood 30→0.7  (イライラでちょくちょく手を出す)
+  //   mood 0 →0.95 (常に手が出る)
+  let triggerChance = 0.35 + (60 - n.mood) * 0.01;
+  triggerChance = Math.max(0.1, Math.min(0.95, triggerChance));
   if (Math.random() > triggerChance) return;
 
   // ターゲット：mama 高い子ほど狙われやすい
@@ -1242,22 +1243,30 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   }
   if (!target) return;
 
-  // 機嫌による挙動分岐
-  if (n.mood < 20 && Math.random() < 0.4) {
-    // 激怒モード：ぶん投げる。50% 川へ／50% ランダムな方向へ遠投
+  // 機嫌に応じて撫で／殴り／ぶん投げの比率を変える。
+  // 機嫌悪いときは絶対に撫でない（患者のリクエスト）。
+  // patR は残り（1 - punchR - throwR）で暗黙に決まる
+  let punchR: number, throwR: number;
+  if (n.mood >= 70)      { punchR = 0.15; throwR = 0.05; }   // pat 80%
+  else if (n.mood >= 45) { punchR = 0.40; throwR = 0.15; }   // pat 45%
+  else if (n.mood >= 25) { punchR = 0.52; throwR = 0.40; }   // pat  8%
+  else                   { punchR = 0.40; throwR = 0.60; }   // pat  0%
+  const action = Math.random();
+
+  if (action < throwR) {
+    // ぶん投げ：50% 川へ / 50% ランダム遠投
     n.state = 'angry';
     n.stateTimer = 1.8;
     spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_THROW), 'npc-speech', 1.6);
-    pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をぶん投げた`);
+    pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をぶん投げた（機嫌${Math.round(n.mood)}）`);
     const toRiver = Math.random() < 0.5;
     if (toRiver) {
       target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + (Math.random() - 0.5) * 200));
       target.pos.y = 430 + Math.random() * 40;
       pushLife(target, Math.floor(target.ageSec), 'フラナに川へぶん投げられた');
     } else {
-      // その辺にぶん投げ：ランダム方向 120-200px 先
       const ang = Math.random() * Math.PI * 2;
-      const dist = 120 + Math.random() * 80;
+      const dist = 140 + Math.random() * 100;
       target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + Math.cos(ang) * dist));
       target.pos.y = Math.max(40, Math.min(400, target.pos.y + Math.sin(ang) * dist));
       pushLife(target, Math.floor(target.ageSec), 'フラナにぶん投げられた');
@@ -1265,33 +1274,34 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     target.target = null;
     setState(target, 'surprised', 0.6);
     spawnBubble(w.bubbles, target.pos, 'とんでるわふ〜！', 'speech', 1);
+    // 投げはさらに軽ダメージ（着地で HP 減）。低い機嫌ほど痛い
+    const throwDmg = n.mood < 25 ? 8 + Math.floor(Math.random() * 8) : 3 + Math.floor(Math.random() * 5);
+    damageChibi(w, target, throwDmg, 'cocoon_abuse');
     return;
   }
 
-  // 通常時：機嫌が低いほど irritated（本気パンチ）確率↑
-  // mood 80→0.15, mood 60→0.35, mood 30→0.7, mood 0→0.95
-  let irritationChance = 0.25 + (60 - n.mood) * 0.01;
-  if (crowded) irritationChance += 0.25;
-  irritationChance = Math.max(0.05, Math.min(0.95, irritationChance));
-  if (Math.random() < irritationChance) {
-    // 本気パンチ
+  if (action < throwR + punchR) {
+    // パンチ／キック。機嫌低いほど痛い。
     n.state = 'angry';
     n.stateTimer = 1.5;
     spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_ANGRY), 'npc-speech', 1.8);
-    const dmg = 6 + Math.floor(Math.random() * 9);
+    // dmg 基本 6-14、mood が 40 以下なら +4〜+8（本気ブチギレ）
+    let dmg = 6 + Math.floor(Math.random() * 9);
+    if (n.mood < 40) dmg += 4 + Math.floor(Math.random() * 5);
     setState(target, 'hurt', 1.3);
     spawnBubble(w.bubbles, target.pos, 'ぎゃーわふ！', 'speech', 1.2);
     pushLife(target, Math.floor(target.ageSec), `フラナ(機嫌${Math.round(n.mood)})に殴られた`);
-    pushNpcLife(n, Math.floor(w.timeSec), `${target.name} を殴った`);
+    pushNpcLife(n, Math.floor(w.timeSec), `${target.name} を殴った（機嫌${Math.round(n.mood)}）`);
     damageChibi(w, target, dmg, 'cocoon_abuse');
-  } else {
-    // soft "めっ"
-    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_PAT), 'npc-speech', 1.6);
-    setState(target, 'hurt', 0.8);
-    spawnBubble(w.bubbles, target.pos, 'きゃんわふ！', 'speech', 1.1);
-    pushLife(target, Math.floor(target.ageSec), 'フラナにめっされた');
-    pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をめっした`);
+    return;
   }
+
+  // 撫で（soft "めっ"）。機嫌良い時しかやらない。
+  spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_PAT), 'npc-speech', 1.6);
+  setState(target, 'hurt', 0.8);
+  spawnBubble(w.bubbles, target.pos, 'きゃんわふ！', 'speech', 1.1);
+  pushLife(target, Math.floor(target.ageSec), 'フラナにめっされた');
+  pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をめっした`);
 }
 
 // イベント発生時にフラナの機嫌を下げる
