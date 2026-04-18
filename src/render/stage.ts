@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, TextStyle, Texture } from 'pixi.js';
 import type { WorldState } from '../sim/world';
-import type { Chibiwafu, DayPhase, PlacedBuilding, Season } from '../types';
+import type { Chibiwafu, DayPhase, HitTarget, PlacedBuilding, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
 import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
 import type { Bubble } from '../sim/bubbles';
@@ -34,9 +34,9 @@ export interface StageHandle {
   resetCamera: () => void;
   // 画面座標（client）→ ワールド座標に変換
   screenToWorld: (cx: number, cy: number) => { x: number; y: number };
-  // pointerdown 位置（world座標）にあるちびわふIDを返す callback を登録。
-  // null を返すとその位置にはちびわふがいない → カメラパン or 空クリックに倒される。
-  setHitTest: (fn: (wx: number, wy: number) => number | null) => void;
+  // pointerdown 位置（world座標）にある対象（ちびわふ or NPC）を返す callback を登録。
+  // null を返すとその位置には対象がない → カメラパン or 空クリックに倒される。
+  setHitTest: (fn: (wx: number, wy: number) => HitTarget | null) => void;
 }
 
 interface ChibiView {
@@ -191,17 +191,17 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     e.preventDefault();
     const rect = canvas.getBoundingClientRect();
     const wp = screenToWorld(e.clientX, e.clientY);
-    const id = hitTest ? hitTest(wp.x, wp.y) : null;
+    const target = hitTest ? hitTest(wp.x, wp.y) : null;
     const ev = new CustomEvent('kszk-inspect', {
-      detail: { chibiId: id, clientX: e.clientX, clientY: e.clientY, rect },
+      detail: { target, clientX: e.clientX, clientY: e.clientY, rect },
     });
     canvas.dispatchEvent(ev);
   });
 
-  let hitTest: ((wx: number, wy: number) => number | null) | null = null;
-  function setHitTest(fn: (wx: number, wy: number) => number | null) { hitTest = fn; }
+  let hitTest: ((wx: number, wy: number) => HitTarget | null) | null = null;
+  function setHitTest(fn: (wx: number, wy: number) => HitTarget | null) { hitTest = fn; }
 
-  type PointerMode = 'pan' | 'chibi-drag';
+  type PointerMode = 'pan' | 'entity-drag';
   let pointerState: {
     pointerId: number;
     mode: PointerMode;
@@ -211,7 +211,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     startY: number;
     moved: boolean;
     button: number;
-    chibiId: number | null;
+    target: HitTarget | null;
   } | null = null;
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -219,17 +219,17 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     if (e.button === 2) return;
     canvas.setPointerCapture(e.pointerId);
     const wp = screenToWorld(e.clientX, e.clientY);
-    const id = hitTest ? hitTest(wp.x, wp.y) : null;
+    const target = hitTest ? hitTest(wp.x, wp.y) : null;
     pointerState = {
       pointerId: e.pointerId,
-      mode: id != null ? 'chibi-drag' : 'pan',
+      mode: target != null ? 'entity-drag' : 'pan',
       lastX: e.clientX,
       lastY: e.clientY,
       startX: e.clientX,
       startY: e.clientY,
       moved: false,
       button: e.button,
-      chibiId: id,
+      target,
     };
   });
 
@@ -245,10 +245,10 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       cameraY += dy;
       clampCamera();
       applyCamera();
-    } else if (pointerState.mode === 'chibi-drag' && pointerState.chibiId != null && pointerState.moved) {
+    } else if (pointerState.mode === 'entity-drag' && pointerState.target != null && pointerState.moved) {
       const wp = screenToWorld(e.clientX, e.clientY);
-      const ev = new CustomEvent('kszk-chibi-drag', {
-        detail: { chibiId: pointerState.chibiId, worldX: wp.x, worldY: wp.y },
+      const ev = new CustomEvent('kszk-entity-drag', {
+        detail: { target: pointerState.target, worldX: wp.x, worldY: wp.y },
       });
       canvas.dispatchEvent(ev);
     }
@@ -259,16 +259,16 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     canvas.releasePointerCapture(e.pointerId);
     const s = pointerState;
     pointerState = null;
-    if (s.mode === 'chibi-drag' && s.chibiId != null) {
+    if (s.mode === 'entity-drag' && s.target != null) {
       const wp = screenToWorld(e.clientX, e.clientY);
       if (s.moved) {
-        const ev = new CustomEvent('kszk-chibi-drop', {
-          detail: { chibiId: s.chibiId, worldX: wp.x, worldY: wp.y },
+        const ev = new CustomEvent('kszk-entity-drop', {
+          detail: { target: s.target, worldX: wp.x, worldY: wp.y },
         });
         canvas.dispatchEvent(ev);
       } else {
         // 左クリックで殴る
-        const ev = new CustomEvent('kszk-chibi-punch', { detail: { chibiId: s.chibiId } });
+        const ev = new CustomEvent('kszk-entity-punch', { detail: { target: s.target } });
         canvas.dispatchEvent(ev);
       }
     } else if (s.mode === 'pan' && !s.moved) {

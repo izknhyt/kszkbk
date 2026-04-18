@@ -4,6 +4,7 @@ import {
   buildAt,
   createWorld,
   damageChibi,
+  damageNpc,
   forceSpawn,
   tickWorld,
   triggerBokaigi,
@@ -26,7 +27,8 @@ import { RANK_DEFS } from './sim/rank';
 import { TRAIT_DEFS } from './sim/traits';
 import { DEATH_CAUSES as DEATHS } from './sim/deaths';
 import { PARAM_COLOR, PARAM_KEYS, PARAM_LABEL } from './sim/personality';
-import type { Chibiwafu, VillageRank } from './types';
+import { NPC_DEFS, type NpcId, type NpcState } from './sim/npcs';
+import type { Chibiwafu, HitTarget, VillageRank } from './types';
 import { clearSave, load, save } from './meta/save';
 import { CONFIG, type TimeScale } from './config';
 import { DEATH_CAUSES } from './sim/deaths';
@@ -81,26 +83,44 @@ async function start() {
 
   // --- プレイヤー操作 --------------------------------------------------
   // 左クリック = 殴る、右クリック = 情報モーダル、ドラッグ = 持ち上げて放る
+  // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
 
-  // Stage にちびわふ当たり判定を登録（stage 側で左クリック/ドラッグ対象を判定するため）
-  stage.setHitTest((wx, wy) => {
-    let bestId: number | null = null;
+  // Stage に当たり判定を登録：ちびわふ優先、次に NPC。
+  // ちびわふは半径 26px、NPC は NPC_DEFS.scale に応じたやや広め。
+  stage.setHitTest((wx, wy): HitTarget | null => {
+    // 1. ちびわふ優先
+    let bestChibi: number | null = null;
     let bestDist = 26;
     for (const c of world.chibis) {
       if (!isChibiAlive(c)) continue;
       const d = Math.hypot(c.pos.x - wx, c.pos.y - wy);
-      if (d < bestDist) { bestId = c.id; bestDist = d; }
+      if (d < bestDist) { bestChibi = c.id; bestDist = d; }
     }
-    return bestId;
+    if (bestChibi != null) return { kind: 'chibi', id: bestChibi };
+    // 2. NPC（生きてるもののみ）
+    let bestNpc: NpcState | null = null;
+    let bestNpcDist = Infinity;
+    for (const n of world.npcs) {
+      if (n.dead) continue;
+      const radius = 26 * NPC_DEFS[n.id].scale * 1.2;
+      const d = Math.hypot(n.pos.x - wx, n.pos.y - wy);
+      if (d < radius && d < bestNpcDist) { bestNpc = n; bestNpcDist = d; }
+    }
+    if (bestNpc) return { kind: 'npc', id: bestNpc.id };
+    return null;
   });
 
-  // 右クリック → 情報モーダル（生存なら life log、死体なら epitaph）
+  // 右クリック → 情報モーダル（ちびわふ: life log、NPC: 名前/HP、死体: epitaph）
   stage.app.canvas.addEventListener('kszk-inspect', (e) => {
-    const detail = (e as CustomEvent).detail as { chibiId: number | null; clientX: number; clientY: number };
-    if (detail.chibiId != null) {
-      const alive = world.chibis.find((c) => c.id === detail.chibiId);
+    const detail = (e as CustomEvent).detail as { target: HitTarget | null; clientX: number; clientY: number };
+    if (detail.target?.kind === 'chibi') {
+      const alive = world.chibis.find((c) => c.id === detail.target!.id);
       if (alive) { pinnedId = alive.id; showChibiModal(alive, false); return; }
+    }
+    if (detail.target?.kind === 'npc') {
+      const npc = world.npcs.find((n) => n.id === detail.target!.id);
+      if (npc) { showNpcModal(npc); return; }
     }
     // 生体ヒットなし → 死体からも探す
     const wp = stage.screenToWorld(detail.clientX, detail.clientY);
@@ -113,63 +133,57 @@ async function start() {
   });
 
   // 左クリック（動かなかった場合）→ 殴る
-  stage.app.canvas.addEventListener('kszk-chibi-punch', (e) => {
-    const detail = (e as CustomEvent).detail as { chibiId: number };
-    punchChibi(world, detail.chibiId);
+  stage.app.canvas.addEventListener('kszk-entity-punch', (e) => {
+    const detail = (e as CustomEvent).detail as { target: HitTarget };
+    if (detail.target.kind === 'chibi') punchChibi(world, detail.target.id);
+    else punchNpc(world, detail.target.id as NpcId);
   });
 
   // ドラッグセッション：最初に掴んだ位置と振り回し総距離を追跡。
-  // これで"振り回されて衰弱死"とドロップ距離ダメージの両方が判定できる。
+  // ちびわふと NPC 両方に対応（id は HitTarget で保持）。
   let dragSession: {
-    chibiId: number;
+    target: HitTarget;
     startX: number;
     startY: number;
     lastX: number;
     lastY: number;
-    swingDistAccum: number;   // ダメージ次回まで貯めるスイング距離
-    bubbleCooldown: number;   // 吹き出し連打防止
+    swingDistAccum: number;
+    bubbleCooldown: number;
   } | null = null;
 
-  // ドラッグ中：ちびわふをカーソル位置に移動 + 振り回しダメージ
-  stage.app.canvas.addEventListener('kszk-chibi-drag', (e) => {
-    const detail = (e as CustomEvent).detail as { chibiId: number; worldX: number; worldY: number };
-    const c = world.chibis.find((x) => x.id === detail.chibiId);
-    if (!c || !isChibiAlive(c)) return;
+  function dragTargetsSame(a: HitTarget, b: HitTarget): boolean {
+    return a.kind === b.kind && a.id === b.id;
+  }
 
-    // 新しいセッション開始 or 切り替え
-    if (!dragSession || dragSession.chibiId !== detail.chibiId) {
+  // ドラッグ中：対象をカーソル位置に移動 + 振り回しダメージ
+  stage.app.canvas.addEventListener('kszk-entity-drag', (e) => {
+    const detail = (e as CustomEvent).detail as { target: HitTarget; worldX: number; worldY: number };
+    if (detail.target.kind === 'chibi') handleDragChibi(detail.target.id, detail.worldX, detail.worldY);
+    else handleDragNpc(detail.target.id as NpcId, detail.worldX, detail.worldY);
+  });
+
+  function handleDragChibi(id: number, wx: number, wy: number) {
+    const c = world.chibis.find((x) => x.id === id);
+    if (!c || !isChibiAlive(c)) return;
+    if (!dragSession || !dragTargetsSame(dragSession.target, { kind: 'chibi', id })) {
       dragSession = {
-        chibiId: detail.chibiId,
-        startX: c.pos.x,
-        startY: c.pos.y,
-        lastX: c.pos.x,
-        lastY: c.pos.y,
-        swingDistAccum: 0,
-        // 最初のリアクションバブルが振り回し悲鳴で上書きされないよう、
-        // ある程度振り回すまで shake バブルを抑制する猶予を入れる。
-        bubbleCooldown: 80,
+        target: { kind: 'chibi', id },
+        startX: c.pos.x, startY: c.pos.y,
+        lastX: c.pos.x, lastY: c.pos.y,
+        swingDistAccum: 0, bubbleCooldown: 80,
       };
       pushLife(c, Math.floor(c.ageSec), '神様に掴まれた');
-      // 掴まれた瞬間のリアクション（性格で喜ぶ／怯える／威嚇／困惑）。
-      // やや上に浮かべて、直後のダメージバブルと位置を分ける。
       spawnBubble(world.bubbles, { x: c.pos.x, y: c.pos.y - 14 }, pickGrabReaction(c), 'speech', 1.8);
     }
-
-    const dx = detail.worldX - dragSession.lastX;
-    const dy = detail.worldY - dragSession.lastY;
+    const dx = wx - dragSession.lastX;
+    const dy = wy - dragSession.lastY;
     const segment = Math.hypot(dx, dy);
     dragSession.swingDistAccum += segment;
-    dragSession.lastX = detail.worldX;
-    dragSession.lastY = detail.worldY;
+    dragSession.lastX = wx; dragSession.lastY = wy;
     dragSession.bubbleCooldown -= segment;
-
-    c.pos.x = detail.worldX;
-    c.pos.y = detail.worldY;
+    c.pos.x = wx; c.pos.y = wy;
     c.target = null;
-    // ドラッグ中は hurt ステートにしておく（絵が震える）
     if (c.state !== 'hurt' && c.state !== 'dead') setState(c, 'hurt', 0.5);
-
-    // 40px 振り回される毎に 1-2 HP ダメージ
     while (dragSession.swingDistAccum >= 40) {
       dragSession.swingDistAccum -= 40;
       const dmg = 1 + Math.floor(Math.random() * 2);
@@ -180,21 +194,53 @@ async function start() {
         return;
       }
     }
-
-    // 吹き出しは 60px 毎に1回くらい
     if (dragSession.bubbleCooldown <= 0 && segment > 2) {
       spawnBubble(world.bubbles, c.pos, pickGodShakeLine(), 'speech', 0.9);
       dragSession.bubbleCooldown = 60;
     }
-  });
+  }
 
-  // ドロップ → 水中ならそのまま溺死、それ以外は投げ距離に応じてダメージ
-  stage.app.canvas.addEventListener('kszk-chibi-drop', (e) => {
-    const detail = (e as CustomEvent).detail as { chibiId: number; worldX: number; worldY: number };
-    const throwDist = dragSession && dragSession.chibiId === detail.chibiId
+  function handleDragNpc(id: NpcId, wx: number, wy: number) {
+    const n = world.npcs.find((x) => x.id === id);
+    if (!n || n.dead) return;
+    if (!dragSession || !dragTargetsSame(dragSession.target, { kind: 'npc', id })) {
+      dragSession = {
+        target: { kind: 'npc', id },
+        startX: n.pos.x, startY: n.pos.y,
+        lastX: n.pos.x, lastY: n.pos.y,
+        swingDistAccum: 0, bubbleCooldown: 80,
+      };
+      const reaction = npcGrabReaction(id);
+      if (reaction) spawnBubble(world.bubbles, { x: n.pos.x, y: n.pos.y - 16 }, reaction, 'speech', 1.8);
+    }
+    const dx = wx - dragSession.lastX;
+    const dy = wy - dragSession.lastY;
+    const segment = Math.hypot(dx, dy);
+    dragSession.swingDistAccum += segment;
+    dragSession.lastX = wx; dragSession.lastY = wy;
+    dragSession.bubbleCooldown -= segment;
+    n.pos.x = wx; n.pos.y = wy;
+    // NPC はちびわふより頑丈：振り回しダメージを半分に
+    while (dragSession.swingDistAccum >= 60) {
+      dragSession.swingDistAccum -= 60;
+      const dmg = 1 + Math.floor(Math.random() * 2);
+      const died = damageNpc(world, n, dmg);
+      if (died) { dragSession = null; return; }
+    }
+    if (dragSession.bubbleCooldown <= 0 && segment > 2) {
+      spawnBubble(world.bubbles, n.pos, pickGodShakeLine(), 'speech', 0.9);
+      dragSession.bubbleCooldown = 80;
+    }
+  }
+
+  // ドロップ → ちびわふ／NPC それぞれに適した処理へ
+  stage.app.canvas.addEventListener('kszk-entity-drop', (e) => {
+    const detail = (e as CustomEvent).detail as { target: HitTarget; worldX: number; worldY: number };
+    const throwDist = dragSession && dragTargetsSame(dragSession.target, detail.target)
       ? Math.hypot(detail.worldX - dragSession.startX, detail.worldY - dragSession.startY)
       : 0;
-    dropChibi(world, detail.chibiId, detail.worldX, detail.worldY, throwDist);
+    if (detail.target.kind === 'chibi') dropChibi(world, detail.target.id, detail.worldX, detail.worldY, throwDist);
+    else dropNpc(world, detail.target.id as NpcId, detail.worldX, detail.worldY, throwDist);
     dragSession = null;
   });
 
@@ -316,6 +362,68 @@ function punchChibi(world: WorldState, chibiId: number) {
   if (!died && Math.random() < 0.1) {
     damageChibi(world, c, c.hp, 'kamisama_punch');
   }
+}
+
+// NPC 殴打：ちびわふより頑丈なのでダメージ低め、リアクション多め
+function punchNpc(world: WorldState, id: NpcId) {
+  const n = world.npcs.find((x) => x.id === id);
+  if (!n || n.dead) return;
+  spawnBubble(world.bubbles, { x: n.pos.x, y: n.pos.y - 30 }, '💥', 'stomp', 0.6);
+  // NPC は 3-8 のダメージ（ちびわふ 8-18 より軽め）
+  const dmg = 3 + Math.floor(Math.random() * 6);
+  damageNpc(world, n, dmg);
+}
+
+function dropNpc(world: WorldState, id: NpcId, wx: number, wy: number, throwDist: number) {
+  const n = world.npcs.find((x) => x.id === id);
+  if (!n || n.dead) return;
+  n.pos.x = wx;
+  n.pos.y = wy;
+  if (wy > 414) {
+    // 水に投げ込まれた NPC は HP 関係なく即死（神話的）
+    spawnBubble(world.bubbles, n.pos, 'わぷっ…', 'speech', 1.2);
+    damageNpc(world, n, n.hp);
+    return;
+  }
+  // 着地：距離に応じて NPC へのダメージ。ちびわふより倍率低め。
+  const dmg = Math.round(3 + Math.min(20, throwDist * 0.06));
+  if (throwDist > 80) {
+    spawnBubble(world.bubbles, n.pos, pickGodThrowLine(), 'speech', 0.9);
+  }
+  const died = damageNpc(world, n, dmg);
+  if (!died) {
+    spawnBubble(world.bubbles, n.pos, pickGodLandedLine(), 'speech', 1.2);
+  }
+}
+
+// NPC を掴んだ時の性格別リアクション（短く）
+function npcGrabReaction(id: NpcId): string | null {
+  if (id === 'furana') return 'きゃっ！？';
+  if (id === 'suzu')   return 'ちょっとなに！？';
+  if (id === 'lou')    return '……ぐぅ？';
+  if (id === 'cocoon') return 'はなせー！';
+  return null;
+}
+
+function showNpcModal(n: NpcState) {
+  const modal = document.getElementById('chibi-modal')!;
+  modal.classList.remove('hidden');
+  const def = NPC_DEFS[n.id];
+  (document.getElementById('modal-name')!).textContent = def.name;
+  (document.getElementById('modal-age')!).textContent = `HP ${n.hp} / ${n.maxHp}`;
+  (document.getElementById('modal-traits')!).innerHTML = '';
+  (document.getElementById('modal-epitaph')!).textContent = '';
+  (document.getElementById('modal-epitaph')!).classList.remove('show');
+  (document.getElementById('modal-params')!).innerHTML =
+    `<div class="param-row"><span class="label">HP</span>` +
+    `<span class="bar"><span class="fill" style="width:${(n.hp / n.maxHp) * 100}%;background:#d85";></span></span>` +
+    `<span class="value">${n.hp}</span></div>`;
+  (document.getElementById('modal-flavors')!).innerHTML =
+    n.id === 'furana' ? '<li>村の母。死ぬと出産停止＋ちびわふ大パニック。</li>'
+    : n.id === 'cocoon' ? '<li>いじめっ子。ちびわふを叩く。</li>'
+    : n.id === 'suzu' ? '<li>村の点呼係。</li>'
+    : '<li>……</li>';
+  (document.getElementById('modal-life')!).innerHTML = '';
 }
 
 function dropChibi(world: WorldState, chibiId: number, wx: number, wy: number, throwDist: number) {
