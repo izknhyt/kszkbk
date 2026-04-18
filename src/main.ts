@@ -6,6 +6,7 @@ import {
   damageChibi,
   damageNpc,
   forceSpawn,
+  sweepThrowCollisions,
   tickWorld,
   triggerBokaigi,
   triggerFire,
@@ -152,6 +153,7 @@ async function start() {
 
   // ドラッグセッション：最初に掴んだ位置と振り回し総距離を追跡。
   // ちびわふと NPC 両方に対応（id は HitTarget で保持）。
+  // samples: 投げの速度計算用、最近のカーソル位置履歴（時刻付き）
   let dragSession: {
     target: HitTarget;
     startX: number;
@@ -160,7 +162,22 @@ async function start() {
     lastY: number;
     swingDistAccum: number;
     bubbleCooldown: number;
+    samples: Array<{ x: number; y: number; t: number }>;
   } | null = null;
+
+  // 直近 120ms のサンプルから投げ速度 (px/sec) を推定
+  function computeThrowVelocity(): { vx: number; vy: number } {
+    if (!dragSession || dragSession.samples.length < 2) return { vx: 0, vy: 0 };
+    const samples = dragSession.samples;
+    const recent = samples[samples.length - 1]!;
+    // 120ms 以上前の古いサンプルを探す
+    let old = samples[0]!;
+    for (let i = samples.length - 1; i >= 0; i--) {
+      if (recent.t - samples[i]!.t >= 0.12) { old = samples[i]!; break; }
+    }
+    const dt = Math.max(0.02, recent.t - old.t);
+    return { vx: (recent.x - old.x) / dt, vy: (recent.y - old.y) / dt };
+  }
 
   function dragTargetsSame(a: HitTarget, b: HitTarget): boolean {
     return a.kind === b.kind && a.id === b.id;
@@ -182,10 +199,13 @@ async function start() {
         startX: c.pos.x, startY: c.pos.y,
         lastX: c.pos.x, lastY: c.pos.y,
         swingDistAccum: 0, bubbleCooldown: 80,
+        samples: [{ x: c.pos.x, y: c.pos.y, t: performance.now() / 1000 }],
       };
       pushLife(c, Math.floor(c.ageSec), '神様に掴まれた');
       spawnBubble(world.bubbles, { x: c.pos.x, y: c.pos.y - 14 }, pickGrabReaction(c), 'speech', 1.8);
     }
+    dragSession.samples.push({ x: wx, y: wy, t: performance.now() / 1000 });
+    if (dragSession.samples.length > 12) dragSession.samples.shift();
     const dx = wx - dragSession.lastX;
     const dy = wy - dragSession.lastY;
     const segment = Math.hypot(dx, dy);
@@ -220,10 +240,13 @@ async function start() {
         startX: n.pos.x, startY: n.pos.y,
         lastX: n.pos.x, lastY: n.pos.y,
         swingDistAccum: 0, bubbleCooldown: 80,
+        samples: [{ x: n.pos.x, y: n.pos.y, t: performance.now() / 1000 }],
       };
       const reaction = npcGrabReaction(id);
       if (reaction) spawnBubble(world.bubbles, { x: n.pos.x, y: n.pos.y - 16 }, reaction, 'npc-speech', 1.8);
     }
+    dragSession.samples.push({ x: wx, y: wy, t: performance.now() / 1000 });
+    if (dragSession.samples.length > 12) dragSession.samples.shift();
     const dx = wx - dragSession.lastX;
     const dy = wy - dragSession.lastY;
     const segment = Math.hypot(dx, dy);
@@ -246,14 +269,17 @@ async function start() {
     }
   }
 
-  // ドロップ → ちびわふ／NPC それぞれに適した処理へ
+  // ドロップ → 投げ速度に応じて着地点を延長し、ルート上の巻き添え判定もする
   stage.app.canvas.addEventListener('kszk-entity-drop', (e) => {
     const detail = (e as CustomEvent).detail as { target: HitTarget; worldX: number; worldY: number };
-    const throwDist = dragSession && dragTargetsSame(dragSession.target, detail.target)
-      ? Math.hypot(detail.worldX - dragSession.startX, detail.worldY - dragSession.startY)
-      : 0;
-    if (detail.target.kind === 'chibi') dropChibi(world, detail.target.id, detail.worldX, detail.worldY, throwDist);
-    else dropNpc(world, detail.target.id as NpcId, detail.worldX, detail.worldY, throwDist);
+    const { vx, vy } = dragSession && dragTargetsSame(dragSession.target, detail.target)
+      ? computeThrowVelocity() : { vx: 0, vy: 0 };
+    // リリース速度から追加飛距離を計算（0.4 秒分）。速度が大きいほど遠くへ飛ぶ。
+    const FLIGHT_SEC = 0.4;
+    const landX = detail.worldX + vx * FLIGHT_SEC;
+    const landY = detail.worldY + vy * FLIGHT_SEC;
+    if (detail.target.kind === 'chibi') dropChibi(world, detail.target.id, detail.worldX, detail.worldY, landX, landY);
+    else dropNpc(world, detail.target.id as NpcId, detail.worldX, detail.worldY, landX, landY);
     dragSession = null;
   });
 
@@ -445,28 +471,34 @@ function punchNpc(world: WorldState, id: NpcId) {
   spawnWitnessReactions(world, n.pos);
 }
 
-function dropNpc(world: WorldState, id: NpcId, wx: number, wy: number, throwDist: number) {
+function dropNpc(world: WorldState, id: NpcId, releasedX: number, releasedY: number, landX: number, landY: number) {
   const n = world.npcs.find((x) => x.id === id);
   if (!n || n.dead) return;
-  n.pos.x = wx;
-  n.pos.y = wy;
-  if (wy > 414) {
-    // 水中に投げ込まれた NPC：即死させず 10 HP の軽ダメージだけ。
-    // ちびわふと違って NPC は泳げる設定。何度も放り込めば死ぬがすぐには死なない。
+  const startPos = { x: releasedX, y: releasedY };
+  landX = Math.max(20, Math.min(world.bounds.w - 20, landX));
+  landY = Math.max(20, Math.min(world.bounds.h - 20, landY));
+  const flightDist = Math.hypot(landX - releasedX, landY - releasedY);
+
+  // 投げの軌道上の誰かを巻き込む
+  sweepThrowCollisions(world, startPos, { x: landX, y: landY }, n);
+
+  n.pos.x = landX;
+  n.pos.y = landY;
+  if (landY > 414) {
+    // 水中は NPC も即死せず 10 HP に抑える
     spawnBubble(world.bubbles, n.pos, 'わぷっ…', 'npc-speech', 1.2);
     damageNpc(world, n, 10);
     return;
   }
-  // 着地：距離に応じて NPC へのダメージ。ちびわふ (0.10) より低く 0.04 倍。
-  const dmg = Math.round(2 + Math.min(14, throwDist * 0.04));
-  if (throwDist > 80) {
+  // 陸地：飛距離に応じて NPC ダメージ（ちびわふより低め）
+  const dmg = Math.round(2 + Math.min(18, flightDist * 0.05));
+  if (flightDist > 80) {
     spawnBubble(world.bubbles, n.pos, pickNpcThrowLine(id), 'npc-speech', 0.9);
   }
   const died = damageNpc(world, n, dmg);
   if (!died) {
     spawnBubble(world.bubbles, n.pos, pickNpcLandedLine(id), 'npc-speech', 1.2);
   }
-  // 着地点で目撃者が反応
   spawnWitnessReactions(world, n.pos);
 }
 
@@ -526,36 +558,43 @@ function showNpcModal(n: NpcState) {
   }
 }
 
-function dropChibi(world: WorldState, chibiId: number, wx: number, wy: number, throwDist: number) {
+// releasedX/Y: プレイヤーが指を離した位置。ここから速度に応じて landX/Y まで飛ぶ。
+function dropChibi(world: WorldState, chibiId: number, releasedX: number, releasedY: number, landX: number, landY: number) {
   const c = world.chibis.find((x) => x.id === chibiId);
   if (!c || !isChibiAlive(c)) return;
-  c.pos.x = wx;
-  c.pos.y = wy;
+  const startPos = { x: releasedX, y: releasedY };
+  // 画面外に飛ばないようクランプ
+  landX = Math.max(20, Math.min(world.bounds.w - 20, landX));
+  landY = Math.max(20, Math.min(world.bounds.h - 20, landY));
+  const flightDist = Math.hypot(landX - releasedX, landY - releasedY);
+
+  // 投げの軌道上にいる誰かを巻き込む（スイープ）
+  sweepThrowCollisions(world, startPos, { x: landX, y: landY }, c);
+
+  c.pos.x = landX;
+  c.pos.y = landY;
   c.target = null;
-  // 水中に落とされたら HP 関係なく即溺死
-  if (wy > 414) {
+  // 水中に落ちたら HP 関係なく即溺死
+  if (landY > 414) {
     spawnBubble(world.bubbles, c.pos, 'わふぅ…', 'speech', 1.1);
     pushLife(c, Math.floor(c.ageSec), '神様に水へ投げ込まれた');
-    // dropChibi から kill するために直接呼ぶ（hp 経由しない）
     damageChibi(world, c, c.hp, 'kamisama_drown');
     return;
   }
-  // 陸地：投げ距離に応じて着地ダメージ 5-35
-  const dmg = Math.round(5 + Math.min(30, throwDist * 0.10));
-  // 距離 80px 以上で "空中で何か言う" 吹き出しを先に出す
-  if (throwDist > 80) {
+  // 陸地：飛距離に応じて着地ダメージ 3-45（速度が大きいほど痛い）
+  const dmg = Math.round(3 + Math.min(42, flightDist * 0.12));
+  if (flightDist > 80) {
     spawnBubble(world.bubbles, c.pos, pickGodThrowLine(), 'speech', 0.9);
   }
   const died = damageChibi(world, c, dmg, 'kamisama_throw');
   if (died) {
     spawnBubble(world.bubbles, c.pos, pickGodLandedLine(), 'speech', 1.3);
-    pushLife(c, Math.floor(c.ageSec), `神様に${Math.round(throwDist)}px 投げ飛ばされ墜死`);
+    pushLife(c, Math.floor(c.ageSec), `神様に${Math.round(flightDist)}px 投げ飛ばされ墜死`);
   } else {
     setState(c, 'hurt', 1.4);
     spawnBubble(world.bubbles, c.pos, pickGodLandedLine(), 'speech', 1.2);
-    pushLife(c, Math.floor(c.ageSec), `神様に投げられ地面に激突（-${dmg}HP）`);
+    pushLife(c, Math.floor(c.ageSec), `神様に${Math.round(flightDist)}px 投げられ激突（-${dmg}HP）`);
   }
-  // 着地点で目撃者反応
   spawnWitnessReactions(world, c.pos, c.id);
 }
 

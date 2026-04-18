@@ -460,6 +460,15 @@ const ANGRY_BYSTANDER_LINES = [
   'こわいわふ…', 'ひぃぃわふ', 'はなれるわふ', 'どうしたわふ？',
   'ちかよらないわふ', 'きげんわるいわふ…',
 ];
+// 投げられたちびわふの軌道にぶつかった巻き添え側の台詞
+const COLLISION_VICTIM_LINES = [
+  'ぶつかったわふ！', 'いたっわふ！', 'なんでわふ！？', 'きゃーわふ！',
+  'とんでくるなわふ！', 'ぶっとばされたわふ', 'ぎゃっ', 'どいてわふ！',
+];
+export function pickCollisionVictimLine(): string {
+  return COLLISION_VICTIM_LINES[Math.floor(Math.random() * COLLISION_VICTIM_LINES.length)]!;
+}
+
 // 目の前で殴られた／投げられた子を見た時の反応
 const WITNESS_SHOCK_LINES = [
   'えっ！わふ', 'きゃー！わふ', 'なんで！？わふ', 'ひどいわふ！',

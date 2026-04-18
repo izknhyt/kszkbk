@@ -60,6 +60,7 @@ import {
   pickActionAnnounce,
   pickAngryBystanderLine,
   pickBegFoodLine,
+  pickCollisionVictimLine,
   pickComfortLine,
   pickCopyCryLine,
   pickMorashiDisgustLine,
@@ -453,6 +454,51 @@ export function damageChibi(w: WorldState, c: Chibiwafu, amount: number, causeId
     return true;
   }
   return false;
+}
+
+// 投げの軌道上にいるちびわふ／NPC を判定して巻き添えダメージを与える。
+// 直線 start→end から perpendicular 20px 以内に居る生存個体を hit として処理。
+export function sweepThrowCollisions(
+  w: WorldState,
+  start: Vec2,
+  end: Vec2,
+  exclude: Chibiwafu | NpcState | null,
+): void {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 16) return;  // 近距離はスイープ意味なし
+  const nx = dx / length;
+  const ny = dy / length;
+  const BAND = 20;
+
+  const hitLine = (px: number, py: number): boolean => {
+    const relX = px - start.x;
+    const relY = py - start.y;
+    const t = relX * nx + relY * ny;
+    if (t < 0 || t > length) return false;
+    const perp = Math.abs(relX * (-ny) + relY * nx);
+    return perp < BAND;
+  };
+
+  // ちびわふへの巻き添え
+  for (const c of w.chibis) {
+    if (!isAlive(c)) continue;
+    if (c === exclude) continue;
+    if (!hitLine(c.pos.x, c.pos.y)) continue;
+    setState(c, 'hurt', 1);
+    spawnBubble(w.bubbles, c.pos, pickCollisionVictimLine(), 'speech', 1.3);
+    pushLife(c, Math.floor(c.ageSec), '投げられた誰かに巻き込まれた');
+    damageChibi(w, c, 5 + Math.floor(Math.random() * 6), 'cocoon_abuse');
+  }
+  // NPC への巻き添え（死体・フラナは除外。ルーは寝てても hit する）
+  for (const n of w.npcs) {
+    if (n.dead) continue;
+    if (n === exclude) continue;
+    if (!hitLine(n.pos.x, n.pos.y)) continue;
+    spawnBubble(w.bubbles, n.pos, pickLine(hurtLinesFor(n.id)), 'npc-speech', 1.3);
+    damageNpc(w, n, 3 + Math.floor(Math.random() * 4));
+  }
 }
 
 // NPC に HP ダメージ。0 以下で dead フラグを立てる。戻り値 = 死んだか。
@@ -1330,8 +1376,9 @@ function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punc
     }
     target.target = null;
     setState(target, 'surprised', 1.3);
-    // 視認性強化：発射点と着地点の両方でバブル
+    // 発射点と着地点の両方でバブル、軌道上の巻き添えも検出
     spawnBubble(w.bubbles, startPos, '💫', 'stomp', 0.6);
+    sweepThrowCollisions(w, startPos, target.pos, target);
     spawnBubble(w.bubbles, target.pos, 'とんでるわふ〜！', 'speech', 1.4);
     // 投げダメージ（着地痛い）。低い機嫌ほど痛い
     const throwDmg = n.mood < 25 ? 10 + Math.floor(Math.random() * 10) : 4 + Math.floor(Math.random() * 6);
