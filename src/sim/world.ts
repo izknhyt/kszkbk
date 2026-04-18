@@ -571,6 +571,63 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     pushLife(c, Math.floor(c.ageSec), '突然立ち止まって空を見つめた');
   }
 
+  // --- フレーバー特性由来の小挙動 --------------------------------------
+  // 季節×flavor 連動の自然発話
+  if (c.state === 'idle') {
+    // 暑がり × 夏：ため息
+    if (w.season === 'summer' && c.flavors.includes('暑がり') && Math.random() < 0.002) {
+      spawnBubble(w.bubbles, c.pos, 'あついわふ…', 'speech', 1.3);
+    }
+    // 寒がり × 冬
+    if (w.season === 'winter' && c.flavors.includes('寒がり') && Math.random() < 0.002) {
+      spawnBubble(w.bubbles, c.pos, 'さむいわふ…', 'speech', 1.3);
+    }
+    // 鼻血出やすい：🩸 絵文字＋ hurt 軽め
+    if (c.flavors.includes('鼻血出やすい') && Math.random() < 0.0015) {
+      spawnBubble(w.bubbles, c.pos, '🩸', 'stomp', 1);
+      setState(c, 'hurt', 0.6);
+    }
+    // しゃっくりが止まらない
+    if (c.flavors.includes('しゃっくりが止まらない') && Math.random() < 0.0025) {
+      spawnBubble(w.bubbles, c.pos, 'ひっく', 'speech', 0.9);
+    }
+    // 歌が壊滅的に下手：♪を出す
+    if (c.flavors.includes('歌が壊滅的に下手') && Math.random() < 0.0015) {
+      spawnBubble(w.bubbles, c.pos, '♪？', 'speech', 1.4);
+    }
+    // 空をじっと見る：staring に突入
+    if (c.flavors.includes('空をじっと見る') && Math.random() < 0.0012) {
+      setState(c, 'staring', 2);
+    }
+    // 棒で何でも叩く：近くの誰かを叩く
+    if (c.flavors.includes('棒で何でも叩く') && Math.random() < 0.0015) {
+      const near = w.chibis.find((o) => o !== c && isAlive(o) && distance(o.pos, c.pos) < 40);
+      if (near) {
+        spawnBubble(w.bubbles, c.pos, 'えいっ！', 'speech', 1);
+        spawnBubble(w.bubbles, near.pos, 'いたっ', 'speech', 0.8);
+        setState(near, 'hurt', 0.8);
+      }
+    }
+    // うんこの形が気になる：近くの死体で立ち止まる
+    if (c.flavors.includes('うんこの形が気になる') && Math.random() < 0.0015) {
+      const corpse = w.corpses.find((cc) => distance(cc.pos, c.pos) < 30);
+      if (corpse) setState(c, 'staring', 2);
+    }
+    // すぐ寝る：sleep 頻発
+    if (c.flavors.includes('すぐ寝る') && Math.random() < 0.003) {
+      setState(c, 'sleep', 2);
+    }
+    // すぐ笑う：笑い bubble
+    if (c.flavors.includes('すぐ笑う') && Math.random() < 0.002) {
+      spawnBubble(w.bubbles, c.pos, 'ふふっわふ', 'speech', 1.1);
+    }
+  }
+
+  // sleep 中のいびきうるさい
+  if (c.state === 'sleep' && c.flavors.includes('いびきがうるさい') && Math.random() < 0.005) {
+    spawnBubble(w.bubbles, c.pos, 'ぐーぐーわふ', 'speech', 1.3);
+  }
+
   // 移動（止まってるステート中は動かない）
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
     const cocoon = w.npcs.find((n) => n.id === 'cocoon');

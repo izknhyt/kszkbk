@@ -356,9 +356,30 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         chibiLayer.addChild(v.container);
         views.set(c.id, v);
       }
-      // 音頭中は全ちびわふが個体位相で揺れる（演出のみ、sim pos は不変）。
-      const wx = ondoWobble ? Math.sin(world.timeSec * 6 + c.id * 0.7) * 8 : 0;
-      const wy = ondoWobble ? Math.abs(Math.cos(world.timeSec * 6 + c.id * 0.7)) * -3 : 0;
+      // --- 視覚だけの小揺れ（sim pos は不変）---
+      // 音頭中は全員個体位相で揺れる。
+      // 移動中は energy 連動の上下バウンス。止まってる時は呼吸だけ。
+      // 元気な子・ぴょんぴょん flavor はバウンス大きめ。
+      let wx = 0, wy = 0;
+      if (ondoWobble) {
+        wx = Math.sin(world.timeSec * 6 + c.id * 0.7) * 8;
+        wy = Math.abs(Math.cos(world.timeSec * 6 + c.id * 0.7)) * -3;
+      } else if (c.state === 'idle' || c.state === 'surprised') {
+        const bouncy = c.params.energy * 0.03 + (c.flavors.includes('ぴょんぴょん跳ねる') ? 2.5 : 0);
+        const phase = world.timeSec * (2 + c.params.energy * 0.04) + c.id * 0.4;
+        wy = -Math.abs(Math.sin(phase)) * bouncy;
+        // 低集中の子はふらふら（横揺れ）
+        if (c.params.focus < 35) wx = Math.sin(phase * 0.7) * 1.2;
+      } else if (c.state === 'sleep' || c.state === 'exhausted') {
+        // 呼吸
+        wy = Math.sin(world.timeSec * 1.5 + c.id) * 0.6;
+      } else if (c.state === 'cry') {
+        // 泣いてる子は小刻みに震える
+        wx = (Math.random() - 0.5) * 1.5;
+      } else if (c.state === 'hurt') {
+        wx = (Math.random() - 0.5) * 3;
+        wy = (Math.random() - 0.5) * 2;
+      }
       v.container.position.set(c.pos.x + wx, c.pos.y + wy);
       v.sprite.scale.x = (c.faceLeft ? -1 : 1) * calcScale(lib);
       if (v.lastState !== c.state) {

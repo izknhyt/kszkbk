@@ -116,8 +116,7 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         const r = 20 + Math.random() * mamaRadius * 0.3;
         newTarget = { x: env.furana.x + Math.cos(ang) * r, y: env.furana.y + Math.sin(ang) * r };
         announcementKey = 'mama';
-      }
-      // 戦闘狂：ココンに向かう 60%
+      }      // 戦闘狂：ココンに向かう 60%
       if (!newTarget && c.traits.includes('ikusa') && env.cocoonPos && Math.random() < 0.6) {
         newTarget = { x: env.cocoonPos.x + (Math.random() - 0.5) * 30, y: env.cocoonPos.y + (Math.random() - 0.5) * 30 };
         announcementKey = 'cocoon_ikusa';
@@ -190,9 +189,19 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
 
     c.target = newTarget;
     c.targetLandmarkId = newLandmarkId;
+    // 方向音痴：目標座標に大きめの乱数をかける
+    if (c.flavors.includes('方向音痴')) {
+      c.target.x += (Math.random() - 0.5) * 120;
+      c.target.y += (Math.random() - 0.5) * 60;
+    }
     c.faceLeft = c.target.x < c.pos.x;
   } else {
     announcementKey = null; // target 継続中は announce しない
+  }
+  // 低集中のちびわふは途中で target を微調整（ふらふら、寄り道）
+  if (c.params.focus < 35 && Math.random() < 0.015) {
+    c.target.x += (Math.random() - 0.5) * 40;
+    c.target.y += (Math.random() - 0.5) * 20;
   }
   const dx = c.target.x - c.pos.x;
   const dy = c.target.y - c.pos.y;
