@@ -1,6 +1,18 @@
 import { Rectangle, Texture } from 'pixi.js';
 import type { ChibiState } from '../types';
 
+const SPLIT_SPRITE_URLS = [
+  '/chibiwafu/01_normal.png',
+  '/chibiwafu/02_crying.png',
+  '/chibiwafu/03_surprised.png',
+  '/chibiwafu/04_angry.png',
+  '/chibiwafu/05_sulking.png',
+  '/chibiwafu/06_dizzy.png',
+  '/chibiwafu/07_dirty.png',
+  '/chibiwafu/08_sleepy.png',
+  '/chibiwafu/09_dead.png',
+] as const;
+
 const STATE_INDEX: Record<ChibiState, number> = {
   idle: 0,
   cry: 1,
@@ -27,6 +39,13 @@ export interface SpriteLibrary {
 const CHROMA_THRESHOLD = 240;
 
 export async function loadSpriteLibrary(sheetUrl: string): Promise<SpriteLibrary> {
+  try {
+    const splitFrames = await loadSplitFrames();
+    if (splitFrames) return { frames: splitFrames, hasSheet: true };
+  } catch (err) {
+    console.warn('[sprites] split sprites load failed, falling back to sheet', err);
+  }
+
   try {
     const img = await loadImage(sheetUrl);
     const canvas = document.createElement('canvas');
@@ -64,6 +83,16 @@ function loadImage(url: string): Promise<HTMLImageElement> {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error(`image load failed: ${url}`));
     img.src = url;
+  });
+}
+
+async function loadSplitFrames(): Promise<Texture[] | null> {
+  const loaded = await Promise.allSettled(SPLIT_SPRITE_URLS.map((url) => loadImage(url)));
+  if (loaded.some((item) => item.status !== 'fulfilled')) return null;
+  return loaded.map((item) => {
+    const img = item.status === 'fulfilled' ? item.value : null;
+    if (!img) throw new Error('unreachable split sprite state');
+    return Texture.from(img);
   });
 }
 
