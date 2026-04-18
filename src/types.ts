@@ -129,6 +129,9 @@ export interface PlacedBuilding {
 }
 
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
+// 1日の位相。time-of-day で挙動・見た目を変える。
+// morning(0-25%) / noon(25-55%) / evening(55-80%) / night(80-100%)
+export type DayPhase = 'morning' | 'noon' | 'evening' | 'night';
 
 // =========================================================================
 // 村ランク。累計進行で 4 段階を上がる。建物Lv上限とフレーバーに影響する。

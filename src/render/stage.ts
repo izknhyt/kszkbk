@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Sprite, Text, TextStyle } from 'pixi.js';
 import type { WorldState } from '../sim/world';
-import type { Chibiwafu, Season } from '../types';
+import type { Chibiwafu, DayPhase, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
 import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
 import type { Bubble } from '../sim/bubbles';
@@ -14,6 +14,15 @@ const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number
   summer: { grass: 0xb2c66f, dirt: 0xd3c37c, river: 0x6a5028, accents: 0xffd35a },
   autumn: { grass: 0xc18a4d, dirt: 0xb77338, river: 0x7a5222, accents: 0xd8572a },
   winter: { grass: 0xd8d8de, dirt: 0xc2c0c6, river: 0x556680, accents: 0xffffff },
+};
+
+// 位相ティント：画面全体に薄い色を被せて時刻感を出す。
+// 昼は tint しない。朝=桃 / 夕=橙 / 夜=紺 を alpha 低めで重ねる。
+const DAY_PHASE_TINT: Record<DayPhase, { color: number; alpha: number }> = {
+  morning: { color: 0xffc7b3, alpha: 0.12 },
+  noon:    { color: 0xffffff, alpha: 0.00 },
+  evening: { color: 0xff8b3d, alpha: 0.18 },
+  night:   { color: 0x1a2550, alpha: 0.34 },
 };
 
 export interface StageHandle {
@@ -79,6 +88,21 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   drawBackground(bgLayer, CONFIG.WORLD_W, CONFIG.WORLD_H, currentSeason);
   const furana = drawFurana();
   fxLayer.addChild(furana);
+
+  // 位相ティント：カメラ外に置き、画面全体を覆う固定オーバーレイ。
+  // app.stage 直下（cameraLayer の兄弟）にして zoom/pan の影響を受けないようにする。
+  const phaseTint = new Graphics();
+  app.stage.addChild(phaseTint);
+  let lastTintPhase: DayPhase | null = null;
+  function drawPhaseTint(phase: DayPhase) {
+    if (lastTintPhase === phase) return;
+    lastTintPhase = phase;
+    const t = DAY_PHASE_TINT[phase];
+    phaseTint.clear();
+    if (t.alpha > 0) {
+      phaseTint.rect(0, 0, app.renderer.width, app.renderer.height).fill({ color: t.color, alpha: t.alpha });
+    }
+  }
 
   // --- カメラ状態 ------------------------------------------------------------
   let cameraScale = 1;
@@ -245,6 +269,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     // ワールドサイズは固定。表示領域が変わったらカメラの可視範囲再計算のみ。
     clampCamera();
     applyCamera();
+    // 位相ティントはサイズが変わるとクリップするので次の draw() で再描画させる
+    lastTintPhase = null;
   }
 
   function setSeason(s: Season) {
@@ -256,6 +282,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   function draw(world: WorldState) {
     setSeason(world.season);
+    drawPhaseTint(world.dayPhase);
     furana.position.set(world.furanaPos.x, world.furanaPos.y);
 
     // landmarks (描き直しは季節が変わった時のみ。ここでは常時再描画して単純化)

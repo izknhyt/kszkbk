@@ -2,7 +2,7 @@ import { BUILDINGS } from '../city/buildings';
 import { DEATH_CAUSES } from '../sim/deaths';
 import type { WorldState } from '../sim/world';
 import { buildingCost, getUpgradeInfo, populationCap, totalDexCount, uniqueDexFound } from '../sim/world';
-import { SEASON_LABEL } from '../sim/events';
+import { DAY_PHASE_LABEL, SEASON_LABEL } from '../sim/events';
 import { RANK_DEFS, nextRank } from '../sim/rank';
 import type { DeathCauseId } from '../types';
 import { CONFIG, type TimeScale } from '../config';
@@ -69,7 +69,7 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   byId('stat-pop').textContent = String(w.chibis.length);
   byId('stat-cap').textContent = String(populationCap(w));
   byId('stat-deaths').textContent = String(w.totalDeaths);
-  byId('stat-season').textContent = SEASON_LABEL[w.season];
+  byId('stat-season').textContent = `${SEASON_LABEL[w.season]} ${w.dayCount}日目 ${DAY_PHASE_LABEL[w.dayPhase]}`;
   byId('stat-gen').textContent = String(w.totalBirths);
   byId('stat-stomp').textContent = String(w.stompCount);
   byId('stat-tick').textContent = String(w.tick);

@@ -1,4 +1,4 @@
-import type { Chibiwafu, DeathCauseId, DexEntry, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -11,7 +11,7 @@ import {
   wanderStep,
 } from './chibiwafu';
 import { generateName } from './naming';
-import { SEASONS, seasonFromTime, intensityAt, type GlobalEvent } from './events';
+import { SEASONS, dayProgress, intensityAt, phaseFromProgress, seasonFromTime, type GlobalEvent } from './events';
 import { HAZARDS, hazardActiveInSeason, pointInZone, type HazardZone } from './hazards';
 import { CONFIG } from '../config';
 import {
@@ -71,6 +71,14 @@ export interface WorldState {
   timeSec: number;
   secondsPerSeason: number;
   season: Season;
+  // 1日の位相（朝/昼/夕/夜）。tick で計算。
+  dayPhase: DayPhase;
+  // 0-1 の進行度（見た目補間用、位相ティングで使う）。
+  dayProgress: number;
+  // 経過日数（整数）。UI表示・lv成長要因に使う。
+  dayCount: number;
+  // 前 tick の dayPhase（日付変わり／位相境界の検出用）。
+  lastDayPhase: DayPhase;
   furanaPos: Vec2;
   chibis: Chibiwafu[];
   corpses: Chibiwafu[];
@@ -122,6 +130,10 @@ export function createWorld(): WorldState {
     timeSec: 0,
     secondsPerSeason: CONFIG.SECONDS_PER_SEASON,
     season: 'spring',
+    dayPhase: 'morning',
+    dayProgress: 0,
+    dayCount: 1,
+    lastDayPhase: 'morning',
     furanaPos: { x: bounds.w / 2, y: 220 },
     chibis: [],
     corpses: [],
@@ -250,6 +262,10 @@ function maybeTriggerBokaigi(w: WorldState, dt: number) {
   if (w.bokaigiCooldown > 0) return;
   const alive = w.chibis.filter(isAlive);
   if (alive.length < CONFIG.BOKAIGI_CLUSTER_MIN) return;
+  // 棒会議は夜／夕で発動率↑。朝昼だと 30% に絞る（くそざこ村では夜間棒会議が本番）
+  if (w.dayPhase === 'morning' || w.dayPhase === 'noon') {
+    if (Math.random() > 0.3) { w.bokaigiCooldown = 6 + Math.random() * 6; return; }
+  }
   const suzu = w.npcs.find((n) => n.id === 'suzu');
   if (suzu) spawnBubble(w.bubbles, suzu.pos, '棒会議ひらくよ', 'speech', 2.2);
   w.bokaigiMarkerTimer = 2.5;
@@ -534,17 +550,21 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   c.stateTimer -= dt;
   if (c.stateTimer <= 0 && c.state !== 'dead') {
     const roll = Math.random();
-    if (roll < 0.05) {
+    // 夜は寝る確率が大きく上がる（夜= sleep ×4, 夕= ×1.5, 朝昼= ×1）
+    const sleepMul = w.dayPhase === 'night' ? 4 : w.dayPhase === 'evening' ? 1.5 : 1;
+    const sleepThreshold = 0.08 + 0.02 * sleepMul;    // night=0.16, evening=0.11, noon=0.10
+    const dazedThreshold = 0.08;                        // 変えない
+    const cryThreshold = 0.05;                          // 変えない
+    if (roll < cryThreshold) {
       setState(c, 'cry', 0.8);
-      // 泣く理由はほぼ必ず出す（"なんで泣いているかわからない"状態を避ける）
       if (Math.random() < 0.95) spawnBubble(w.bubbles, c.pos, pickReason(CRY_REASONS), 'speech', 1.4);
     }
-    else if (roll < 0.08) {
+    else if (roll < dazedThreshold) {
       setState(c, 'dazed', 0.6);
       if (Math.random() < 0.85) spawnBubble(w.bubbles, c.pos, pickReason(DAZED_REASONS), 'speech', 1.2);
     }
-    else if (roll < 0.10) {
-      setState(c, 'sleep', 1.5);
+    else if (roll < sleepThreshold) {
+      setState(c, 'sleep', w.dayPhase === 'night' ? 3 : 1.5);
       if (Math.random() < 0.9) spawnBubble(w.bubbles, c.pos, pickReason(SLEEP_REASONS), 'speech', 1.3);
     }
     // 哲学石に着いたら空を見る（philo パラメータで確率決定）
@@ -926,7 +946,13 @@ export function tickWorld(w: WorldState, dt: number) {
   w.tick += 1;
   w.timeSec += dt;
   const prevSeason = w.season;
+  const prevPhase = w.dayPhase;
   w.season = seasonFromTime(w.timeSec, w.secondsPerSeason);
+  w.dayProgress = dayProgress(w.timeSec, CONFIG.SECONDS_PER_DAY);
+  w.dayPhase = phaseFromProgress(w.dayProgress);
+  w.dayCount = 1 + Math.floor(w.timeSec / CONFIG.SECONDS_PER_DAY);
+  // 位相境界で NPC リアクション（朝礼／夜の静まり）
+  if (w.dayPhase !== prevPhase) onPhaseChange(w, prevPhase, w.dayPhase);
   w.villageRank = computeRank(rankContext(w));
   applyBuildingMods(w);
   spawnIfRoom(w);
@@ -943,6 +969,36 @@ export function tickWorld(w: WorldState, dt: number) {
   updateBubbles(w.bubbles, dt);
   if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);
   w.lastSeason = prevSeason;
+  w.lastDayPhase = prevPhase;
+}
+
+// 位相境界で発火する小イベント（朝礼・夜の寝静まり・夕の呼び戻し）
+function onPhaseChange(w: WorldState, prev: DayPhase, next: DayPhase) {
+  const suzu = w.npcs.find((n) => n.id === 'suzu');
+  if (next === 'morning') {
+    // 朝礼：スズが全員を起こす
+    if (suzu && !suzu.dead) {
+      spawnBubble(w.bubbles, suzu.pos, 'あさだよ〜！', 'speech', 2.6);
+    }
+    // 寝ているちびわふを idle に戻す（目覚めバブル）
+    for (const c of w.chibis) {
+      if (c.state === 'sleep' && isAlive(c)) {
+        setState(c, 'idle', 0.5);
+        if (Math.random() < 0.3) spawnBubble(w.bubbles, c.pos, 'おはようわふ', 'speech', 1.2);
+      }
+    }
+  } else if (next === 'evening') {
+    // 夕暮れ：お腹が空いた雰囲気
+    if (suzu && !suzu.dead && Math.random() < 0.6) {
+      spawnBubble(w.bubbles, suzu.pos, 'ゆうはんのじかんだよ〜', 'speech', 2.4);
+    }
+  } else if (next === 'night') {
+    // 夜の挨拶：ランダムで寝入る子を出す
+    if (suzu && !suzu.dead && Math.random() < 0.6) {
+      spawnBubble(w.bubbles, suzu.pos, 'よるだよ、ねんねしよ', 'speech', 2.4);
+    }
+  }
+  void prev;
 }
 
 export function buildingCost(w: WorldState, defId: string): number {
