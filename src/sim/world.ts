@@ -17,6 +17,7 @@ import { CONFIG } from '../config';
 import {
   CHIBI_TO_COCOON_LINES,
   CHIBI_TO_FURANA_LINES,
+  CHIBI_TO_FURANA_SCARED_LINES,
   CHIBI_TO_SUZU_LINES,
   COCOON_DEATH_LINES,
   COCOON_LINES_ABUSE,
@@ -24,6 +25,7 @@ import {
   COCOON_LINES_DEATH,
   FURANA_LINES_ANGRY,
   FURANA_LINES_CHAT,
+  FURANA_LINES_CHAT_ANGRY,
   FURANA_LINES_DEATH,
   FURANA_LINES_DEATH_REACTION,
   FURANA_LINES_HAPPY,
@@ -1155,10 +1157,14 @@ function processChats(w: WorldState, dt: number) {
       (c) => isAlive(c) && c.state === 'idle' && c.chatCooldown <= 0 && distance(c.pos, n.pos) < 50,
     );
     if (!partner) continue;
-    const npcPool = n.id === 'furana' ? FURANA_LINES_CHAT
+    // フラナは機嫌で話しかけ内容が変わる
+    const furanaAngry = n.id === 'furana' && n.mood < 45;
+    const npcPool = n.id === 'furana'
+        ? (furanaAngry ? FURANA_LINES_CHAT_ANGRY : FURANA_LINES_CHAT)
       : n.id === 'suzu' ? SUZU_LINES_CHAT
       : COCOON_LINES_CHAT;
-    const chibiPool = n.id === 'furana' ? CHIBI_TO_FURANA_LINES
+    const chibiPool = n.id === 'furana'
+        ? (furanaAngry ? CHIBI_TO_FURANA_SCARED_LINES : CHIBI_TO_FURANA_LINES)
       : n.id === 'suzu' ? CHIBI_TO_SUZU_LINES
       : CHIBI_TO_COCOON_LINES;
     const duration = 2.2 + Math.random() * 1.2;
@@ -1635,13 +1641,14 @@ function reactNpcsToBirth(w: WorldState) {
   }
 }
 
-// 変な死に方と判定する死因（rare 指定 or 浮世離れ/哲学系など意外な死）。
+// 変な死に方と判定する死因（哲学・境界消失・奇妙な事故）。
 // フラナがびっくり反応（state='surprised'）を出す対象。
+// 神様 (プレイヤー) 系とフラナ自身の暴行 (cocoon_abuse) は "よく起きる暴力" 扱いで除外、
+// フラナが自分の行動に対して驚かないようにする。
 const WEIRD_DEATH_CAUSES = new Set<DeathCauseId>([
   'philosophy', 'tetsugakusha_shoushitsu', 'ukiyo_shoushitsu',
   'bouken_cliff', 'tabikko_boundary', 'bo_meijin_tenka',
-  'mama_lost', 'taiko_tobikomi', 'kamisama_punch', 'kamisama_drown',
-  'kamisama_shake', 'kamisama_throw',
+  'taiko_tobikomi',
 ]);
 
 function reactNpcsToDeath(w: WorldState, c: Chibiwafu) {
