@@ -567,10 +567,12 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   runHazards(w, c, dt, hazards);
 }
 
-// 生意気セリフを吐いたちびわふへのお仕置き。
-// 近くにいる他のちびわふが「棒でボコボコにする」＝ 40% で hurt 状態 + 吹き出し、
-// さらに 35% で死亡（namaiki_boko）。近くに誰もいなければ黙認される。
+// 生意気セリフが出ると"たまに"ボコられる。毎回ではない。
+// PUNISH_CHANCE: 近くに誰かいても無視される確率が大半。
+// ボコ確定した時は 35% で死亡（namaiki_boko）。
+const PUNISH_CHANCE = 0.25;
 function maybePunishCheeky(w: WorldState, victim: Chibiwafu) {
+  if (Math.random() > PUNISH_CHANCE) return;
   const nearby = w.chibis.filter((o) => o !== victim && isAlive(o) && distance(o.pos, victim.pos) < 60);
   if (nearby.length === 0) return;
   const striker = nearby[Math.floor(Math.random() * nearby.length)]!;
