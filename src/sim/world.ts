@@ -26,7 +26,6 @@ import {
   FURANA_LINES_CHAT,
   FURANA_LINES_DEATH,
   FURANA_LINES_DEATH_REACTION,
-  FURANA_LINES_HURT,
   FURANA_LINES_IDLE,
   FURANA_LINES_PAT,
   FURANA_LINES_WEIRD_DEATH,
@@ -39,6 +38,7 @@ import {
   SUZU_LINES_MAMA_HURT,
   SUZU_LINES_ONDO,
   createNpcs,
+  hurtLinesFor,
   pickLine,
   reviveLinesFor,
   wanderNpc,
@@ -443,12 +443,23 @@ export function damageNpc(w: WorldState, n: NpcState, amount: number): boolean {
   // HP 残ってるときの "いた！" 反応
   n.state = 'hurt';
   n.stateTimer = 1.2;
+  // どのNPCでも専用の hurt 台詞を吐く
+  spawnBubble(w.bubbles, n.pos, pickLine(hurtLinesFor(n.id)), 'npc-speech', 1.6);
   if (n.id === 'furana') {
-    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_HURT), 'npc-speech', 1.6);
-    // スズが近くにいたらママ心配で反応（30%）
+    // スズが近くにいたらママ心配で反応（35%）
     const suzu = w.npcs.find((x) => x.id === 'suzu');
-    if (suzu && !suzu.dead && Math.random() < 0.3) {
+    if (suzu && !suzu.dead && Math.random() < 0.35) {
       spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_MAMA_HURT), 'npc-speech', 2);
+    }
+    // 近くのちびわふも反応：40px 以内の mama 40 超え の子が "ママー！" 30%
+    for (const c of w.chibis) {
+      if (!isAlive(c)) continue;
+      if (distance(c.pos, n.pos) > 50) continue;
+      if (c.params.mama < 40) continue;
+      if (Math.random() < 0.3) {
+        setState(c, 'cry', 1.2);
+        spawnBubble(w.bubbles, c.pos, 'ママー！', 'speech', 1.4);
+      }
     }
   }
   return false;
@@ -1197,8 +1208,10 @@ export function isFuranaAlive(w: WorldState): boolean {
 
 // パニック：フラナが死んで以降、ちびわふは徐々に心が折れる。
 // 毎 tick 小確率で cry 状態、低確率で mama_lost 死亡。
+// mama 高い子は死体に寄り添いに行く。
 function applyFuranaLossPanic(w: WorldState, dt: number) {
   if (isFuranaAlive(w)) return;
+  const furanaCorpse = w.npcs.find((x) => x.id === 'furana');
   for (const c of w.chibis) {
     if (!isAlive(c)) continue;
     // 50秒に 1度くらい cry 誘発、長引く
@@ -1207,6 +1220,23 @@ function applyFuranaLossPanic(w: WorldState, dt: number) {
       if (Math.random() < 0.5) {
         const line = Math.random() < 0.5 ? 'ママいないわふ…' : 'ママどこわふ！？';
         spawnBubble(w.bubbles, c.pos, line, 'speech', 1.8);
+      }
+    }
+    // ママ寄り添い：mama > 55 の子はフラナ死体に歩み寄る
+    if (furanaCorpse && c.state === 'idle' && c.params.mama > 55) {
+      const d = distance(c.pos, furanaCorpse.pos);
+      if (d > 24 && Math.random() < 0.012) {
+        // ママの側へ歩き出す（wanderStep が次の tick で走る）
+        c.target = {
+          x: furanaCorpse.pos.x + (Math.random() - 0.5) * 40,
+          y: furanaCorpse.pos.y + (Math.random() - 0.5) * 24,
+        };
+      } else if (d <= 24 && Math.random() < 0.006) {
+        // 近くに来てる：寄り添って泣く
+        setState(c, 'cry', 3);
+        const line = pickLine(['ママ…', 'おきてよママ…', 'ままぁ…わふ', 'どうしてわふ…', 'さみしいわふ…']);
+        spawnBubble(w.bubbles, c.pos, line, 'speech', 2);
+        pushLife(c, Math.floor(c.ageSec), 'ママの死体に寄り添った');
       }
     }
     // 低確率で心折れ死（大体 60-120 秒に 1体くらい、全体）

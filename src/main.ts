@@ -228,9 +228,9 @@ async function start() {
     dragSession.lastX = wx; dragSession.lastY = wy;
     dragSession.bubbleCooldown -= segment;
     n.pos.x = wx; n.pos.y = wy;
-    // NPC はちびわふより頑丈：振り回しダメージを半分に
-    while (dragSession.swingDistAccum >= 60) {
-      dragSession.swingDistAccum -= 60;
+    // NPC はちびわふより頑丈：振り回しダメージをさらに半分（120px 毎 1-2 HP）
+    while (dragSession.swingDistAccum >= 120) {
+      dragSession.swingDistAccum -= 120;
       const dmg = 1 + Math.floor(Math.random() * 2);
       const died = damageNpc(world, n, dmg);
       if (died) { dragSession = null; return; }
@@ -412,13 +412,14 @@ function dropNpc(world: WorldState, id: NpcId, wx: number, wy: number, throwDist
   n.pos.x = wx;
   n.pos.y = wy;
   if (wy > 414) {
-    // 水に投げ込まれた NPC は HP 関係なく即死（神話的）
+    // 水中に投げ込まれた NPC：ちびわふと違って即死させず、固定 40 HP のダメージに留める
+    // （神話的に泳げる扱い。繰り返し投げればいずれ死ぬ）
     spawnBubble(world.bubbles, n.pos, 'わぷっ…', 'npc-speech', 1.2);
-    damageNpc(world, n, n.hp);
+    damageNpc(world, n, 40);
     return;
   }
-  // 着地：距離に応じて NPC へのダメージ。ちびわふより倍率低め。
-  const dmg = Math.round(3 + Math.min(20, throwDist * 0.06));
+  // 着地：距離に応じて NPC へのダメージ。ちびわふ (0.10) より低く 0.04 倍。
+  const dmg = Math.round(2 + Math.min(14, throwDist * 0.04));
   if (throwDist > 80) {
     spawnBubble(world.bubbles, n.pos, pickNpcThrowLine(id), 'npc-speech', 0.9);
   }

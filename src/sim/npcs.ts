@@ -64,9 +64,9 @@ export const NPC_DEFS: Record<NpcId, NpcDef> = {
     reactOnDeath: false,
     reactOnBirth: true,
     reactOnOndo: false,
-    // 村の要。高耐久。死ぬと村はパニック＋出産停止になるが、120秒で戻ってくる。
+    // 村の要。高耐久。死ぬと村はパニック＋出産停止になるが、75秒で戻ってくる。
     maxHp: 220,
-    respawnSec: 120,
+    respawnSec: 75,
   },
 };
 
@@ -303,6 +303,22 @@ export const FURANA_LINES_HURT = [
   'きゃっわふ！？', 'いたっわふ！', 'なにするわふ…', 'やめるわふ！',
   'うそわふ…', 'あなたなにものわふ', 'ひどいわふ',
 ];
+// 他NPCの殴られたリアクション
+export const SUZU_LINES_HURT = [
+  'いたい！', 'やめて！', 'てちょうが！', '数えてたのに！',
+  'なにすんの！？', 'ひぃ！', 'ばか！',
+];
+export const COCOON_LINES_HURT = [
+  'ぐぉ…！', 'ぶっ殺すぞ！', 'てめぇ！', 'ママー！',
+  'しぬ…', 'くそっ！', 'うるせえ！',
+];
+export const LOU_LINES_HURT = ['……！', '…ぐぅ', '……ぇ', '…いた'];
+export function hurtLinesFor(id: NpcId): string[] {
+  if (id === 'furana') return FURANA_LINES_HURT;
+  if (id === 'suzu') return SUZU_LINES_HURT;
+  if (id === 'cocoon') return COCOON_LINES_HURT;
+  return LOU_LINES_HURT;
+}
 
 // フラナがイライラしてちびわふを本気で殴る時
 export const FURANA_LINES_ANGRY = [
