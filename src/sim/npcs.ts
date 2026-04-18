@@ -1,4 +1,4 @@
-import type { ChibiState, LifeEvent, Vec2 } from '../types';
+import type { ChibiState, FlightState, LifeEvent, Vec2 } from '../types';
 
 export type NpcId = 'suzu' | 'lou' | 'cocoon' | 'furana';
 
@@ -97,6 +97,8 @@ export interface NpcState {
   mood: number;
   // 最近の出来事（右クリックモーダル用、最大 20 件）
   lifeLog: LifeEvent[];
+  // 投げられて飛行中（null = 地上）
+  flight: FlightState | null;
 }
 
 export const SUZU_LINES_DEATH = [
@@ -160,6 +162,7 @@ function mkNpc(id: NpcId, home: Vec2, abuseCooldown = 0): NpcState {
     faceLeft: false,
     mood: 70,
     lifeLog: [],
+    flight: null,
   };
 }
 

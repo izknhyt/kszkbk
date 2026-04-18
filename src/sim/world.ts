@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, FlightState, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -456,48 +456,102 @@ export function damageChibi(w: WorldState, c: Chibiwafu, amount: number, causeId
   return false;
 }
 
-// 投げの軌道上にいるちびわふ／NPC を判定して巻き添えダメージを与える。
-// 直線 start→end から perpendicular 20px 以内に居る生存個体を hit として処理。
-export function sweepThrowCollisions(
-  w: WorldState,
-  start: Vec2,
-  end: Vec2,
-  exclude: Chibiwafu | NpcState | null,
+// ちびわふ／NPC を "空中に投げ飛ばす" 物理的な飛行を起動する。
+// 指定した速度で飛び、毎 tick 当たり判定を行い、landTime 経過で着地処理。
+export function launchFlight(
+  entity: Chibiwafu | NpcState,
+  vx: number,
+  vy: number,
+  flightSec: number,
+  landingDamage: number,
+  landCauseId: DeathCauseId,
 ): void {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const length = Math.hypot(dx, dy);
-  if (length < 16) return;  // 近距離はスイープ意味なし
-  const nx = dx / length;
-  const ny = dy / length;
-  const BAND = 20;
-
-  const hitLine = (px: number, py: number): boolean => {
-    const relX = px - start.x;
-    const relY = py - start.y;
-    const t = relX * nx + relY * ny;
-    if (t < 0 || t > length) return false;
-    const perp = Math.abs(relX * (-ny) + relY * nx);
-    return perp < BAND;
+  const flight: FlightState = {
+    vx,
+    vy,
+    leftSec: flightSec,
+    totalSec: flightSec,
+    hitKeys: [],
+    landingDamage,
+    landCauseId,
   };
+  entity.flight = flight;
+}
 
-  // ちびわふへの巻き添え
+// 毎 tick の飛行処理。isChibi=true でちびわふ、false で NPC。
+function flightStep(
+  w: WorldState,
+  entity: Chibiwafu | NpcState,
+  isChibi: boolean,
+  dt: number,
+): void {
+  const f = entity.flight;
+  if (!f) return;
+  // 移動 + 重力ちょい弱
+  entity.pos.x += f.vx * dt;
+  entity.pos.y += f.vy * dt;
+  f.vy += 180 * dt;
+  f.leftSec -= dt;
+  // 横方向は画面内にクランプ（反射はしない、端で止まる）
+  if (entity.pos.x < 16) { entity.pos.x = 16; f.vx = Math.abs(f.vx) * 0.5; }
+  if (entity.pos.x > w.bounds.w - 16) { entity.pos.x = w.bounds.w - 16; f.vx = -Math.abs(f.vx) * 0.5; }
+
+  // 衝突判定：半径 22px、同一個体は hitKeys で一度だけ
+  const hitRadius = 22;
   for (const c of w.chibis) {
-    if (!isAlive(c)) continue;
-    if (c === exclude) continue;
-    if (!hitLine(c.pos.x, c.pos.y)) continue;
+    if (!isAlive(c) || c === entity) continue;
+    const key = `c:${c.id}`;
+    if (f.hitKeys.includes(key)) continue;
+    const d = Math.hypot(c.pos.x - entity.pos.x, c.pos.y - entity.pos.y);
+    if (d >= hitRadius) continue;
+    f.hitKeys.push(key);
     setState(c, 'hurt', 1);
     spawnBubble(w.bubbles, c.pos, pickCollisionVictimLine(), 'speech', 1.3);
-    pushLife(c, Math.floor(c.ageSec), '投げられた誰かに巻き込まれた');
-    damageChibi(w, c, 5 + Math.floor(Math.random() * 6), 'cocoon_abuse');
+    pushLife(c, Math.floor(c.ageSec), '飛んできた誰かに激突された');
+    damageChibi(w, c, 4 + Math.floor(Math.random() * 5), 'cocoon_abuse');
   }
-  // NPC への巻き添え（死体・フラナは除外。ルーは寝てても hit する）
   for (const n of w.npcs) {
-    if (n.dead) continue;
-    if (n === exclude) continue;
-    if (!hitLine(n.pos.x, n.pos.y)) continue;
+    if (n.dead || n === entity) continue;
+    const key = `n:${n.id}`;
+    if (f.hitKeys.includes(key)) continue;
+    const d = Math.hypot(n.pos.x - entity.pos.x, n.pos.y - entity.pos.y);
+    if (d >= hitRadius) continue;
+    f.hitKeys.push(key);
     spawnBubble(w.bubbles, n.pos, pickLine(hurtLinesFor(n.id)), 'npc-speech', 1.3);
     damageNpc(w, n, 3 + Math.floor(Math.random() * 4));
+  }
+
+  // 着地：leftSec 切れ or 画面下端へ接触
+  if (f.leftSec <= 0 || entity.pos.y >= w.bounds.h - 10) {
+    // 位置クランプ（水＝泥川ゾーンはそのまま、陸は地面に）
+    entity.pos.y = Math.min(entity.pos.y, w.bounds.h - 16);
+    entity.flight = null;
+    // 着地処理：水中 (y>414) なら溺死（ちびわふ）or 水HP削り（NPC）
+    if (isChibi) {
+      const c = entity as Chibiwafu;
+      if (c.pos.y > 414) {
+        spawnBubble(w.bubbles, c.pos, 'わふぅ…', 'speech', 1.1);
+        pushLife(c, Math.floor(c.ageSec), '水に落ちて沈んだ');
+        damageChibi(w, c, c.hp, 'kamisama_drown');
+        return;
+      }
+      setState(c, 'hurt', 1.4);
+      spawnBubble(w.bubbles, c.pos, 'どさっわふ', 'speech', 1.2);
+      const died = damageChibi(w, c, f.landingDamage, f.landCauseId as DeathCauseId);
+      if (died) {
+        pushLife(c, Math.floor(c.ageSec), `投げられて地面に激突死（-${f.landingDamage}HP）`);
+      } else {
+        pushLife(c, Math.floor(c.ageSec), `投げられて地面に激突（-${f.landingDamage}HP）`);
+      }
+    } else {
+      const n = entity as NpcState;
+      if (n.pos.y > 414) {
+        spawnBubble(w.bubbles, n.pos, 'わぷっ…', 'npc-speech', 1.2);
+        damageNpc(w, n, 10);
+        return;
+      }
+      damageNpc(w, n, f.landingDamage);
+    }
   }
 }
 
@@ -743,6 +797,11 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   c.chatCooldown -= dt;
   if (c.ageSec >= c.maxAgeSec) {
     kill(w, c, 'roushuai');
+    return;
+  }
+  // 飛行中は wander/state transition を止めて物理だけ動かす
+  if (c.flight) {
+    flightStep(w, c, true, dt);
     return;
   }
   c.stateTimer -= dt;
@@ -1133,6 +1192,11 @@ function compactCorpses(w: WorldState) {
 
 function updateNpcs(w: WorldState, dt: number) {
   for (const n of w.npcs) {
+    // 飛行中は物理だけ動かして normal updates はスキップ
+    if (n.flight) {
+      flightStep(w, n, false, dt);
+      continue;
+    }
     if (n.dead) {
       n.state = 'dead';
       // respawnSec が Infinity のNPC（フラナ）は復活しない
@@ -1359,30 +1423,32 @@ function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punc
     pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をぶん投げた（機嫌${Math.round(n.mood)}）`);
 
     const startPos = { x: target.pos.x, y: target.pos.y };
-    const toRiver = Math.random() < 0.5;
-    if (toRiver) {
-      // 川方向へ 250-400px 横飛ばし、y は川エリア
+    // 目的地：50% 川 / 50% ランダム遠投
+    let landX: number, landY: number;
+    if (Math.random() < 0.5) {
       const dir = target.pos.x < w.bounds.w / 2 ? 1 : -1;
-      target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + dir * (250 + Math.random() * 150)));
-      target.pos.y = 430 + Math.random() * 40;
+      landX = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + dir * (250 + Math.random() * 150)));
+      landY = 430 + Math.random() * 40;
       pushLife(target, Math.floor(target.ageSec), 'フラナに川へぶん投げられた');
     } else {
-      // 遠くに遠投：方向ランダム、距離 280-450px
       const ang = Math.random() * Math.PI * 2;
       const dist = 280 + Math.random() * 170;
-      target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + Math.cos(ang) * dist));
-      target.pos.y = Math.max(40, Math.min(400, target.pos.y + Math.sin(ang) * dist));
+      landX = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + Math.cos(ang) * dist));
+      landY = Math.max(40, Math.min(400, target.pos.y + Math.sin(ang) * dist));
       pushLife(target, Math.floor(target.ageSec), 'フラナにぶん投げられた');
     }
     target.target = null;
-    setState(target, 'surprised', 1.3);
-    // 発射点と着地点の両方でバブル、軌道上の巻き添えも検出
+    // 発射点のエフェクト
     spawnBubble(w.bubbles, startPos, '💫', 'stomp', 0.6);
-    sweepThrowCollisions(w, startPos, target.pos, target);
-    spawnBubble(w.bubbles, target.pos, 'とんでるわふ〜！', 'speech', 1.4);
-    // 投げダメージ（着地痛い）。低い機嫌ほど痛い
+    spawnBubble(w.bubbles, target.pos, 'とんでるわふ〜！', 'speech', 1);
+    // 飛行起動：速度 / 時間を距離から計算
+    const flightDist = Math.hypot(landX - startPos.x, landY - startPos.y);
+    const flightSec = Math.min(1.2, Math.max(0.4, flightDist / 400));
+    const vx = (landX - startPos.x) / flightSec;
+    const vy = (landY - startPos.y) / flightSec - 90 * flightSec;
     const throwDmg = n.mood < 25 ? 10 + Math.floor(Math.random() * 10) : 4 + Math.floor(Math.random() * 6);
-    damageChibi(w, target, throwDmg, 'cocoon_abuse');
+    setState(target, 'surprised', flightSec + 0.3);
+    launchFlight(target, vx, vy, flightSec, throwDmg, 'cocoon_abuse');
     return;
   }
 

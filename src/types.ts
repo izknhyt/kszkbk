@@ -49,11 +49,25 @@ export interface Chibiwafu {
   // 通常の事故死（ハザード・音頭・棒会議など）は HP を経由しない即死。
   hp: number;
   maxHp: number;
+  // 投げられて飛行中（null = 地上）
+  flight: FlightState | null;
 }
 
 export interface LifeEvent {
   sec: number;
   text: string;
+}
+
+// 投げられて空中を飛んでいる状態（ちびわふ・NPC 共用）。
+// flightStep が毎 tick 座標を更新し、終わったら着地ダメージを入れて null に戻す。
+export interface FlightState {
+  vx: number;  // px/sec
+  vy: number;
+  leftSec: number;
+  totalSec: number;
+  hitKeys: string[];  // 同一個体を重ねて巻き添えしない
+  landingDamage: number;
+  landCauseId: string;  // HP 0 になった時の死因
 }
 
 export type DeathCauseId =

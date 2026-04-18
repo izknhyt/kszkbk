@@ -48,6 +48,7 @@ export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
     targetLandmarkId: null,
     hp: maxHp,
     maxHp,
+    flight: null,
   };
 }
 

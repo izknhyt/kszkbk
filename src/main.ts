@@ -6,7 +6,7 @@ import {
   damageChibi,
   damageNpc,
   forceSpawn,
-  sweepThrowCollisions,
+  launchFlight,
   tickWorld,
   triggerBokaigi,
   triggerFire,
@@ -18,7 +18,6 @@ import { isAlive as isChibiAlive, setState } from './sim/chibiwafu';
 import { spawnBubble } from './sim/bubbles';
 import {
   pickGodDefianceLine,
-  pickGodLandedLine,
   pickGodPunchLine,
   pickGodShakeLine,
   pickGodThrowLine,
@@ -34,7 +33,6 @@ import { DEATH_CAUSES as DEATHS } from './sim/deaths';
 import { PARAM_COLOR, PARAM_KEYS, PARAM_LABEL } from './sim/personality';
 import {
   NPC_DEFS,
-  pickNpcLandedLine,
   pickNpcShakeLine,
   pickNpcThrowLine,
   type NpcId,
@@ -474,32 +472,20 @@ function punchNpc(world: WorldState, id: NpcId) {
 function dropNpc(world: WorldState, id: NpcId, releasedX: number, releasedY: number, landX: number, landY: number) {
   const n = world.npcs.find((x) => x.id === id);
   if (!n || n.dead) return;
-  const startPos = { x: releasedX, y: releasedY };
   landX = Math.max(20, Math.min(world.bounds.w - 20, landX));
   landY = Math.max(20, Math.min(world.bounds.h - 20, landY));
+  n.pos.x = releasedX;
+  n.pos.y = releasedY;
   const flightDist = Math.hypot(landX - releasedX, landY - releasedY);
-
-  // 投げの軌道上の誰かを巻き込む
-  sweepThrowCollisions(world, startPos, { x: landX, y: landY }, n);
-
-  n.pos.x = landX;
-  n.pos.y = landY;
-  if (landY > 414) {
-    // 水中は NPC も即死せず 10 HP に抑える
-    spawnBubble(world.bubbles, n.pos, 'わぷっ…', 'npc-speech', 1.2);
-    damageNpc(world, n, 10);
-    return;
-  }
-  // 陸地：飛距離に応じて NPC ダメージ（ちびわふより低め）
+  const flightSec = Math.min(1.0, Math.max(0.25, flightDist / 400));
+  const vx = (landX - releasedX) / flightSec;
+  const vy = (landY - releasedY) / flightSec - 90 * flightSec;
   const dmg = Math.round(2 + Math.min(18, flightDist * 0.05));
-  if (flightDist > 80) {
+  if (flightDist > 60) {
     spawnBubble(world.bubbles, n.pos, pickNpcThrowLine(id), 'npc-speech', 0.9);
   }
-  const died = damageNpc(world, n, dmg);
-  if (!died) {
-    spawnBubble(world.bubbles, n.pos, pickNpcLandedLine(id), 'npc-speech', 1.2);
-  }
-  spawnWitnessReactions(world, n.pos);
+  launchFlight(n, vx, vy, flightSec, dmg, 'kamisama_throw');
+  spawnWitnessReactions(world, { x: releasedX, y: releasedY });
 }
 
 // NPC を掴んだ時の性格別リアクション（短く）
@@ -558,44 +544,28 @@ function showNpcModal(n: NpcState) {
   }
 }
 
-// releasedX/Y: プレイヤーが指を離した位置。ここから速度に応じて landX/Y まで飛ぶ。
+// releasedX/Y: プレイヤーが指を離した位置。ここから速度に応じて landX/Y まで "飛んで行く"。
 function dropChibi(world: WorldState, chibiId: number, releasedX: number, releasedY: number, landX: number, landY: number) {
   const c = world.chibis.find((x) => x.id === chibiId);
   if (!c || !isChibiAlive(c)) return;
-  const startPos = { x: releasedX, y: releasedY };
   // 画面外に飛ばないようクランプ
   landX = Math.max(20, Math.min(world.bounds.w - 20, landX));
   landY = Math.max(20, Math.min(world.bounds.h - 20, landY));
-  const flightDist = Math.hypot(landX - releasedX, landY - releasedY);
-
-  // 投げの軌道上にいる誰かを巻き込む（スイープ）
-  sweepThrowCollisions(world, startPos, { x: landX, y: landY }, c);
-
-  c.pos.x = landX;
-  c.pos.y = landY;
+  c.pos.x = releasedX;
+  c.pos.y = releasedY;
   c.target = null;
-  // 水中に落ちたら HP 関係なく即溺死
-  if (landY > 414) {
-    spawnBubble(world.bubbles, c.pos, 'わふぅ…', 'speech', 1.1);
-    pushLife(c, Math.floor(c.ageSec), '神様に水へ投げ込まれた');
-    damageChibi(world, c, c.hp, 'kamisama_drown');
-    return;
-  }
-  // 陸地：飛距離に応じて着地ダメージ 3-45（速度が大きいほど痛い）
+  const flightDist = Math.hypot(landX - releasedX, landY - releasedY);
+  const flightSec = Math.min(1.0, Math.max(0.25, flightDist / 400));
+  const vx = (landX - releasedX) / flightSec;
+  const vy = (landY - releasedY) / flightSec - 90 * flightSec;  // 重力補正で弧を描く
   const dmg = Math.round(3 + Math.min(42, flightDist * 0.12));
-  if (flightDist > 80) {
+  setState(c, 'surprised', flightSec + 0.3);
+  if (flightDist > 60) {
     spawnBubble(world.bubbles, c.pos, pickGodThrowLine(), 'speech', 0.9);
   }
-  const died = damageChibi(world, c, dmg, 'kamisama_throw');
-  if (died) {
-    spawnBubble(world.bubbles, c.pos, pickGodLandedLine(), 'speech', 1.3);
-    pushLife(c, Math.floor(c.ageSec), `神様に${Math.round(flightDist)}px 投げ飛ばされ墜死`);
-  } else {
-    setState(c, 'hurt', 1.4);
-    spawnBubble(world.bubbles, c.pos, pickGodLandedLine(), 'speech', 1.2);
-    pushLife(c, Math.floor(c.ageSec), `神様に${Math.round(flightDist)}px 投げられ激突（-${dmg}HP）`);
-  }
-  spawnWitnessReactions(world, c.pos, c.id);
+  pushLife(c, Math.floor(c.ageSec), `神様に${Math.round(flightDist)}px 投げ飛ばされた`);
+  launchFlight(c, vx, vy, flightSec, dmg, 'kamisama_throw');
+  spawnWitnessReactions(world, { x: releasedX, y: releasedY }, c.id);
 }
 
 function showChibiModal(c: Chibiwafu, isEpitaph: boolean) {
