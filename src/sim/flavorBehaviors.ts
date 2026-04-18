@@ -119,6 +119,28 @@ export const FLAVOR_DURING: Record<string, FlavorDuringState> = {
   // いびき は world.ts 側で既に処理済み
 };
 
+// ambient で発火したら "くそざこ村の理不尽裁判" の対象になる粗相系フレーバー。
+// 屁・しゃっくり・よだれ・鼻血・泥舐め・手舐め・うんこ気にしなど、
+// 周囲がブチ切れても不思議じゃない（けど実際には理不尽）行動。
+export const EMBARRASSING_FLAVORS = new Set<string>([
+  '屁をこく',
+  'しゃっくりが止まらない',
+  'よだれを垂らす',
+  '鼻血出やすい',
+  '汗かき',
+  'くしゃみが大きい',
+  '泥をなめる',
+  '土を少しだけ食べる',
+  '手を舐める',
+  '鼻がたまに光る',
+  '大声で叫ぶ',
+  '指が変な角度に曲がる',
+  '同じ場所をぐるぐる回る',
+  '自分の尻尾を追う',
+  'ポケットに石を溜めてる',
+  'まもりんの裏に何か入れてる',
+]);
+
 // speed を変える flavor（spawn時適用）
 export const FLAVOR_SPEED_MOD: Record<string, number> = {
   '足が妙に遅い': 0.8,

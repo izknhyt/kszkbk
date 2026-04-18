@@ -231,6 +231,14 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 18,
     template: (n) => `${n}はくそざこの分際で生意気を言い、周りから棒でボコボコにされた。`,
   },
+  rifujin_boko: {
+    id: 'rifujin_boko',
+    title: '粗相で理不尽にボコられ死亡',
+    rare: false,
+    uncommon: true,
+    points: 20,
+    template: (n) => `${n}は屁やしゃっくりや涎など、何か些細な粗相をしただけでなぜか周りからボコボコにされて死んだ。`,
+  },
   kamisama_punch: {
     id: 'kamisama_punch',
     title: '神様の鉄槌',

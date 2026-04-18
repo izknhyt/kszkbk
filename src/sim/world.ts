@@ -41,10 +41,12 @@ import {
   pickActionAnnounce,
   pickOshaberiLine,
   pickReason,
+  pickRifujinStrikerLine,
+  pickRifujinVictimLine,
   pickStrikerLine,
   pickVictimHurtLine,
 } from './chats';
-import { FLAVOR_AMBIENT, FLAVOR_DURING, FLAVOR_SEASONAL, applyFlavorSpeedMod } from './flavorBehaviors';
+import { EMBARRASSING_FLAVORS, FLAVOR_AMBIENT, FLAVOR_DURING, FLAVOR_SEASONAL, applyFlavorSpeedMod } from './flavorBehaviors';
 import { TRAIT_DEFS } from './traits';
 import {
   applyTraitBias,
@@ -521,15 +523,16 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     const roll = Math.random();
     if (roll < 0.05) {
       setState(c, 'cry', 0.8);
-      if (Math.random() < 0.7) spawnBubble(w.bubbles, c.pos, pickReason(CRY_REASONS), 'speech', 1.4);
+      // 泣く理由はほぼ必ず出す（"なんで泣いているかわからない"状態を避ける）
+      if (Math.random() < 0.95) spawnBubble(w.bubbles, c.pos, pickReason(CRY_REASONS), 'speech', 1.4);
     }
     else if (roll < 0.08) {
       setState(c, 'dazed', 0.6);
-      if (Math.random() < 0.5) spawnBubble(w.bubbles, c.pos, pickReason(DAZED_REASONS), 'speech', 1.2);
+      if (Math.random() < 0.85) spawnBubble(w.bubbles, c.pos, pickReason(DAZED_REASONS), 'speech', 1.2);
     }
     else if (roll < 0.10) {
       setState(c, 'sleep', 1.5);
-      if (Math.random() < 0.6) spawnBubble(w.bubbles, c.pos, pickReason(SLEEP_REASONS), 'speech', 1.3);
+      if (Math.random() < 0.9) spawnBubble(w.bubbles, c.pos, pickReason(SLEEP_REASONS), 'speech', 1.3);
     }
     // 哲学石に着いたら空を見る（philo パラメータで確率決定）
     else if (
@@ -656,6 +659,8 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     if (amb && c.state === 'idle' && Math.random() < amb.chance) {
       if (amb.bubble) spawnBubble(w.bubbles, c.pos, amb.bubble, 'speech', 1.2);
       if (amb.state) setState(c, amb.state, amb.duration ?? 1);
+      // 粗相系フレーバー：周囲から理不尽にボコられる可能性
+      if (EMBARRASSING_FLAVORS.has(f)) maybePunishRifujin(w, c, f);
     }
     const seasonals = FLAVOR_SEASONAL[f];
     if (seasonals) {
@@ -689,6 +694,27 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     }
   }
   runHazards(w, c, dt, hazards);
+}
+
+// 屁・しゃっくり・よだれ等の粗相 → 理不尽ボコ。
+// 近くに誰かいると 35% で発動、そのうち 30% で死亡（rifujin_boko）。
+// "なぜか殴られた"が画面で読めるよう、両者に理由バブル + lifeLog を残す。
+const RIFUJIN_PUNISH_CHANCE = 0.35;
+const RIFUJIN_KILL_CHANCE = 0.30;
+function maybePunishRifujin(w: WorldState, victim: Chibiwafu, flavor: string) {
+  if (Math.random() > RIFUJIN_PUNISH_CHANCE) return;
+  const nearby = w.chibis.filter((o) => o !== victim && isAlive(o) && distance(o.pos, victim.pos) < 55);
+  if (nearby.length === 0) return;
+  const striker = nearby[Math.floor(Math.random() * nearby.length)]!;
+  spawnBubble(w.bubbles, striker.pos, pickRifujinStrikerLine(), 'speech', 1.5);
+  spawnBubble(w.bubbles, victim.pos, pickRifujinVictimLine(), 'speech', 1.3);
+  setState(victim, 'hurt', 1.2);
+  setState(striker, 'angry', 0.8);
+  pushLife(victim, Math.floor(victim.ageSec), `${flavor}で ${striker.name} に理不尽に殴られた`);
+  pushLife(striker, Math.floor(striker.ageSec), `${victim.name} が${flavor}をやっていたので殴った`);
+  if (Math.random() < RIFUJIN_KILL_CHANCE) {
+    kill(w, victim, 'rifujin_boko');
+  }
 }
 
 // 生意気セリフが出ると"たまに"ボコられる。毎回ではない。

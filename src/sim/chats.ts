@@ -377,6 +377,24 @@ export function pickVictimHurtLine(): string {
   return VICTIM_HURT_LINES[Math.floor(Math.random() * VICTIM_HURT_LINES.length)]!;
 }
 
+// 粗相（屁・しゃっくり・よだれ等）で理不尽に殴る側の吹き出し
+const RIFUJIN_STRIKER_LINES = [
+  'くさいわふ！', 'きたないわふ！', 'うるさいわふ！', 'はずかしいわふ！',
+  'みっともないわふ！', 'やめろわふ！', 'ゆるせないわふ！', 'ばっちいわふ！',
+];
+export function pickRifujinStrikerLine(): string {
+  return RIFUJIN_STRIKER_LINES[Math.floor(Math.random() * RIFUJIN_STRIKER_LINES.length)]!;
+}
+
+// 粗相でボコられる側（理由が理不尽なので困惑）
+const RIFUJIN_VICTIM_LINES = [
+  'なんでわふ！？', 'りふじんわふ…', 'ゆるしてわふ…', 'わるいことしたわふ？',
+  'ひどいわふ…', 'ごめんなさいわふ…', 'なにもしてないわふ…',
+];
+export function pickRifujinVictimLine(): string {
+  return RIFUJIN_VICTIM_LINES[Math.floor(Math.random() * RIFUJIN_VICTIM_LINES.length)]!;
+}
+
 export interface ChatAttempt {
   a: Chibiwafu;
   b: Chibiwafu;

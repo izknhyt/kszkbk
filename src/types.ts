@@ -84,6 +84,7 @@ export type DeathCauseId =
   | 'tetsugakusha_shoushitsu'// 哲学者が考えすぎて輪郭が消えた
   | 'bo_meijin_tenka'         // 棒名人が棒会議でみんなを転倒させる
   | 'namaiki_boko'            // 生意気な発言をしてボコボコに殴られる
+  | 'rifujin_boko'            // 屁・しゃっくり等の粗相で理不尽にボコボコにされる
   | 'kamisama_punch'          // プレイヤー（神様）の鉄槌で死亡
   | 'kamisama_drown';         // プレイヤーに水に投げ込まれて死亡
 
