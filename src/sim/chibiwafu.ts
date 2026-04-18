@@ -100,7 +100,8 @@ function pickLandmarkTarget(c: Chibiwafu, env: WanderEnv): Landmark | null {
   return null;
 }
 
-export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: number }, env?: WanderEnv) {
+export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: number }, env?: WanderEnv): string | null {
+  let announcementKey: string | null = null;
   if (!c.target || distance(c.pos, c.target) < 4) {
     const margin = 30;
     let newTarget: Vec2 | null = null;
@@ -114,10 +115,12 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         const ang = Math.random() * Math.PI * 2;
         const r = 20 + Math.random() * mamaRadius * 0.3;
         newTarget = { x: env.furana.x + Math.cos(ang) * r, y: env.furana.y + Math.sin(ang) * r };
+        announcementKey = 'mama';
       }
       // 戦闘狂：ココンに向かう 60%
       if (!newTarget && c.traits.includes('ikusa') && env.cocoonPos && Math.random() < 0.6) {
         newTarget = { x: env.cocoonPos.x + (Math.random() - 0.5) * 30, y: env.cocoonPos.y + (Math.random() - 0.5) * 30 };
+        announcementKey = 'cocoon_ikusa';
       }
       // 勇気：高いほど川/橋へ寄る
       if (!newTarget && Math.random() < (c.params.courage - 50) * 0.008) {
@@ -125,6 +128,7 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
           x: margin + Math.random() * (bounds.w - margin * 2),
           y: 380 + Math.random() * 60,
         };
+        announcementKey = 'river_bouken';
       }
       // 旅っ子：55% でワールドの左右端を目指す
       if (!newTarget && c.traits.includes('tabikko') && Math.random() < 0.55) {
@@ -133,17 +137,19 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
           x: goLeft ? margin + Math.random() * 80 : bounds.w - margin - Math.random() * 80,
           y: 100 + Math.random() * 250,
         };
+        announcementKey = 'edge_tabikko';
       }
-      // 太鼓っ子：60% で太鼓やぐらに寄る（taiko_kko は env.taikoPositions を使うのが本筋だが、
-      // とりあえず landmark 相当の別経路で処理せず、ここで buildings から拾う）
+      // 太鼓っ子：60% で太鼓やぐらに寄る
       if (!newTarget && c.traits.includes('taiko_kko') && env.taikoPositions.length > 0 && Math.random() < 0.6) {
         const tp = env.taikoPositions[Math.floor(Math.random() * env.taikoPositions.length)]!;
         newTarget = { x: tp.x + (Math.random() - 0.5) * 40, y: tp.y + (Math.random() - 0.5) * 20 };
+        announcementKey = 'taiko';
       }
       // 農民気質：農業区に 55%
       if (!newTarget && c.traits.includes('noumin') && env.noukouPositions.length > 0 && Math.random() < 0.55) {
         const np = env.noukouPositions[Math.floor(Math.random() * env.noukouPositions.length)]!;
         newTarget = { x: np.x + (Math.random() - 0.5) * 40, y: np.y + (Math.random() - 0.5) * 30 };
+        announcementKey = 'noukou';
       }
       // ランドマーク指向（パラメータ＋特性）
       if (!newTarget) {
@@ -151,6 +157,7 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         if (lm) {
           newTarget = { x: lm.pos.x + (Math.random() - 0.5) * 16, y: lm.pos.y + (Math.random() - 0.5) * 16 };
           newLandmarkId = lm.id;
+          announcementKey = `landmark_${lm.id}`;
         }
       }
     }
@@ -184,12 +191,15 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
     c.target = newTarget;
     c.targetLandmarkId = newLandmarkId;
     c.faceLeft = c.target.x < c.pos.x;
+  } else {
+    announcementKey = null; // target 継続中は announce しない
   }
   const dx = c.target.x - c.pos.x;
   const dy = c.target.y - c.pos.y;
   const d = Math.max(0.001, Math.hypot(dx, dy));
   c.pos.x += (dx / d) * c.speed * dt;
   c.pos.y += (dy / d) * c.speed * dt;
+  return announcementKey;
 }
 
 export { type WanderEnv, landmarkList };

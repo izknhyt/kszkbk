@@ -302,6 +302,39 @@ export function pickOshaberiLine(c?: Chibiwafu): SpokenLine {
   return { text: pickFromPool(GENERIC.normal), cheeky: false };
 }
 
+// =========================================================================
+// 行動予告セリフ（〜するわふ！系）
+//   「これから何するのか」を本人が短く宣言するプール。
+//   説明口調にならないよう短く、1〜2語＋わふ。
+//   各行動に 3〜5 パターン用意し、random で引く。
+// =========================================================================
+export const ACTION_ANNOUNCE: Record<string, string[]> = {
+  // 目的地別
+  landmark_stonebread : ['いしぱんわふ！', 'たべるわふ！', 'かじるわふ'],
+  landmark_philosophy : ['そらみるわふ', 'かんがえるわふ', 'ぼーっとするわふ'],
+  landmark_mudpool    : ['のむわふ', 'おみずわふ'],
+  landmark_beer       : ['いっぱいいくわふ！', 'のむぞわふ'],
+  landmark_flowers    : ['おはなわふ！', 'きれいなのわふ'],
+  landmark_totem      : ['ぼうのとこわふ', 'むらのちゅうしんわふ'],
+  river_bouken        : ['はしわたるわふ！', 'かわみるわふ', 'ぼうけんわふ！'],
+  cocoon_ikusa        : ['やっつけるわふ！', 'ぶつぞわふ', 'せんとうわふ！'],
+  mama                : ['ママのとこわふ', 'ママみるわふ', 'ママー！'],
+  noukou              : ['しごとするわふ', 'つちほりわふ', 'たねまくわふ'],
+  taiko               : ['たいこわふ！', 'ドンドンわふ', 'やぐらわふ！'],
+  edge_tabikko        : ['たびだつわふ！', 'むこうへわふ', 'いってくるわふ！'],
+  // 状態遷移別
+  state_eating        : ['もぐもぐわふ', 'いただきますわふ'],
+  state_staring       : ['…', 'なにかあるわふ…', 'そらわふ'],
+  state_sleep         : ['ねむいわふ…', 'おやすみわふ', 'ねるわふ'],
+  state_cry           : ['うぇんわふ', 'ないちゃうわふ', 'かなしいわふ…'],
+};
+
+export function pickActionAnnounce(key: string): string | null {
+  const pool = ACTION_ANNOUNCE[key];
+  if (!pool || pool.length === 0) return null;
+  return pool[Math.floor(Math.random() * pool.length)]!;
+}
+
 // 生意気な子が殴られる時、殴る側の吹き出し
 const STRIKER_LINES = [
   'じぶんでいうなわふ！', 'ずるいわふ！', 'おこったわふ！',

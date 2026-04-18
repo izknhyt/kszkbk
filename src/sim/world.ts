@@ -33,7 +33,7 @@ import { spawnBubble, updateBubbles, type Bubble } from './bubbles';
 import { rollTraits } from './traits';
 import { computeRank, maxBuildingLevel, upgradeCostFor, type RankContext } from './rank';
 import { landmarkList, type Landmark } from './landmarks';
-import { maybeStartChat, pickOshaberiLine, pickStrikerLine, pickVictimHurtLine } from './chats';
+import { maybeStartChat, pickActionAnnounce, pickOshaberiLine, pickStrikerLine, pickVictimHurtLine } from './chats';
 import { TRAIT_DEFS } from './traits';
 import {
   applyTraitBias,
@@ -518,6 +518,10 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     ) {
       setState(c, 'staring', 2.5);
       pushLife(c, Math.floor(c.ageSec), '哲学石で空を見た');
+      if (Math.random() < 0.6) {
+        const line = pickActionAnnounce('state_staring');
+        if (line) spawnBubble(w.bubbles, c.pos, line, 'speech', 1.4);
+      }
     }
     // 食事スポットに着いたら食事（appetite パラメータで確率決定）
     else if (
@@ -529,6 +533,10 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       setState(c, 'eating', 1.8);
       const where = c.targetLandmarkId === 'stonebread' ? '石パン岩' : c.targetLandmarkId === 'mudpool' ? '泥水池' : '泥水ビール樽';
       pushLife(c, Math.floor(c.ageSec), `${where}で食べた`);
+      if (Math.random() < 0.6) {
+        const line = pickActionAnnounce('state_eating');
+        if (line) spawnBubble(w.bubbles, c.pos, line, 'speech', 1.3);
+      }
     }
     else setState(c, 'idle', 0.4 + Math.random());
   }
@@ -566,7 +574,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   // 移動（止まってるステート中は動かない）
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
     const cocoon = w.npcs.find((n) => n.id === 'cocoon');
-    wanderStep(c, dt, w.bounds, {
+    const announcementKey = wanderStep(c, dt, w.bounds, {
       landmarks: w.landmarks,
       season: w.season,
       furana: w.furanaPos,
@@ -574,6 +582,11 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       noukouPositions: w.buildings.filter((b) => b.defId === 'noukou').map((b) => b.pos),
       taikoPositions: w.buildings.filter((b) => b.defId === 'taiko').map((b) => b.pos),
     });
+    // 40% で行動予告（毎回だと説明口調になるので抑制）
+    if (announcementKey && Math.random() < 0.4) {
+      const line = pickActionAnnounce(announcementKey);
+      if (line) spawnBubble(w.bubbles, c.pos, line, 'speech', 1.3);
+    }
   }
   runHazards(w, c, dt, hazards);
 }
