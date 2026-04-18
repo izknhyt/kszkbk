@@ -15,8 +15,10 @@ import { SEASONS, seasonFromTime, intensityAt, type GlobalEvent } from './events
 import { HAZARDS, hazardActiveInSeason, pointInZone, type HazardZone } from './hazards';
 import { CONFIG } from '../config';
 import {
+  COCOON_DEATH_LINES,
   COCOON_LINES_ABUSE,
   COCOON_LINES_DEATH,
+  COCOON_REVIVE_LINES,
   LOU_LINES,
   NPC_DEFS,
   SUZU_LINES_BIRTH,
@@ -550,8 +552,8 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   // 全員：社交 param に応じて独り言を漏らす（oshaberi 無くても少しは喋る）
   if (!c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < derivedSoloSpeakChance(c.params)) {
     const line = pickOshaberiLine(c);
-    spawnBubble(w.bubbles, c.pos, line.text, 'speech', 1.2);
-    c.chatCooldown = 3 + Math.random() * 3;
+    spawnBubble(w.bubbles, c.pos, line.text, 'speech', 1.6);
+    c.chatCooldown = 1 + Math.random() * 2;
     if (line.cheeky) maybePunishCheeky(w, c);
   }
   // 哲学者：場所関係なく突然立ち止まって空を見る（20-30秒に1回程度）
@@ -604,8 +606,8 @@ function processChats(w: WorldState, dt: number) {
     for (let j = i + 1; j < w.chibis.length; j++) {
       const b = w.chibis[j]!;
       if (!isAlive(b) || b.state === 'chatting' || b.chatCooldown > 0) continue;
-      // 近接距離：28 → 45 に広げて、すれ違いが発生しやすく
-      if (distance(a.pos, b.pos) > 45) continue;
+      // 近接距離：広めに取って常時どこかで立ち話が起きてる状態にする
+      if (distance(a.pos, b.pos) > 70) continue;
       const chat = maybeStartChat(a, b);
       if (!chat) continue;
       // 両者を chatting 状態に、向き合わせる、吹き出しを出す
@@ -645,6 +647,16 @@ function compactCorpses(w: WorldState) {
 
 function updateNpcs(w: WorldState, dt: number) {
   for (const n of w.npcs) {
+    if (n.dead) {
+      n.respawnTimer -= dt;
+      if (n.respawnTimer <= 0) {
+        n.dead = false;
+        n.pos = { ...n.home };
+        n.abuseCooldown = 4;
+        spawnBubble(w.bubbles, n.pos, pickLine(COCOON_REVIVE_LINES), 'speech', 2.5);
+      }
+      continue;
+    }
     wanderNpc(n, dt);
     if (n.id === 'cocoon') updateCocoonAbuse(w, n, dt);
     if (n.id === 'lou' && Math.random() < 0.0007) {
@@ -656,12 +668,13 @@ function updateNpcs(w: WorldState, dt: number) {
 function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
   n.abuseCooldown -= dt;
   if (n.abuseCooldown > 0) return;
-  const candidates = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 70);
-  if (candidates.length === 0) return;
-  // 立ち話セットアップはこの前に行う（下で）
+  const candidates = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 90);
+  if (candidates.length === 0) {
+    n.abuseCooldown = 0.6;
+    return;
+  }
   // 特性でターゲット優先度を重み付け：
-  //   心配性は狙われやすい（ビビってるので）。
-  //   戦闘狂はあえて絡みに行くので、出会うと衝突率も高い（1.5倍）。
+  //   心配性は狙われやすい、戦闘狂は絡みに行くので衝突率↑
   const weights = candidates.map((c) => {
     if (c.traits.includes('shinpai')) return 2.0;
     if (c.traits.includes('ikusa')) return 1.5;
@@ -675,18 +688,42 @@ function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
     if (roll < 0) { target = candidates[i]!; break; }
   }
   if (!target) return;
-  n.abuseCooldown = 5 + Math.random() * 6;
+  // CD 短めで、頻繁に叩く
+  n.abuseCooldown = 2 + Math.random() * 2;
   spawnBubble(w.bubbles, n.pos, pickLine(COCOON_LINES_ABUSE), 'speech', 1.8);
   setState(target, 'cry', 1);
   pushLife(target, Math.floor(target.ageSec), 'ココンに棒で突かれた');
-  // 戦闘狂が対象で70%、棒を奪おうとして相討ち
+
+  // 包囲カウンター：ココン周辺に 4匹以上いると 20% で逆襲され死亡
+  if (candidates.length >= 4 && Math.random() < 0.2) {
+    killCocoon(w, n);
+    for (const c of candidates.slice(0, 5)) {
+      pushLife(c, Math.floor(c.ageSec), 'ココンをみんなで倒した');
+    }
+    return;
+  }
+
+  // 戦闘狂相手：70% で絡みが発生。そのうち 25% はココンが負けて死ぬ。
   if (target.traits.includes('ikusa') && Math.random() < 0.7) {
+    if (Math.random() < 0.25) {
+      killCocoon(w, n);
+      pushLife(target, Math.floor(target.ageSec), 'ココンを返り討ちにした');
+      return;
+    }
     kill(w, target, 'ikusa_taezetsu');
     return;
   }
   if (Math.random() < 0.35) {
     kill(w, target, 'cocoon_abuse');
   }
+}
+
+function killCocoon(w: WorldState, n: NpcState) {
+  n.dead = true;
+  n.respawnTimer = 30 + Math.random() * 20;
+  spawnBubble(w.bubbles, n.pos, pickLine(COCOON_DEATH_LINES), 'speech', 2.5);
+  const suzu = w.npcs.find((x) => x.id === 'suzu');
+  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, 'ココン！？', 'speech', 2);
 }
 
 function reactNpcsToBirth(w: WorldState) {

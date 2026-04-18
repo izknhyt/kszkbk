@@ -312,6 +312,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         npcViews.set(n.id, v);
       }
       v.position.set(n.pos.x, n.pos.y);
+      // 死亡中は薄くする（ココン専用）
+      v.alpha = n.dead ? 0.25 : 1.0;
+      v.rotation = n.dead ? Math.PI * 0.5 : 0; // 倒れてる表現
     }
 
     // bubbles

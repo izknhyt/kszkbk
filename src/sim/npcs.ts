@@ -52,6 +52,9 @@ export interface NpcState {
   home: Vec2;
   wanderTimer: number;
   abuseCooldown: number; // ココン専用
+  // --- P6: ココン死亡・復活 -------------------------------------------
+  dead: boolean;          // true の間は wander/abuse を停止、描画も変わる
+  respawnTimer: number;   // dead 時にカウントダウン。0 以下で復活
 }
 
 export const SUZU_LINES_DEATH = [
@@ -95,6 +98,8 @@ export function createNpcs(bounds: { w: number; h: number }): NpcState[] {
       pos: { x: bounds.w * 0.25, y: 240 },
       wanderTimer: 0,
       abuseCooldown: 0,
+      dead: false,
+      respawnTimer: 0,
     },
     {
       id: 'lou',
@@ -102,13 +107,17 @@ export function createNpcs(bounds: { w: number; h: number }): NpcState[] {
       pos: { x: bounds.w * 0.82, y: 180 },
       wanderTimer: 0,
       abuseCooldown: 0,
+      dead: false,
+      respawnTimer: 0,
     },
     {
       id: 'cocoon',
       home: { x: bounds.w * 0.65, y: 300 },
       pos: { x: bounds.w * 0.65, y: 300 },
       wanderTimer: 0,
-      abuseCooldown: 5,
+      abuseCooldown: 2,
+      dead: false,
+      respawnTimer: 0,
     },
   ];
 }
@@ -117,8 +126,10 @@ export function wanderNpc(n: NpcState, dt: number) {
   n.wanderTimer -= dt;
   if (n.wanderTimer <= 0) {
     n.wanderTimer = 1 + Math.random() * 3;
-    const dx = (Math.random() - 0.5) * 40;
-    const dy = (Math.random() - 0.5) * 40;
+    // ココンは村じゅうを動き回る（大きめの範囲）。他NPCは自宅周辺のみ。
+    const range = n.id === 'cocoon' ? 220 : 40;
+    const dx = (Math.random() - 0.5) * range;
+    const dy = (Math.random() - 0.5) * range;
     n.pos.x = n.home.x + dx;
     n.pos.y = n.home.y + dy;
   }
@@ -127,3 +138,13 @@ export function wanderNpc(n: NpcState, dt: number) {
 export function pickLine(pool: string[]): string {
   return pool[Math.floor(Math.random() * pool.length)]!;
 }
+
+export const COCOON_REVIVE_LINES = [
+  'ただいま〜', 'あれ？ いきてる', 'なぜかいるわふ', 'ママぁ…もどってきた',
+  'かえってきちゃった', '…？',
+];
+
+export const COCOON_DEATH_LINES = [
+  'やられたー！', 'うぎゃー', 'ママぁ…しぬ…', 'ひどいわふ！',
+  'ちびわふにまけた…',
+];

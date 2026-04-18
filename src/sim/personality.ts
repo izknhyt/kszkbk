@@ -154,21 +154,20 @@ export function derivedRiverTrespass(p: ChibiParams): number {
   return Math.max(0, Math.min(0.6, 0.04 + (p.courage - 40) * 0.006));
 }
 
-// すれ違い会話の発動確率（ちょい上げ、より発生しやすく）
+// すれ違い会話の発動確率（上げて常時わちゃわちゃに）
 export function derivedChatChance(p1: ChibiParams, p2: ChibiParams): number {
   const avg = (p1.social + p2.social) / 2;
-  return Math.max(0.05, Math.min(0.7, 0.08 + avg * 0.006));
+  return Math.max(0.08, Math.min(0.85, 0.15 + avg * 0.007));
 }
 
 // 会話後のクールダウン秒。social 高いほど短い（どんどん喋る）。
 export function derivedChatCooldown(p: ChibiParams): number {
-  return Math.max(2, 8 - p.social * 0.07);
+  return Math.max(1, 4 - p.social * 0.03);
 }
 
 // 独り言（ambient speech）の 1tick あたり発生確率
-// 社交が高いと少し出やすい。oshaberi 特性は別途上乗せで発生する。
 export function derivedSoloSpeakChance(p: ChibiParams): number {
-  return 0.0004 + p.social * 0.00004; // social 0→0.0004, social 100→0.0044
+  return 0.0015 + p.social * 0.00008; // social 0→0.0015, social 100→0.0095
 }
 
 // 哲学石で止まる確率
