@@ -47,6 +47,7 @@ async function start() {
       flashToast('セーブしました', 'info');
     },
     onReset: () => {
+      skipUnloadSave = true;
       clearSave();
       location.reload();
     },
@@ -160,7 +161,14 @@ async function start() {
   }
   requestAnimationFrame(loop);
 
-  window.addEventListener('beforeunload', () => save(world));
+  // beforeunload で自動セーブするが、リセット時はこの保存を飛ばす必要がある。
+  // （clearSave → reload の間に上書きされて復活してしまうバグを防ぐ）
+  let skipUnloadSave = false;
+  const saveOnUnload = () => {
+    if (skipUnloadSave) return;
+    save(world);
+  };
+  window.addEventListener('beforeunload', saveOnUnload);
 }
 
 type ToastKind = 'info' | 'discovery';
