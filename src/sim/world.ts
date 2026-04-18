@@ -1377,22 +1377,31 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   else maxTargets = 3 + (Math.random() < 0.5 ? 1 : 0);
   maxTargets = Math.min(maxTargets, candidates.length);
 
-  // ターゲット選択：mama 高い子ほど狙われやすい（重み付き抽選で重複なし）
+  // ターゲット選択
+  //   機嫌悪い (<45)：距離が近い子から順に狙う（手当たり次第パニック）
+  //   機嫌良い時：mama 高い子ほど狙われやすい
   const pool = candidates.slice();
-  const weights = pool.map((c) => 1 + Math.max(0, c.params.mama - 50) * 0.03);
   const targets: Chibiwafu[] = [];
-  for (let k = 0; k < maxTargets; k++) {
-    if (pool.length === 0) break;
-    const total = weights.reduce((a, b) => a + b, 0);
-    let roll = Math.random() * total;
-    let idx = 0;
-    for (let i = 0; i < pool.length; i++) {
-      roll -= weights[i]!;
-      if (roll < 0) { idx = i; break; }
+  if (n.mood < 45) {
+    pool.sort((a, b) => distance(a.pos, n.pos) - distance(b.pos, n.pos));
+    for (let k = 0; k < maxTargets && k < pool.length; k++) {
+      targets.push(pool[k]!);
     }
-    targets.push(pool[idx]!);
-    pool.splice(idx, 1);
-    weights.splice(idx, 1);
+  } else {
+    const weights = pool.map((c) => 1 + Math.max(0, c.params.mama - 50) * 0.03);
+    for (let k = 0; k < maxTargets; k++) {
+      if (pool.length === 0) break;
+      const total = weights.reduce((a, b) => a + b, 0);
+      let roll = Math.random() * total;
+      let idx = 0;
+      for (let i = 0; i < pool.length; i++) {
+        roll -= weights[i]!;
+        if (roll < 0) { idx = i; break; }
+      }
+      targets.push(pool[idx]!);
+      pool.splice(idx, 1);
+      weights.splice(idx, 1);
+    }
   }
   if (targets.length === 0) return;
 

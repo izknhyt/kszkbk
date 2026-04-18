@@ -267,17 +267,13 @@ async function start() {
     }
   }
 
-  // ドロップ → 投げ速度に応じて着地点を延長し、ルート上の巻き添え判定もする
+  // ドロップ → カーソル速度をそのまま投射速度に。速くフリングすれば飛ぶ距離もスピードも増す。
   stage.app.canvas.addEventListener('kszk-entity-drop', (e) => {
     const detail = (e as CustomEvent).detail as { target: HitTarget; worldX: number; worldY: number };
     const { vx, vy } = dragSession && dragTargetsSame(dragSession.target, detail.target)
       ? computeThrowVelocity() : { vx: 0, vy: 0 };
-    // リリース速度から追加飛距離を計算（0.4 秒分）。速度が大きいほど遠くへ飛ぶ。
-    const FLIGHT_SEC = 0.4;
-    const landX = detail.worldX + vx * FLIGHT_SEC;
-    const landY = detail.worldY + vy * FLIGHT_SEC;
-    if (detail.target.kind === 'chibi') dropChibi(world, detail.target.id, detail.worldX, detail.worldY, landX, landY);
-    else dropNpc(world, detail.target.id as NpcId, detail.worldX, detail.worldY, landX, landY);
+    if (detail.target.kind === 'chibi') dropChibi(world, detail.target.id, detail.worldX, detail.worldY, vx, vy);
+    else dropNpc(world, detail.target.id as NpcId, detail.worldX, detail.worldY, vx, vy);
     dragSession = null;
   });
 
@@ -469,19 +465,16 @@ function punchNpc(world: WorldState, id: NpcId) {
   spawnWitnessReactions(world, n.pos);
 }
 
-function dropNpc(world: WorldState, id: NpcId, releasedX: number, releasedY: number, landX: number, landY: number) {
+function dropNpc(world: WorldState, id: NpcId, releasedX: number, releasedY: number, vx: number, vy: number) {
   const n = world.npcs.find((x) => x.id === id);
   if (!n || n.dead) return;
-  landX = Math.max(20, Math.min(world.bounds.w - 20, landX));
-  landY = Math.max(20, Math.min(world.bounds.h - 20, landY));
   n.pos.x = releasedX;
   n.pos.y = releasedY;
-  const flightDist = Math.hypot(landX - releasedX, landY - releasedY);
-  const flightSec = Math.min(1.0, Math.max(0.25, flightDist / 400));
-  const vx = (landX - releasedX) / flightSec;
-  const vy = (landY - releasedY) / flightSec - 90 * flightSec;
-  const dmg = Math.round(2 + Math.min(18, flightDist * 0.05));
-  if (flightDist > 60) {
+  const speed = Math.hypot(vx, vy);
+  const flightSec = 0.55;
+  const expectedDist = speed * flightSec;
+  const dmg = Math.round(1 + Math.min(16, speed * 0.01));
+  if (expectedDist > 60) {
     spawnBubble(world.bubbles, n.pos, pickNpcThrowLine(id), 'npc-speech', 0.9);
   }
   launchFlight(n, vx, vy, flightSec, dmg, 'kamisama_throw');
@@ -544,26 +537,23 @@ function showNpcModal(n: NpcState) {
   }
 }
 
-// releasedX/Y: プレイヤーが指を離した位置。ここから速度に応じて landX/Y まで "飛んで行く"。
-function dropChibi(world: WorldState, chibiId: number, releasedX: number, releasedY: number, landX: number, landY: number) {
+// リリース位置とカーソル速度をそのまま飛行に反映。
+// 指を速く離すほど速く＆遠くに飛ぶ（flightSec は 0.5 固定、速度で飛距離が決まる）。
+function dropChibi(world: WorldState, chibiId: number, releasedX: number, releasedY: number, vx: number, vy: number) {
   const c = world.chibis.find((x) => x.id === chibiId);
   if (!c || !isChibiAlive(c)) return;
-  // 画面外に飛ばないようクランプ
-  landX = Math.max(20, Math.min(world.bounds.w - 20, landX));
-  landY = Math.max(20, Math.min(world.bounds.h - 20, landY));
   c.pos.x = releasedX;
   c.pos.y = releasedY;
   c.target = null;
-  const flightDist = Math.hypot(landX - releasedX, landY - releasedY);
-  const flightSec = Math.min(1.0, Math.max(0.25, flightDist / 400));
-  const vx = (landX - releasedX) / flightSec;
-  const vy = (landY - releasedY) / flightSec - 90 * flightSec;  // 重力補正で弧を描く
-  const dmg = Math.round(3 + Math.min(42, flightDist * 0.12));
+  const speed = Math.hypot(vx, vy);
+  const flightSec = 0.55;  // 固定：速い速度 = そのまま飛ぶ距離が伸びる
+  const expectedDist = speed * flightSec;
+  const dmg = Math.round(2 + Math.min(40, speed * 0.025));
   setState(c, 'surprised', flightSec + 0.3);
-  if (flightDist > 60) {
+  if (expectedDist > 60) {
     spawnBubble(world.bubbles, c.pos, pickGodThrowLine(), 'speech', 0.9);
   }
-  pushLife(c, Math.floor(c.ageSec), `神様に${Math.round(flightDist)}px 投げ飛ばされた`);
+  pushLife(c, Math.floor(c.ageSec), `神様に投げ飛ばされた（速度${Math.round(speed)}）`);
   launchFlight(c, vx, vy, flightSec, dmg, 'kamisama_throw');
   spawnWitnessReactions(world, { x: releasedX, y: releasedY }, c.id);
 }
