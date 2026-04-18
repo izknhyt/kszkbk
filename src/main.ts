@@ -19,6 +19,7 @@ import {
   pickGodPunchLine,
   pickGodShakeLine,
   pickGodThrowLine,
+  pickGrabReaction,
 } from './sim/chats';
 import type { WorldState } from './sim/world';
 import { RANK_DEFS } from './sim/rank';
@@ -147,6 +148,8 @@ async function start() {
         bubbleCooldown: 0,
       };
       pushLife(c, Math.floor(c.ageSec), '神様に掴まれた');
+      // 掴まれた瞬間のリアクション（性格で喜ぶ／怯える／威嚇／困惑）
+      spawnBubble(world.bubbles, c.pos, pickGrabReaction(c), 'speech', 1.4);
     }
 
     const dx = detail.worldX - dragSession.lastX;

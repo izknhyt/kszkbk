@@ -440,6 +440,62 @@ export function pickGodLandedLine(): string {
   return GOD_LANDED_LINES[Math.floor(Math.random() * GOD_LANDED_LINES.length)]!;
 }
 
+// =========================================================================
+// 掴まれた瞬間のリアクション（無邪気に喜ぶ／怯える／威嚇／困惑）
+//   ドラッグ開始時に、個体の性格で系統を切り替えて 1 行出す。
+//   同じちびわふでも毎回ランダム。
+// =========================================================================
+
+// 喜ぶ系：courage 高 or bouken / gourmand / nonbiri
+const GRAB_EXCITED_LINES = [
+  'わーいたかいわふ！', 'ぴゅーんわふ！', 'たのしーわふ！', 'もっとわふ！',
+  'そらちかいわふ！', 'ママにみせるわふ！', 'ふわふわわふ〜！', 'ぶーんわふ！',
+  'とんでるわふ！', 'やったーわふ！', 'きもちいいわふ〜', 'あはははわふ',
+];
+
+// 怯える系：shinpai / nakimushi / morashi / yowai / zako高
+const GRAB_SCARED_LINES = [
+  'ひええええわふ！', 'たすけてわふ！', 'こわいわふー！', 'ママどこわふ！？',
+  'おりたいわふ…', 'やめてわふ〜', 'ぶるぶるわふ', 'ぴえんわふ…',
+  'もうむりわふ', 'ぽたぽたわふ…', 'ごめんなさいわふ…', 'しぬわふ…',
+];
+
+// 威嚇系：ikusa / tsuyoi / bo_meijin
+const GRAB_DEFIANT_LINES = [
+  'はなせわふ！', 'たたかうわふ！', 'なめるなわふ！', 'おとしてみろわふ！',
+  'ぶっとばすわふ！', 'こわくないわふ！', 'ぼくさいきょうわふ！',
+];
+
+// 困惑系：上記どれにも当てはまらない時
+const GRAB_CONFUSED_LINES = [
+  'わふ？', 'なにわふ！？', 'へ？わふ', 'ぽわっわふ', 'どうしたわふ？',
+  'あれっわふ', 'もちあがったわふ！？', 'ぷかぷかわふ',
+];
+
+export function pickGrabReaction(c: Chibiwafu): string {
+  // 1. 怖がり系特性は必ず怯える
+  if (c.traits.includes('shinpai') || c.traits.includes('nakimushi')) {
+    return pickFromPool(GRAB_SCARED_LINES);
+  }
+  // 2. 威嚇系特性は威嚇
+  if (c.traits.includes('ikusa') || c.traits.includes('tsuyoi') || c.traits.includes('bo_meijin')) {
+    return pickFromPool(GRAB_DEFIANT_LINES);
+  }
+  // 3. 冒険家 or 勇気高めは喜ぶ
+  if (c.traits.includes('bouken') || c.params.courage > 65) {
+    return pickFromPool(GRAB_EXCITED_LINES);
+  }
+  // 4. zako 高 or courage 低は怯える
+  if (c.params.zako > 60 || c.params.courage < 35) {
+    return pickFromPool(GRAB_SCARED_LINES);
+  }
+  // 5. それ以外は困惑、たまに喜び・怯えが混じる
+  const r = Math.random();
+  if (r < 0.15) return pickFromPool(GRAB_EXCITED_LINES);
+  if (r < 0.30) return pickFromPool(GRAB_SCARED_LINES);
+  return pickFromPool(GRAB_CONFUSED_LINES);
+}
+
 export interface ChatAttempt {
   a: Chibiwafu;
   b: Chibiwafu;
