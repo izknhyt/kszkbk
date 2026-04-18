@@ -119,6 +119,12 @@ export interface WorldState {
   totalPointsEarned: number;
   // 連続値の村レベル 1-99。totalPointsEarned から毎tick 再計算される。
   villageLv: number;
+  // --- 開拓リソース（P1-C2）----------------------------------------------
+  // 食料: 畑から生産、ちびわふが食べる / 空腹を下げる（将来）
+  // 水:   水源 + 水路で補給、畑にも必要（将来）
+  // 木材: 伐採で得る、建物の材料
+  // 石材: 石切で得る、建物の材料
+  resources: { food: number; water: number; wood: number; stone: number };
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
@@ -184,6 +190,7 @@ export function createWorld(): WorldState {
     points: 0,
     totalPointsEarned: 0,
     villageLv: 1,
+    resources: { food: 0, water: 0, wood: 0, stone: 0 },
     totalDeaths: 0,
     totalBirths: 0,
     stompCount: 0,

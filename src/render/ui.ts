@@ -70,6 +70,10 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   byId('stat-cap').textContent = String(populationCap(w));
   byId('stat-deaths').textContent = String(w.totalDeaths);
   byId('stat-season').textContent = `${SEASON_LABEL[w.season]} ${w.dayCount}日目 ${DAY_PHASE_LABEL[w.dayPhase]}`;
+  byId('stat-food').textContent = String(Math.floor(w.resources.food));
+  byId('stat-water').textContent = String(Math.floor(w.resources.water));
+  byId('stat-wood').textContent = String(Math.floor(w.resources.wood));
+  byId('stat-stone').textContent = String(Math.floor(w.resources.stone));
   byId('stat-gen').textContent = String(w.totalBirths);
   byId('stat-stomp').textContent = String(w.stompCount);
   // 統計：平均寿命 / 最長寿 / 最短寿

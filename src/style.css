@@ -153,6 +153,16 @@ html, body {
   gap: 4px;
 }
 
+.stat-grid.resource-row {
+  margin-top: 4px;
+}
+.resource-row .stat {
+  padding: 4px 6px;
+}
+.resource-row .stat span {
+  font-size: 14px;
+}
+
 .stat {
   display: flex;
   flex-direction: column;
