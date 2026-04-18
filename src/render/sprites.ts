@@ -35,7 +35,7 @@ export async function loadSpriteLibrary(sheetUrl: string): Promise<SpriteLibrary
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('2d context unavailable');
     ctx.drawImage(img, 0, 0);
-    chromaKeyWhite(ctx, img.width, img.height);
+    removeBackgroundFloodFill(ctx, img.width, img.height);
     const base = Texture.from(canvas);
     const cellW = Math.floor(img.width / 3);
     const cellH = Math.floor(img.height / 3);
@@ -67,13 +67,32 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-function chromaKeyWhite(ctx: CanvasRenderingContext2D, w: number, h: number) {
+// 4隅から flood-fill して「外側の白」だけ透明にする。
+// キャラ内部の白（まもりん等）はアウトラインで囲まれてるので flood に到達せず残る。
+// 以前は「白ピクセル全部透明」にしていたためまもりんが透けていた。
+function removeBackgroundFloodFill(ctx: CanvasRenderingContext2D, w: number, h: number) {
   const id = ctx.getImageData(0, 0, w, h);
   const d = id.data;
-  for (let i = 0; i < d.length; i += 4) {
-    if (d[i]! >= CHROMA_THRESHOLD && d[i + 1]! >= CHROMA_THRESHOLD && d[i + 2]! >= CHROMA_THRESHOLD) {
-      d[i + 3] = 0;
-    }
+  const visited = new Uint8Array(w * h);
+  const isNearWhite = (i: number): boolean => {
+    const o = i * 4;
+    return d[o]! >= CHROMA_THRESHOLD && d[o + 1]! >= CHROMA_THRESHOLD && d[o + 2]! >= CHROMA_THRESHOLD;
+  };
+  const stack: number[] = [];
+  const seeds = [0, w - 1, (h - 1) * w, h * w - 1];
+  for (const s of seeds) if (isNearWhite(s)) stack.push(s);
+  while (stack.length > 0) {
+    const i = stack.pop()!;
+    if (visited[i]) continue;
+    if (!isNearWhite(i)) continue;
+    visited[i] = 1;
+    d[i * 4 + 3] = 0;
+    const x = i % w;
+    const y = (i / w) | 0;
+    if (x > 0) stack.push(i - 1);
+    if (x < w - 1) stack.push(i + 1);
+    if (y > 0) stack.push(i - w);
+    if (y < h - 1) stack.push(i + w);
   }
   ctx.putImageData(id, 0, 0);
 }

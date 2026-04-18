@@ -38,6 +38,7 @@ import {
   derivedChatCooldown,
   derivedEatChance,
   derivedHazardSusceptibility,
+  derivedSoloSpeakChance,
   derivedStareChance,
   rollParams,
 } from './personality';
@@ -532,8 +533,13 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     spawnBubble(w.bubbles, c.pos, '💧', 'stomp', 1.1);
   }
   // おしゃべり：idle 中、相手がいなくても一人で喋る
-  if (c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < 0.003) {
+  if (c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < 0.005) {
     spawnBubble(w.bubbles, c.pos, pickOshaberiLine(), 'speech', 1.3);
+  }
+  // 全員：社交 param に応じて独り言を漏らす（aoshaberi 無くても少しは喋る）
+  if (!c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < derivedSoloSpeakChance(c.params)) {
+    spawnBubble(w.bubbles, c.pos, pickOshaberiLine(), 'speech', 1.2);
+    c.chatCooldown = 3 + Math.random() * 3;
   }
   // 哲学者：場所関係なく突然立ち止まって空を見る（20-30秒に1回程度）
   if (c.traits.includes('tetsugakusha') && c.state === 'idle' && Math.random() < 0.0015) {
@@ -565,7 +571,8 @@ function processChats(w: WorldState, dt: number) {
     for (let j = i + 1; j < w.chibis.length; j++) {
       const b = w.chibis[j]!;
       if (!isAlive(b) || b.state === 'chatting' || b.chatCooldown > 0) continue;
-      if (distance(a.pos, b.pos) > 28) continue;
+      // 近接距離：28 → 45 に広げて、すれ違いが発生しやすく
+      if (distance(a.pos, b.pos) > 45) continue;
       const chat = maybeStartChat(a, b);
       if (!chat) continue;
       // 両者を chatting 状態に、向き合わせる、吹き出しを出す
