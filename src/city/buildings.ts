@@ -65,6 +65,15 @@ export const BUILDINGS: Record<string, BuildingDef> = {
       radius: 40,
     },
   },
+  ubuya: {
+    id: 'ubuya',
+    name: '産屋（うぶや）',
+    desc: 'フラナの出産速度 +18%（Lv ごとに加算）／ハザードなし',
+    cost: 80,
+    costGrowth: 1.85,
+    // 'spawn+0.18' を applyBuildingMods がパースして spawnSpeedMultiplier に反映する
+    effect: 'spawn+0.18',
+  },
 } as const;
 
 export function buildingsToHazards(placed: { defId: string; pos: Vec2; level: number }[]): HazardZone[] {

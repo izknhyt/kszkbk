@@ -625,6 +625,7 @@ function buildingColor(id: string): number {
     case 'kouba': return 0xa9a9a9;
     case 'hakaba': return 0x8a7a6a;
     case 'taiko': return 0xc05a3a;
+    case 'ubuya': return 0xfbc7d4; // 薄ピンク（産屋）
     default: return 0xbbbbbb;
   }
 }

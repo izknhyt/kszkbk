@@ -76,6 +76,8 @@ export interface WorldState {
   baseCap: number;
   event: GlobalEvent | null;
   pointMultiplier: number;
+  // 産屋で伸びる出産速度倍率。1.0 = 通常、1.36 なら +36% 速い。
+  spawnSpeedMultiplier: number;
   // 次の音頭／火事までの秒カウントダウン（イベント発動中は Infinity）。
   ondoCooldown: number;
   fireCooldown: number;
@@ -125,6 +127,7 @@ export function createWorld(): WorldState {
     baseCap: CONFIG.BASE_POP_CAP,
     event: null,
     pointMultiplier: CONFIG.GLOBAL_POINT_MULT_BASE,
+    spawnSpeedMultiplier: 1,
     // 最初の音頭／火事はフルインターバルを待たず「先行き短め」で1発目を見せる。
     ondoCooldown: CONFIG.ONDO_BASE_INTERVAL_SEC * 0.45,
     fireCooldown: CONFIG.FIRE_BASE_INTERVAL_SEC * 0.45,
@@ -154,13 +157,18 @@ function countBuildingLevels(w: WorldState, defId: string): number {
 
 function applyBuildingMods(w: WorldState) {
   let mult = CONFIG.GLOBAL_POINT_MULT_BASE;
+  let spawnMul = 1;
   for (const b of w.buildings) {
     const def = BUILDINGS[b.defId];
     if (!def) continue;
-    const m = /pmult\+([0-9.]+)/.exec(def.effect);
-    if (m) mult += Number(m[1]) * b.level;
+    const pm = /pmult\+([0-9.]+)/.exec(def.effect);
+    if (pm) mult += Number(pm[1]) * b.level;
+    // 産屋など：'spawn+0.18' → spawnSpeedMultiplier に線形加算
+    const sp = /spawn\+([0-9.]+)/.exec(def.effect);
+    if (sp) spawnMul += Number(sp[1]) * b.level;
   }
   w.pointMultiplier = mult;
+  w.spawnSpeedMultiplier = spawnMul;
 }
 
 // --- Event scheduling -----------------------------------------------------
@@ -347,7 +355,8 @@ function spawnIfRoom(w: WorldState) {
     if (w.chibis.filter(isAlive).length >= cap) break;
     forceSpawn(w);
   }
-  const nextInterval = (w.baseSpawnInterval + Math.random() * CONFIG.SPAWN_INTERVAL_JITTER_SEC) * scale;
+  // 産屋で伸びる spawnSpeedMultiplier で実インターバル短縮
+  const nextInterval = ((w.baseSpawnInterval + Math.random() * CONFIG.SPAWN_INTERVAL_JITTER_SEC) * scale) / Math.max(0.5, w.spawnSpeedMultiplier);
   w.spawnCooldown = nextInterval;
 }
 
