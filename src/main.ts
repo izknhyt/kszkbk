@@ -3,8 +3,8 @@ import { bindUI, refreshUI, type UICallbacks } from './render/ui';
 import {
   buildAt,
   createWorld,
+  damageChibi,
   forceSpawn,
-  kill as killChibi,
   tickWorld,
   triggerBokaigi,
   triggerFire,
@@ -14,6 +14,12 @@ import {
 import { pushLife } from './sim/world';
 import { isAlive as isChibiAlive, setState } from './sim/chibiwafu';
 import { spawnBubble } from './sim/bubbles';
+import {
+  pickGodLandedLine,
+  pickGodPunchLine,
+  pickGodShakeLine,
+  pickGodThrowLine,
+} from './sim/chats';
 import type { WorldState } from './sim/world';
 import { RANK_DEFS } from './sim/rank';
 import { TRAIT_DEFS } from './sim/traits';
@@ -110,21 +116,79 @@ async function start() {
     punchChibi(world, detail.chibiId);
   });
 
-  // ドラッグ中：ちびわふをカーソル位置に移動
+  // ドラッグセッション：最初に掴んだ位置と振り回し総距離を追跡。
+  // これで"振り回されて衰弱死"とドロップ距離ダメージの両方が判定できる。
+  let dragSession: {
+    chibiId: number;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    swingDistAccum: number;   // ダメージ次回まで貯めるスイング距離
+    bubbleCooldown: number;   // 吹き出し連打防止
+  } | null = null;
+
+  // ドラッグ中：ちびわふをカーソル位置に移動 + 振り回しダメージ
   stage.app.canvas.addEventListener('kszk-chibi-drag', (e) => {
     const detail = (e as CustomEvent).detail as { chibiId: number; worldX: number; worldY: number };
     const c = world.chibis.find((x) => x.id === detail.chibiId);
-    if (!c) return;
+    if (!c || !isChibiAlive(c)) return;
+
+    // 新しいセッション開始 or 切り替え
+    if (!dragSession || dragSession.chibiId !== detail.chibiId) {
+      dragSession = {
+        chibiId: detail.chibiId,
+        startX: c.pos.x,
+        startY: c.pos.y,
+        lastX: c.pos.x,
+        lastY: c.pos.y,
+        swingDistAccum: 0,
+        bubbleCooldown: 0,
+      };
+      pushLife(c, Math.floor(c.ageSec), '神様に掴まれた');
+    }
+
+    const dx = detail.worldX - dragSession.lastX;
+    const dy = detail.worldY - dragSession.lastY;
+    const segment = Math.hypot(dx, dy);
+    dragSession.swingDistAccum += segment;
+    dragSession.lastX = detail.worldX;
+    dragSession.lastY = detail.worldY;
+    dragSession.bubbleCooldown -= segment;
+
     c.pos.x = detail.worldX;
     c.pos.y = detail.worldY;
-    // target をクリアして、ドロップ後に wanderStep が再抽選するように
     c.target = null;
+    // ドラッグ中は hurt ステートにしておく（絵が震える）
+    if (c.state !== 'hurt' && c.state !== 'dead') setState(c, 'hurt', 0.5);
+
+    // 40px 振り回される毎に 1-2 HP ダメージ
+    while (dragSession.swingDistAccum >= 40) {
+      dragSession.swingDistAccum -= 40;
+      const dmg = 1 + Math.floor(Math.random() * 2);
+      const died = damageChibi(world, c, dmg, 'kamisama_shake');
+      if (died) {
+        pushLife(c, Math.floor(c.ageSec), '神様に振り回されて力尽きた');
+        dragSession = null;
+        return;
+      }
+    }
+
+    // 吹き出しは 60px 毎に1回くらい
+    if (dragSession.bubbleCooldown <= 0 && segment > 2) {
+      spawnBubble(world.bubbles, c.pos, pickGodShakeLine(), 'speech', 0.9);
+      dragSession.bubbleCooldown = 60;
+    }
   });
 
-  // ドロップ → 水中ならそのまま溺死、それ以外は surprised + life log
+  // ドロップ → 水中ならそのまま溺死、それ以外は投げ距離に応じてダメージ
   stage.app.canvas.addEventListener('kszk-chibi-drop', (e) => {
     const detail = (e as CustomEvent).detail as { chibiId: number; worldX: number; worldY: number };
-    dropChibi(world, detail.chibiId, detail.worldX, detail.worldY);
+    const throwDist = dragSession && dragSession.chibiId === detail.chibiId
+      ? Math.hypot(detail.worldX - dragSession.startX, detail.worldY - dragSession.startY)
+      : 0;
+    dropChibi(world, detail.chibiId, detail.worldX, detail.worldY, throwDist);
+    dragSession = null;
   });
 
   const modal = document.getElementById('chibi-modal')!;
@@ -229,30 +293,47 @@ function flashToast(msg: string, kind: ToastKind = 'info') {
 function punchChibi(world: WorldState, chibiId: number) {
   const c = world.chibis.find((x) => x.id === chibiId);
   if (!c || !isChibiAlive(c)) return;
-  spawnBubble(world.bubbles, c.pos, 'ぎゃー！', 'speech', 1.2);
+  spawnBubble(world.bubbles, c.pos, pickGodPunchLine(), 'speech', 1.2);
   spawnBubble(world.bubbles, { x: c.pos.x, y: c.pos.y - 30 }, '💥', 'stomp', 0.6);
   setState(c, 'hurt', 1.3);
   pushLife(c, Math.floor(c.ageSec), '神様に殴られた');
-  // 20% で即死
-  if (Math.random() < 0.2) killChibi(world, c, 'kamisama_punch');
+  // 殴打ダメージ 8-18、HP 0 で kamisama_punch
+  const dmg = 8 + Math.floor(Math.random() * 11);
+  const died = damageChibi(world, c, dmg, 'kamisama_punch');
+  // 生き残ってても 10% で神の不興で追加即死（ドラマ用）
+  if (!died && Math.random() < 0.1) {
+    damageChibi(world, c, c.hp, 'kamisama_punch');
+  }
 }
 
-function dropChibi(world: WorldState, chibiId: number, wx: number, wy: number) {
+function dropChibi(world: WorldState, chibiId: number, wx: number, wy: number, throwDist: number) {
   const c = world.chibis.find((x) => x.id === chibiId);
   if (!c || !isChibiAlive(c)) return;
   c.pos.x = wx;
   c.pos.y = wy;
   c.target = null;
-  // 水中に落とされたら溺死
+  // 水中に落とされたら HP 関係なく即溺死
   if (wy > 414) {
     spawnBubble(world.bubbles, c.pos, 'わふぅ…', 'speech', 1.1);
     pushLife(c, Math.floor(c.ageSec), '神様に水へ投げ込まれた');
-    killChibi(world, c, 'kamisama_drown');
+    // dropChibi から kill するために直接呼ぶ（hp 経由しない）
+    damageChibi(world, c, c.hp, 'kamisama_drown');
+    return;
+  }
+  // 陸地：投げ距離に応じて着地ダメージ 5-35
+  const dmg = Math.round(5 + Math.min(30, throwDist * 0.10));
+  // 距離 80px 以上で "空中で何か言う" 吹き出しを先に出す
+  if (throwDist > 80) {
+    spawnBubble(world.bubbles, c.pos, pickGodThrowLine(), 'speech', 0.9);
+  }
+  const died = damageChibi(world, c, dmg, 'kamisama_throw');
+  if (died) {
+    spawnBubble(world.bubbles, c.pos, pickGodLandedLine(), 'speech', 1.3);
+    pushLife(c, Math.floor(c.ageSec), `神様に${Math.round(throwDist)}px 投げ飛ばされ墜死`);
   } else {
-    // 陸地に落とされたら驚いて数秒固まる
-    setState(c, 'surprised', 1.4);
-    spawnBubble(world.bubbles, c.pos, 'ぽわっ', 'speech', 1);
-    pushLife(c, Math.floor(c.ageSec), '神様に掴まれて移動させられた');
+    setState(c, 'hurt', 1.4);
+    spawnBubble(world.bubbles, c.pos, pickGodLandedLine(), 'speech', 1.2);
+    pushLife(c, Math.floor(c.ageSec), `神様に投げられ地面に激突（-${dmg}HP）`);
   }
 }
 

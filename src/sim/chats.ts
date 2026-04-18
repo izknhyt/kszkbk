@@ -395,6 +395,51 @@ export function pickRifujinVictimLine(): string {
   return RIFUJIN_VICTIM_LINES[Math.floor(Math.random() * RIFUJIN_VICTIM_LINES.length)]!;
 }
 
+// =========================================================================
+// 神様（プレイヤー）に殴られた／振り回された／投げられた時の悲鳴プール
+//   ダメージを受けた瞬間にランダムで出す。同じ"ぎゃー"だけにならないように。
+// =========================================================================
+
+// 殴打された瞬間（左クリック）
+const GOD_PUNCH_LINES = [
+  'ぎゃーわふ！', 'いたいわふ！', 'ひどいわふ…', 'なんでわふ！？',
+  'ゆるしてわふ〜', 'ママーわふ！', 'たすけてわふ！', 'もうやめてわふ',
+  'かみさまひどいわふ', 'ぐぇっわふ', 'いてぇわふ！', 'ぼくなにしたわふ？',
+  'ぎゃわっ', 'いたたたわふ', 'わふん！', 'どいてよわふ…',
+];
+export function pickGodPunchLine(): string {
+  return GOD_PUNCH_LINES[Math.floor(Math.random() * GOD_PUNCH_LINES.length)]!;
+}
+
+// 掴まれて振り回されている最中（ドラッグ中、連続的に）
+const GOD_SHAKE_LINES = [
+  'ぐえええわふ', 'くるしいわふ！', 'めがまわるわふ…', 'やめてええわふ',
+  'たすけてわふ！', 'はなしてわふ〜', 'きもちわるいわふ…', 'ぐるぐるわふ',
+  'ぺろぺろわふ…', 'うぷっわふ', 'もどしそうわふ', 'ぐぇええ',
+  'ひえええわふ', 'おちるわふー！', 'しぬわふ…', 'ままああああ',
+];
+export function pickGodShakeLine(): string {
+  return GOD_SHAKE_LINES[Math.floor(Math.random() * GOD_SHAKE_LINES.length)]!;
+}
+
+// 投げ飛ばされて宙を飛んでいる瞬間（ドロップ時、着地前）
+const GOD_THROW_LINES = [
+  'とんでるわふ〜！', 'わあああわふ！', 'どこいくわふ！？', 'そらわふ！？',
+  'ひええええわふ', 'ぴゃーわふ！', 'まっさかさまわふ', 'ぽーんわふ！',
+];
+export function pickGodThrowLine(): string {
+  return GOD_THROW_LINES[Math.floor(Math.random() * GOD_THROW_LINES.length)]!;
+}
+
+// 着地した瞬間（ドロップで陸地にぶつかった時）
+const GOD_LANDED_LINES = [
+  'どさっわふ', 'ぐへぇわふ', 'いたたたわふ…', 'あたまうったわふ',
+  'ぺしゃんわふ', 'うごけないわふ…', 'ぽてっわふ', 'めがまわるわふ…',
+];
+export function pickGodLandedLine(): string {
+  return GOD_LANDED_LINES[Math.floor(Math.random() * GOD_LANDED_LINES.length)]!;
+}
+
 export interface ChatAttempt {
   a: Chibiwafu;
   b: Chibiwafu;

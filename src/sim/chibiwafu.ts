@@ -24,6 +24,8 @@ export interface SpawnArgs {
 }
 
 export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
+  // HP は toughness 依存：tough 0→20HP, tough 50→40HP, tough 100→60HP
+  const maxHp = Math.round(20 + args.params.tough * 0.4);
   return {
     id: nextId++,
     name: args.name,
@@ -44,6 +46,8 @@ export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
     lifeLog: [],
     chatCooldown: 2,
     targetLandmarkId: null,
+    hp: maxHp,
+    maxHp,
   };
 }
 

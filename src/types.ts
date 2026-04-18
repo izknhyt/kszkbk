@@ -44,6 +44,11 @@ export interface Chibiwafu {
   chatCooldown: number;
   // 目的地の種類（ランドマーク由来の場合、ランドマークID）
   targetLandmarkId: string | null;
+  // --- HP（神様に殴られる／振り回される／投げられる時だけ減る）-------
+  // 0 になったら死亡（kamisama_punch か kamisama_shake か kamisama_throw）。
+  // 通常の事故死（ハザード・音頭・棒会議など）は HP を経由しない即死。
+  hp: number;
+  maxHp: number;
 }
 
 export interface LifeEvent {
@@ -86,7 +91,9 @@ export type DeathCauseId =
   | 'namaiki_boko'            // 生意気な発言をしてボコボコに殴られる
   | 'rifujin_boko'            // 屁・しゃっくり等の粗相で理不尽にボコボコにされる
   | 'kamisama_punch'          // プレイヤー（神様）の鉄槌で死亡
-  | 'kamisama_drown';         // プレイヤーに水に投げ込まれて死亡
+  | 'kamisama_drown'          // プレイヤーに水に投げ込まれて死亡
+  | 'kamisama_shake'          // プレイヤーに掴まれて振り回され衰弱死
+  | 'kamisama_throw';         // プレイヤーに投げつけられ地面に激突死
 
 export interface DeathCause {
   id: DeathCauseId;

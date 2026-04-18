@@ -338,9 +338,22 @@ export function kill(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   c.state = 'dead';
   c.deathTick = w.tick;
   c.deathCauseId = causeId;
+  c.hp = 0;
   pushLife(c, Math.floor(c.ageSec), `死んだ（${DEATH_CAUSES[causeId]!.title}）`);
   logDeath(w, c, causeId);
   reactNpcsToDeath(w, c);
+}
+
+// HP を減らす。0 以下で causeId で死亡。戻り値 = 死んだか。
+// 神様の殴打／振り回し／投げ の3系統で使う。通常事故死は経由しない。
+export function damageChibi(w: WorldState, c: Chibiwafu, amount: number, causeId: DeathCauseId): boolean {
+  if (!isAlive(c)) return false;
+  c.hp = Math.max(0, c.hp - amount);
+  if (c.hp <= 0) {
+    kill(w, c, causeId);
+    return true;
+  }
+  return false;
 }
 
 // lifeLog に1行追加。上限30件（古いものから削除）。
