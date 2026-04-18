@@ -318,10 +318,13 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     setBounds(world.bounds.w, world.bounds.h);
     drawPhaseTint(world.dayPhase);
 
-    // 開拓プロット（仮グラフィックで色違いの矩形のみ）
+    // 開拓プロット（仮グラフィックで色違いの矩形のみ）+ 障害物
     plotLayer.removeChildren();
     for (const p of world.plots) {
       plotLayer.addChild(drawPlot(p));
+    }
+    for (const obs of world.obstacles) {
+      plotLayer.addChild(drawObstacle(obs));
     }
 
     // landmarks (描き直しは季節が変わった時のみ。ここでは常時再描画して単純化)
@@ -1121,6 +1124,29 @@ function drawPlot(p: import('../types').Plot): Container {
     c.addChild(dots);
   }
   c.position.set(p.pos.x, p.pos.y);
+  return c;
+}
+
+// 障害物の仮描画。kind 別の色＋HP バー。
+function drawObstacle(o: import('../types').Obstacle): Container {
+  const c = new Container();
+  const g = new Graphics();
+  const kindColor: Record<import('../types').ObstacleKind, number> = {
+    rock: 0x7a6a4a,
+    stump: 0x5a3a20,
+    bush: 0x4a6a3a,
+  };
+  const size = o.kind === 'rock' ? 8 : o.kind === 'stump' ? 7 : 6;
+  g.circle(0, 0, size).fill({ color: kindColor[o.kind] }).stroke({ color: 0x1a0a00, width: 1 });
+  c.addChild(g);
+  // HP バー（上に）
+  const pct = Math.max(0, o.hp / o.maxHp);
+  const bw = 14;
+  const bar = new Graphics();
+  bar.rect(-bw / 2, -size - 5, bw, 2).fill({ color: 0x000000, alpha: 0.5 });
+  bar.rect(-bw / 2, -size - 5, bw * pct, 2).fill({ color: 0xff7a3a });
+  c.addChild(bar);
+  c.position.set(o.pos.x, o.pos.y);
   return c;
 }
 

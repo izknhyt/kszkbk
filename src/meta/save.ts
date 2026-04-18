@@ -2,7 +2,7 @@ import type { WorldState } from '../sim/world';
 import { peekNextId, resetIdCounter } from '../sim/chibiwafu';
 
 const KEY = 'kszkbk:save:v1';
-const CURRENT_VERSION = 6;
+const CURRENT_VERSION = 7;
 
 // v1: P2-a 前。16 dex。
 // v2: P2-a 以降。24 dex（Uncommon 含む）。live chibis は persist しないので
@@ -10,7 +10,7 @@ const CURRENT_VERSION = 6;
 //     側で 0 埋めされる（load は id ごとに上書き、欠けたものはそのまま残る）。
 // v3: totalPointsEarned を追加（村Lv の成長源）。v1/v2 からの load では
 //     `points` 初期値をそのまま totalPointsEarned として引き継ぐ。
-type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6;
+type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 interface SaveData {
   version: SaveVersion;
@@ -34,6 +34,8 @@ interface SaveData {
   resources?: WorldState['resources'];
   // v6+: 開拓プロット
   plots?: WorldState['plots'];
+  // v7+: 障害物
+  obstacles?: WorldState['obstacles'];
 }
 
 export function save(w: WorldState) {
@@ -56,6 +58,7 @@ export function save(w: WorldState) {
     shortestLifeName: w.shortestLifeName,
     resources: w.resources,
     plots: w.plots,
+    obstacles: w.obstacles,
   };
   try {
     localStorage.setItem(KEY, JSON.stringify(data));
@@ -69,7 +72,7 @@ export function load(w: WorldState): boolean {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw) as SaveData;
-    if (![1, 2, 3, 4, 5, 6].includes(data.version)) return false;
+    if (![1, 2, 3, 4, 5, 6, 7].includes(data.version)) return false;
     resetIdCounter(data.nextId || 1);
     w.points = data.points;
     // v3+: totalPointsEarned あり / 旧版: points をそのまま累計として流用
@@ -93,6 +96,7 @@ export function load(w: WorldState): boolean {
     if (typeof data.shortestLifeName === 'string') w.shortestLifeName = data.shortestLifeName;
     if (data.resources) w.resources = { ...w.resources, ...data.resources };
     if (Array.isArray(data.plots) && data.plots.length > 0) w.plots = data.plots;
+    if (Array.isArray(data.obstacles)) w.obstacles = data.obstacles;
     return true;
   } catch {
     return false;

@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, FlightState, PlacedBuilding, Plot, PlotKind, Season, Vec2, VillageRank } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, FlightState, Obstacle, ObstacleKind, PlacedBuilding, Plot, PlotKind, Season, Vec2, VillageRank } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -163,6 +163,36 @@ export interface WorldState {
   landmarks: Landmark[];
   // 開拓プロット（荒地 → 均し済み → 畑等に進化）
   plots: Plot[];
+  // 障害物（プロット内にあってちびわふが叩いて消す）
+  obstacles: Obstacle[];
+}
+
+// 荒地プロット内に障害物をばら撒く
+function createInitialObstacles(plots: Plot[]): Obstacle[] {
+  const list: Obstacle[] = [];
+  let seq = 0;
+  const kinds: ObstacleKind[] = ['rock', 'stump', 'bush'];
+  const hpMap: Record<ObstacleKind, number> = { rock: 30, stump: 25, bush: 15 };
+  for (const p of plots) {
+    if (p.kind !== 'wasteland') continue;
+    const n = 2 + Math.floor(Math.random() * 2);  // 2-3 個
+    for (let i = 0; i < n; i++) {
+      const k = kinds[Math.floor(Math.random() * kinds.length)]!;
+      const margin = 14;
+      list.push({
+        id: `obs-${seq++}`,
+        pos: {
+          x: p.pos.x + margin + Math.random() * (p.w - margin * 2),
+          y: p.pos.y + margin + Math.random() * (p.h - margin * 2),
+        },
+        kind: k,
+        hp: hpMap[k],
+        maxHp: hpMap[k],
+        plotId: p.id,
+      });
+    }
+  }
+  return list;
 }
 
 // 初期プロット配置：陸地帯に格子状に 4x4 = 16 枚。
@@ -260,8 +290,19 @@ export function createWorld(): WorldState {
     npcs: createNpcs(bounds),
     bubbles: [],
     landmarks: landmarkList(bounds),
-    plots: createInitialPlots(bounds),
+    plots: [] as Plot[],
+    obstacles: [] as Obstacle[],
   };
+}
+
+// プロットと障害物を生成してワールドに載せる。createWorld / load 後に呼ぶ。
+export function ensurePlots(w: WorldState) {
+  if (!w.plots || w.plots.length === 0) {
+    w.plots = createInitialPlots(w.bounds);
+  }
+  if (!w.obstacles || w.obstacles.length === 0) {
+    w.obstacles = createInitialObstacles(w.plots);
+  }
 }
 
 export function populationCap(w: WorldState): number {
@@ -1062,6 +1103,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       cocoonPos: cocoon ? cocoon.pos : null,
       noukouPositions: w.buildings.filter((b) => b.defId === 'noukou').map((b) => b.pos),
       taikoPositions: w.buildings.filter((b) => b.defId === 'taiko').map((b) => b.pos),
+      obstaclePositions: w.obstacles.map((o) => o.pos),
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {
@@ -1744,6 +1786,67 @@ function reactNpcsToOndo(w: WorldState) {
 
 // --- Corpse stomp gag -----------------------------------------------------
 
+// 労働ループ：障害物の近くに居るちびわふが HP を削る。破壊で木材/石材が増える。
+// 全障害物が消えた荒地プロットは cleared に昇格（devLevel 1）。
+const OBSTACLE_DROPS: Record<ObstacleKind, 'wood' | 'stone'> = {
+  rock: 'stone',
+  stump: 'wood',
+  bush: 'wood',
+};
+const OBSTACLE_DROP_AMOUNT: Record<ObstacleKind, number> = {
+  rock: 2,
+  stump: 2,
+  bush: 1,
+};
+function updateLabor(w: WorldState, dt: number) {
+  if (w.obstacles.length === 0) return;
+  for (const obs of w.obstacles) {
+    // 18px 以内のちびわふ（活動可能な状態のみ）をカウント
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c)) continue;
+      if (c.state === 'sleep' || c.state === 'dead' || c.state === 'hurt') continue;
+      if (distance(c.pos, obs.pos) > 18) continue;
+      workers++;
+      // 作業中のちびわふは空腹・疲労が早める（ちびわふ側に直接加算）
+      c.fatigue += dt * 0.25;
+      c.hunger += dt * 0.10;
+    }
+    if (workers === 0) continue;
+    // ちびわふ 1 人あたり 0.5 HP/秒（くそざこ）。多いほど速く片付く
+    obs.hp -= dt * 0.5 * workers;
+    // バブル：作業中の気配（5% * workers / 秒）
+    if (Math.random() < dt * 0.5 * workers) {
+      const near = w.chibis.find((c) => isAlive(c) && distance(c.pos, obs.pos) < 18);
+      if (near) {
+        const line = obs.kind === 'rock' ? 'えいっわふ' : obs.kind === 'stump' ? 'ぬくわふ！' : 'むしるわふ';
+        spawnBubble(w.bubbles, near.pos, line, 'speech', 0.8);
+      }
+    }
+  }
+  // 破壊判定
+  const cleared = w.obstacles.filter((o) => o.hp <= 0);
+  if (cleared.length > 0) {
+    for (const c of cleared) {
+      const drop = OBSTACLE_DROPS[c.kind];
+      w.resources[drop] += OBSTACLE_DROP_AMOUNT[c.kind];
+      // プロットの workSec を累積
+      const plot = w.plots.find((p) => p.id === c.plotId);
+      if (plot) plot.workSec += 5;
+    }
+    w.obstacles = w.obstacles.filter((o) => o.hp > 0);
+    // 荒地プロット内の障害物が尽きたら cleared に昇格
+    for (const p of w.plots) {
+      if (p.kind !== 'wasteland') continue;
+      const remaining = w.obstacles.filter((o) => o.plotId === p.id).length;
+      if (remaining === 0) {
+        p.kind = 'cleared';
+        p.devLevel = 1;
+      }
+    }
+  }
+}
+
 function updateStomps(w: WorldState, dt: number) {
   if (w.corpses.length === 0) return;
   // sparse sampling: 5% of frames only checks
@@ -1794,6 +1897,7 @@ export function tickWorld(w: WorldState, dt: number) {
   compactCorpses(w);
   updateNpcs(w, dt);
   applyFuranaLossPanic(w, dt);
+  updateLabor(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
   if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);

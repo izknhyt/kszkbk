@@ -3,6 +3,7 @@
 
 import {
   createWorld,
+  ensurePlots,
   tickWorld,
   buildAt,
   buildingCost,
@@ -25,6 +26,7 @@ const SIM_MINUTES = 60;
 const INTERACT = process.argv.includes('--interact');
 
 const w = createWorld();
+ensurePlots(w);
 const dt = CONFIG.TICK_DT;
 const totalTicks = Math.floor((SIM_MINUTES * 60) / dt);
 

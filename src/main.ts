@@ -5,6 +5,7 @@ import {
   createWorld,
   damageChibi,
   damageNpc,
+  ensurePlots,
   forceSpawn,
   launchFlight,
   tickWorld,
@@ -47,6 +48,7 @@ async function start() {
   const host = document.getElementById('stage') as HTMLElement;
   const world = createWorld();
   load(world);
+  ensurePlots(world);
 
   const stage = await createStage(host);
   stage.app.renderer.on('resize', (w: number, h: number) => {

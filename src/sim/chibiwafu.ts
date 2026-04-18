@@ -84,6 +84,8 @@ interface WanderEnv {
   cocoonPos: Vec2 | null;
   noukouPositions: Vec2[];
   taikoPositions: Vec2[];
+  // 近くの障害物リスト（開拓のため働きに行く候補）
+  obstaclePositions: Vec2[];
 }
 
 function pickLandmarkTarget(c: Chibiwafu, env: WanderEnv): Landmark | null {
@@ -156,6 +158,17 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         const np = env.noukouPositions[Math.floor(Math.random() * env.noukouPositions.length)]!;
         newTarget = { x: np.x + (Math.random() - 0.5) * 40, y: np.y + (Math.random() - 0.5) * 30 };
         announcementKey = 'noukou';
+      }
+      // 開拓労働：35% で近くの障害物へ歩く（数で片付ける）
+      if (!newTarget && env.obstaclePositions.length > 0 && Math.random() < 0.35) {
+        // 最寄りを優先（近い順に並べて上位 3 つから抽選）
+        const ranked = env.obstaclePositions
+          .slice()
+          .sort((a, b) => distance(c.pos, a) - distance(c.pos, b))
+          .slice(0, 3);
+        const op = ranked[Math.floor(Math.random() * ranked.length)]!;
+        newTarget = { x: op.x + (Math.random() - 0.5) * 10, y: op.y + (Math.random() - 0.5) * 10 };
+        announcementKey = 'work';
       }
       // ランドマーク指向（パラメータ＋特性）
       if (!newTarget) {

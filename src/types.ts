@@ -171,6 +171,18 @@ export interface Plot {
   workSec: number;    // 作業累積秒。閾値で devLevel が上がる
 }
 
+// 障害物（荒地に配置。ちびわふが叩いて減らす、破壊で木材/石材を生産）
+export type ObstacleKind = 'rock' | 'stump' | 'bush';
+
+export interface Obstacle {
+  id: string;
+  pos: Vec2;
+  kind: ObstacleKind;
+  hp: number;
+  maxHp: number;
+  plotId: string;     // 所属プロット
+}
+
 // プレイヤー操作の対象（ちびわふ or NPC）。
 // stage.ts の hitTest と main.ts の punch/drag/drop イベントで共有。
 export type HitTarget =
