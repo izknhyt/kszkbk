@@ -33,7 +33,18 @@ import { spawnBubble, updateBubbles, type Bubble } from './bubbles';
 import { rollTraits } from './traits';
 import { computeRank, maxBuildingLevel, upgradeCostFor, type RankContext } from './rank';
 import { landmarkList, type Landmark } from './landmarks';
-import { maybeStartChat, pickActionAnnounce, pickOshaberiLine, pickStrikerLine, pickVictimHurtLine } from './chats';
+import {
+  CRY_REASONS,
+  DAZED_REASONS,
+  SLEEP_REASONS,
+  maybeStartChat,
+  pickActionAnnounce,
+  pickOshaberiLine,
+  pickReason,
+  pickStrikerLine,
+  pickVictimHurtLine,
+} from './chats';
+import { FLAVOR_AMBIENT, FLAVOR_DURING, FLAVOR_SEASONAL, applyFlavorSpeedMod } from './flavorBehaviors';
 import { TRAIT_DEFS } from './traits';
 import {
   applyTraitBias,
@@ -391,6 +402,8 @@ export function forceSpawn(w: WorldState) {
     params,
     flavors,
   });
+  // フレーバー由来の速度補正（足が妙に速い／遅い）
+  child.speed *= applyFlavorSpeedMod(flavors);
   setState(child, 'surprised', 1.5);
   const traitLabel = traits.length > 0 ? `（${traits.map((t) => TRAIT_DEFS[t].name).join('・')}）` : '';
   pushLife(child, 0, `生まれた${traitLabel}`);
@@ -506,9 +519,18 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   c.stateTimer -= dt;
   if (c.stateTimer <= 0 && c.state !== 'dead') {
     const roll = Math.random();
-    if (roll < 0.05) setState(c, 'cry', 0.8);
-    else if (roll < 0.08) setState(c, 'dazed', 0.6);
-    else if (roll < 0.10) setState(c, 'sleep', 1.5);
+    if (roll < 0.05) {
+      setState(c, 'cry', 0.8);
+      if (Math.random() < 0.7) spawnBubble(w.bubbles, c.pos, pickReason(CRY_REASONS), 'speech', 1.4);
+    }
+    else if (roll < 0.08) {
+      setState(c, 'dazed', 0.6);
+      if (Math.random() < 0.5) spawnBubble(w.bubbles, c.pos, pickReason(DAZED_REASONS), 'speech', 1.2);
+    }
+    else if (roll < 0.10) {
+      setState(c, 'sleep', 1.5);
+      if (Math.random() < 0.6) spawnBubble(w.bubbles, c.pos, pickReason(SLEEP_REASONS), 'speech', 1.3);
+    }
     // 哲学石に着いたら空を見る（philo パラメータで確率決定）
     else if (
       c.targetLandmarkId === 'philosophy' &&
@@ -626,6 +648,27 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   // sleep 中のいびきうるさい
   if (c.state === 'sleep' && c.flavors.includes('いびきがうるさい') && Math.random() < 0.005) {
     spawnBubble(w.bubbles, c.pos, 'ぐーぐーわふ', 'speech', 1.3);
+  }
+
+  // --- テーブル駆動のフレーバー挙動 ----------------------------------
+  for (const f of c.flavors) {
+    const amb = FLAVOR_AMBIENT[f];
+    if (amb && c.state === 'idle' && Math.random() < amb.chance) {
+      if (amb.bubble) spawnBubble(w.bubbles, c.pos, amb.bubble, 'speech', 1.2);
+      if (amb.state) setState(c, amb.state, amb.duration ?? 1);
+    }
+    const seasonals = FLAVOR_SEASONAL[f];
+    if (seasonals) {
+      for (const s of seasonals) {
+        if (s.season === w.season && Math.random() < s.chance) {
+          spawnBubble(w.bubbles, c.pos, s.bubble, 'speech', 1.3);
+        }
+      }
+    }
+    const during = FLAVOR_DURING[f];
+    if (during && c.state === during.state && Math.random() < during.chance) {
+      spawnBubble(w.bubbles, c.pos, during.bubble, 'speech', 1.2);
+    }
   }
 
   // 移動（止まってるステート中は動かない）
