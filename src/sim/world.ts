@@ -48,12 +48,18 @@ import {
   SLEEP_REASONS,
   maybeStartChat,
   pickActionAnnounce,
+  pickAngryBystanderLine,
+  pickBegFoodLine,
+  pickComfortLine,
+  pickCopyCryLine,
   pickMorashiDisgustLine,
   pickMorashiWipeLine,
   pickOshaberiLine,
   pickReason,
   pickRifujinStrikerLine,
   pickRifujinVictimLine,
+  pickSchadenfreudeLine,
+  pickSleepyContagionLine,
   pickStrikerLine,
   pickVictimHurtLine,
 } from './chats';
@@ -392,6 +398,7 @@ export function kill(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   pushLife(c, Math.floor(c.ageSec), `死んだ（${DEATH_CAUSES[causeId]!.title}）`);
   logDeath(w, c, causeId);
   reactNpcsToDeath(w, c);
+  chibiSchadenfreude(w, c);
 }
 
 // HP を減らす。0 以下で causeId で死亡。戻り値 = 死んだか。
@@ -814,6 +821,14 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     }
   }
 
+  // --- 感情の伝染 / 野次 ------------------------------------------------
+  // idle なちびわふが 45px 以内の "反応可能な" 子を見つけて反応する。
+  // 泣いてる子 → 慰め / もらい泣き
+  // 食べてる子 → おねだり
+  // 寝てる子  → あくび伝染
+  // 怒ってる子 → 怯える
+  emergentPeerReactions(w, c);
+
   // 移動（止まってるステート中は動かない）
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
     const cocoon = w.npcs.find((n) => n.id === 'cocoon');
@@ -853,6 +868,68 @@ function maybePunishRifujin(w: WorldState, victim: Chibiwafu, flavor: string) {
   if (Math.random() < RIFUJIN_KILL_CHANCE) {
     kill(w, victim, 'rifujin_boko');
   }
+}
+
+// 感情伝染：idle なちびわふが近くの子の状態を見て反応する。
+// ～1秒に 1回前後のペースで発火するよう、per-tick 確率を抑え目に設定。
+function emergentPeerReactions(w: WorldState, c: Chibiwafu) {
+  if (c.state !== 'idle') return;
+  if (c.chatCooldown > 0) return;          // おしゃべり CD を共有
+  if (Math.random() > 0.004) return;        // 50秒に 1回程度（per chibi）
+  // 45px 以内で "反応したくなる" ステートの子を探す
+  const targets = w.chibis.filter(
+    (o) => o !== c && isAlive(o) && distance(o.pos, c.pos) < 45
+      && (o.state === 'cry' || o.state === 'eating' || o.state === 'sleep' || o.state === 'angry'),
+  );
+  if (targets.length === 0) return;
+  const t = targets[Math.floor(Math.random() * targets.length)]!;
+
+  if (t.state === 'cry') {
+    // 40% 慰め / 60% もらい泣き
+    if (Math.random() < 0.4) {
+      spawnBubble(w.bubbles, c.pos, pickComfortLine(), 'speech', 1.4);
+      pushLife(c, Math.floor(c.ageSec), `${t.name} を慰めた`);
+    } else {
+      setState(c, 'cry', 1.2);
+      spawnBubble(w.bubbles, c.pos, pickCopyCryLine(), 'speech', 1.3);
+      pushLife(c, Math.floor(c.ageSec), `${t.name} につられて泣いた`);
+    }
+  } else if (t.state === 'eating') {
+    spawnBubble(w.bubbles, c.pos, pickBegFoodLine(), 'speech', 1.3);
+    pushLife(c, Math.floor(c.ageSec), `${t.name} の食事をねだった`);
+  } else if (t.state === 'sleep') {
+    // 25% で自分もあくび（dazed 短時間）
+    spawnBubble(w.bubbles, c.pos, pickSleepyContagionLine(), 'speech', 1.3);
+    if (Math.random() < 0.25) setState(c, 'dazed', 1);
+  } else if (t.state === 'angry') {
+    // 怒ってる子を見て怯える
+    spawnBubble(w.bubbles, c.pos, pickAngryBystanderLine(), 'speech', 1.3);
+    setState(c, 'dazed', 0.8);
+  }
+  c.chatCooldown = 4 + Math.random() * 3;
+}
+
+// "悪い死に方" 一覧：この causeId で死んだ子には周囲が "ざまあみろ" と言いがち
+const SCHADENFREUDE_CAUSES = new Set<DeathCauseId>([
+  'namaiki_boko',      // 生意気言ってボコられた
+  'rifujin_boko',      // 粗相で理不尽に殴られた（でもこれは気の毒？一応混ぜる）
+  'bo_meijin_tenka',   // 棒名人が巻き添え→自業自得
+  'kamisama_punch',    // 神様にボコられた（子どもの野次的）
+  'cocoon_abuse',      // ココンに叩き殺された
+]);
+
+// 悪い死に方をした子の近くにいるちびわふが、まれに野次を飛ばす
+function chibiSchadenfreude(w: WorldState, victim: Chibiwafu) {
+  if (victim.deathCauseId == null || !SCHADENFREUDE_CAUSES.has(victim.deathCauseId as DeathCauseId)) return;
+  const witnesses = w.chibis.filter(
+    (o) => o !== victim && isAlive(o) && distance(o.pos, victim.pos) < 70 && o.state === 'idle',
+  );
+  if (witnesses.length === 0) return;
+  // 1人だけランダムに選び 12% の確率で野次
+  const w1 = witnesses[Math.floor(Math.random() * witnesses.length)]!;
+  if (Math.random() > 0.12) return;
+  spawnBubble(w.bubbles, w1.pos, pickSchadenfreudeLine(), 'speech', 1.6);
+  pushLife(w1, Math.floor(w1.ageSec), `${victim.name} の死を笑った`);
 }
 
 // 生意気セリフが出ると"たまに"ボコられる。毎回ではない。

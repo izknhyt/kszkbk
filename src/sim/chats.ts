@@ -431,6 +431,47 @@ export function pickGodThrowLine(): string {
   return GOD_THROW_LINES[Math.floor(Math.random() * GOD_THROW_LINES.length)]!;
 }
 
+// =========================================================================
+// 生き生きリアクション用のプール
+//   他のちびわふが泣いてる／怒ってる／食べてる／寝てるのを見た時、
+//   または悪い子が死んだ時、周りが何か言う。
+// =========================================================================
+
+// 慰め系（誰かが泣いてる時）
+const COMFORT_LINES = [
+  'よしよしわふ', 'なかないでわふ', 'だいじょうぶわふ', 'いっしょにいるわふ',
+  'ぼくもいるわふ', 'ぎゅっわふ', 'なみだふくわふ',
+];
+// もらい泣き系
+const COPY_CRY_LINES = [
+  'うぇんわふ…', 'ぼくもかなしいわふ', 'ぽろぽろわふ', 'なんだかなきたいわふ',
+];
+// 食べ物おねだり系
+const BEGFOOD_LINES = [
+  'いいなわふ', 'ちょうだいわふ', 'ぼくもたべたいわふ', 'ひとくちわふ',
+  'おなかすいたわふ', 'わけてわふ',
+];
+// あくび伝染系
+const SLEEPY_CONTAGION_LINES = [
+  'ふぁ〜わふ', 'ぼくもねむくなったわふ', 'つられてあくびわふ', 'めがおもいわふ',
+];
+// 怒ってる子を見た時（びびる／引く）
+const ANGRY_BYSTANDER_LINES = [
+  'こわいわふ…', 'ひぃぃわふ', 'はなれるわふ', 'どうしたわふ？',
+  'ちかよらないわふ', 'きげんわるいわふ…',
+];
+// 悪い子が死んだ時のざまあみろ系
+const SCHADENFREUDE_LINES = [
+  'ざまあみろわふ', 'じごうじとくわふ', 'バチあたったわふ', 'いいきみわふ',
+  'いばってたからわふ', 'そうなるとおもったわふ', 'しったことかわふ',
+];
+export function pickComfortLine(): string { return COMFORT_LINES[Math.floor(Math.random() * COMFORT_LINES.length)]!; }
+export function pickCopyCryLine(): string { return COPY_CRY_LINES[Math.floor(Math.random() * COPY_CRY_LINES.length)]!; }
+export function pickBegFoodLine(): string { return BEGFOOD_LINES[Math.floor(Math.random() * BEGFOOD_LINES.length)]!; }
+export function pickSleepyContagionLine(): string { return SLEEPY_CONTAGION_LINES[Math.floor(Math.random() * SLEEPY_CONTAGION_LINES.length)]!; }
+export function pickAngryBystanderLine(): string { return ANGRY_BYSTANDER_LINES[Math.floor(Math.random() * ANGRY_BYSTANDER_LINES.length)]!; }
+export function pickSchadenfreudeLine(): string { return SCHADENFREUDE_LINES[Math.floor(Math.random() * SCHADENFREUDE_LINES.length)]!; }
+
 // 殴られた後、反抗して神様に吠える時の一言
 const GOD_DEFIANCE_LINES = [
   'いたすぎるわふ！', 'ゆるさないわふ', 'ぷんっわふ！', 'おこったわふ！',
