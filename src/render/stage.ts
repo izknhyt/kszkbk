@@ -25,6 +25,9 @@ export interface StageHandle {
   resetCamera: () => void;
   // 画面座標（client）→ ワールド座標に変換
   screenToWorld: (cx: number, cy: number) => { x: number; y: number };
+  // pointerdown 位置（world座標）にあるちびわふIDを返す callback を登録。
+  // null を返すとその位置にはちびわふがいない → カメラパン or 空クリックに倒される。
+  setHitTest: (fn: (wx: number, wy: number) => number | null) => void;
 }
 
 interface ChibiView {
@@ -139,37 +142,98 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     { passive: false },
   );
 
-  let dragState: { lastX: number; lastY: number; pointerId: number; startX: number; startY: number; moved: boolean } | null = null;
+  // 右クリックメニューを抑制（右クリックはちびわふ情報表示に割り当てるため）
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const wp = screenToWorld(e.clientX, e.clientY);
+    const id = hitTest ? hitTest(wp.x, wp.y) : null;
+    const ev = new CustomEvent('kszk-inspect', {
+      detail: { chibiId: id, clientX: e.clientX, clientY: e.clientY, rect },
+    });
+    canvas.dispatchEvent(ev);
+  });
+
+  let hitTest: ((wx: number, wy: number) => number | null) | null = null;
+  function setHitTest(fn: (wx: number, wy: number) => number | null) { hitTest = fn; }
+
+  type PointerMode = 'pan' | 'chibi-drag';
+  let pointerState: {
+    pointerId: number;
+    mode: PointerMode;
+    lastX: number;
+    lastY: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    button: number;
+    chibiId: number | null;
+  } | null = null;
+
   canvas.addEventListener('pointerdown', (e) => {
+    // 右クリックは contextmenu で処理済み
+    if (e.button === 2) return;
     canvas.setPointerCapture(e.pointerId);
-    dragState = { lastX: e.clientX, lastY: e.clientY, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false };
+    const wp = screenToWorld(e.clientX, e.clientY);
+    const id = hitTest ? hitTest(wp.x, wp.y) : null;
+    pointerState = {
+      pointerId: e.pointerId,
+      mode: id != null ? 'chibi-drag' : 'pan',
+      lastX: e.clientX,
+      lastY: e.clientY,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+      button: e.button,
+      chibiId: id,
+    };
   });
+
   canvas.addEventListener('pointermove', (e) => {
-    if (!dragState || dragState.pointerId !== e.pointerId) return;
-    cameraX += e.clientX - dragState.lastX;
-    cameraY += e.clientY - dragState.lastY;
-    dragState.lastX = e.clientX;
-    dragState.lastY = e.clientY;
-    if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) > 4) dragState.moved = true;
-    clampCamera();
-    applyCamera();
+    if (!pointerState || pointerState.pointerId !== e.pointerId) return;
+    const dx = e.clientX - pointerState.lastX;
+    const dy = e.clientY - pointerState.lastY;
+    pointerState.lastX = e.clientX;
+    pointerState.lastY = e.clientY;
+    if (Math.hypot(e.clientX - pointerState.startX, e.clientY - pointerState.startY) > 4) pointerState.moved = true;
+    if (pointerState.mode === 'pan') {
+      cameraX += dx;
+      cameraY += dy;
+      clampCamera();
+      applyCamera();
+    } else if (pointerState.mode === 'chibi-drag' && pointerState.chibiId != null && pointerState.moved) {
+      const wp = screenToWorld(e.clientX, e.clientY);
+      const ev = new CustomEvent('kszk-chibi-drag', {
+        detail: { chibiId: pointerState.chibiId, worldX: wp.x, worldY: wp.y },
+      });
+      canvas.dispatchEvent(ev);
+    }
   });
-  const endDrag = (e: PointerEvent) => {
-    if (dragState && dragState.pointerId === e.pointerId) {
-      canvas.releasePointerCapture(e.pointerId);
-      const wasClick = !dragState.moved;
-      const startX = dragState.startX;
-      const startY = dragState.startY;
-      dragState = null;
-      if (wasClick) {
-        const ev = new CustomEvent('kszk-click', { detail: { clientX: startX, clientY: startY } });
+
+  const endPointer = (e: PointerEvent) => {
+    if (!pointerState || pointerState.pointerId !== e.pointerId) return;
+    canvas.releasePointerCapture(e.pointerId);
+    const s = pointerState;
+    pointerState = null;
+    if (s.mode === 'chibi-drag' && s.chibiId != null) {
+      const wp = screenToWorld(e.clientX, e.clientY);
+      if (s.moved) {
+        const ev = new CustomEvent('kszk-chibi-drop', {
+          detail: { chibiId: s.chibiId, worldX: wp.x, worldY: wp.y },
+        });
+        canvas.dispatchEvent(ev);
+      } else {
+        // 左クリックで殴る
+        const ev = new CustomEvent('kszk-chibi-punch', { detail: { chibiId: s.chibiId } });
         canvas.dispatchEvent(ev);
       }
+    } else if (s.mode === 'pan' && !s.moved) {
+      // 空クリック（何もない場所を左クリック）— 現状は何もしない
     }
   };
-  canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', endDrag);
-  canvas.addEventListener('pointerleave', endDrag);
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+  canvas.addEventListener('pointerleave', endPointer);
 
   const views = new Map<number, ChibiView>();
   const corpseViews = new Map<number, Sprite>();
@@ -358,6 +422,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     setSeason,
     resetCamera: fitCameraToViewport,
     screenToWorld,
+    setHitTest,
   };
 }
 

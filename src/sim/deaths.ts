@@ -231,6 +231,22 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 18,
     template: (n) => `${n}はくそざこの分際で生意気を言い、周りから棒でボコボコにされた。`,
   },
+  kamisama_punch: {
+    id: 'kamisama_punch',
+    title: '神様の鉄槌',
+    rare: false,
+    uncommon: true,
+    points: 30,
+    template: (n) => `${n}は空から落ちてきた神の手に撃ち抜かれ、ぺしゃんこになった。`,
+  },
+  kamisama_drown: {
+    id: 'kamisama_drown',
+    title: '神様に投げ込まれて水死',
+    rare: false,
+    uncommon: true,
+    points: 28,
+    template: (n) => `${n}は神様に掴まれ、ぽいっと泥川に投げ込まれ沈んだ。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;

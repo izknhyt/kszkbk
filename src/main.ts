@@ -4,12 +4,17 @@ import {
   buildAt,
   createWorld,
   forceSpawn,
+  kill as killChibi,
   tickWorld,
   triggerBokaigi,
   triggerFire,
   triggerOndo,
   upgradeOne,
 } from './sim/world';
+import { pushLife } from './sim/world';
+import { isAlive as isChibiAlive, setState } from './sim/chibiwafu';
+import { spawnBubble } from './sim/bubbles';
+import type { WorldState } from './sim/world';
 import { RANK_DEFS } from './sim/rank';
 import { TRAIT_DEFS } from './sim/traits';
 import { DEATH_CAUSES as DEATHS } from './sim/deaths';
@@ -66,33 +71,60 @@ async function start() {
   let acc = 0;
   let prev = performance.now();
 
-  // --- 個体クリック → life log モーダル --------------------------------
+  // --- プレイヤー操作 --------------------------------------------------
+  // 左クリック = 殴る、右クリック = 情報モーダル、ドラッグ = 持ち上げて放る
   let pinnedId: number | null = null;
-  stage.app.canvas.addEventListener('kszk-click', (e) => {
-    const detail = (e as CustomEvent).detail as { clientX: number; clientY: number };
-    const wp = stage.screenToWorld(detail.clientX, detail.clientY);
-    // 近い living chibi を探す
-    let best: Chibiwafu | null = null;
-    let bestDist = 26; // クリック許容距離（ワールド座標）
+
+  // Stage にちびわふ当たり判定を登録（stage 側で左クリック/ドラッグ対象を判定するため）
+  stage.setHitTest((wx, wy) => {
+    let bestId: number | null = null;
+    let bestDist = 26;
     for (const c of world.chibis) {
-      const d = Math.hypot(c.pos.x - wp.x, c.pos.y - wp.y);
-      if (d < bestDist) { best = c; bestDist = d; }
+      if (!isChibiAlive(c)) continue;
+      const d = Math.hypot(c.pos.x - wx, c.pos.y - wy);
+      if (d < bestDist) { bestId = c.id; bestDist = d; }
     }
-    if (best) {
-      pinnedId = best.id;
-      showChibiModal(best, false);
-    } else {
-      // 死体にヒットしたら epitaph モードで表示
-      for (const corpse of world.corpses) {
-        const d = Math.hypot(corpse.pos.x - wp.x, corpse.pos.y - wp.y);
-        if (d < 26) {
-          showChibiModal(corpse, true);
-          return;
-        }
-      }
-      closeChibiModal();
-      pinnedId = null;
+    return bestId;
+  });
+
+  // 右クリック → 情報モーダル（生存なら life log、死体なら epitaph）
+  stage.app.canvas.addEventListener('kszk-inspect', (e) => {
+    const detail = (e as CustomEvent).detail as { chibiId: number | null; clientX: number; clientY: number };
+    if (detail.chibiId != null) {
+      const alive = world.chibis.find((c) => c.id === detail.chibiId);
+      if (alive) { pinnedId = alive.id; showChibiModal(alive, false); return; }
     }
+    // 生体ヒットなし → 死体からも探す
+    const wp = stage.screenToWorld(detail.clientX, detail.clientY);
+    for (const corpse of world.corpses) {
+      const d = Math.hypot(corpse.pos.x - wp.x, corpse.pos.y - wp.y);
+      if (d < 26) { showChibiModal(corpse, true); return; }
+    }
+    closeChibiModal();
+    pinnedId = null;
+  });
+
+  // 左クリック（動かなかった場合）→ 殴る
+  stage.app.canvas.addEventListener('kszk-chibi-punch', (e) => {
+    const detail = (e as CustomEvent).detail as { chibiId: number };
+    punchChibi(world, detail.chibiId);
+  });
+
+  // ドラッグ中：ちびわふをカーソル位置に移動
+  stage.app.canvas.addEventListener('kszk-chibi-drag', (e) => {
+    const detail = (e as CustomEvent).detail as { chibiId: number; worldX: number; worldY: number };
+    const c = world.chibis.find((x) => x.id === detail.chibiId);
+    if (!c) return;
+    c.pos.x = detail.worldX;
+    c.pos.y = detail.worldY;
+    // target をクリアして、ドロップ後に wanderStep が再抽選するように
+    c.target = null;
+  });
+
+  // ドロップ → 水中ならそのまま溺死、それ以外は surprised + life log
+  stage.app.canvas.addEventListener('kszk-chibi-drop', (e) => {
+    const detail = (e as CustomEvent).detail as { chibiId: number; worldX: number; worldY: number };
+    dropChibi(world, detail.chibiId, detail.worldX, detail.worldY);
   });
 
   const modal = document.getElementById('chibi-modal')!;
@@ -192,6 +224,36 @@ function flashToast(msg: string, kind: ToastKind = 'info') {
     el.style.transform = 'translateX(-50%) translateY(-10px)';
   }, 1600);
   setTimeout(() => el.remove(), 2100);
+}
+
+function punchChibi(world: WorldState, chibiId: number) {
+  const c = world.chibis.find((x) => x.id === chibiId);
+  if (!c || !isChibiAlive(c)) return;
+  spawnBubble(world.bubbles, c.pos, 'ぎゃー！', 'speech', 1.2);
+  spawnBubble(world.bubbles, { x: c.pos.x, y: c.pos.y - 30 }, '💥', 'stomp', 0.6);
+  setState(c, 'hurt', 1.3);
+  pushLife(c, Math.floor(c.ageSec), '神様に殴られた');
+  // 20% で即死
+  if (Math.random() < 0.2) killChibi(world, c, 'kamisama_punch');
+}
+
+function dropChibi(world: WorldState, chibiId: number, wx: number, wy: number) {
+  const c = world.chibis.find((x) => x.id === chibiId);
+  if (!c || !isChibiAlive(c)) return;
+  c.pos.x = wx;
+  c.pos.y = wy;
+  c.target = null;
+  // 水中に落とされたら溺死
+  if (wy > 414) {
+    spawnBubble(world.bubbles, c.pos, 'わふぅ…', 'speech', 1.1);
+    pushLife(c, Math.floor(c.ageSec), '神様に水へ投げ込まれた');
+    killChibi(world, c, 'kamisama_drown');
+  } else {
+    // 陸地に落とされたら驚いて数秒固まる
+    setState(c, 'surprised', 1.4);
+    spawnBubble(world.bubbles, c.pos, 'ぽわっ', 'speech', 1);
+    pushLife(c, Math.floor(c.ageSec), '神様に掴まれて移動させられた');
+  }
 }
 
 function showChibiModal(c: Chibiwafu, isEpitaph: boolean) {
