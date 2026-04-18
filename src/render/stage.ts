@@ -274,7 +274,12 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         canvas.dispatchEvent(ev);
       }
     } else if (s.mode === 'pan' && !s.moved) {
-      // 空クリック（何もない場所を左クリック）— 現状は何もしない
+      // 空クリック（何もない場所を左クリック）→ 建設モードで利用
+      const wp = screenToWorld(e.clientX, e.clientY);
+      const ev = new CustomEvent('kszk-empty-click', {
+        detail: { worldX: wp.x, worldY: wp.y },
+      });
+      canvas.dispatchEvent(ev);
     }
   };
   canvas.addEventListener('pointerup', endPointer);

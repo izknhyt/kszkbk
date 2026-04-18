@@ -97,6 +97,57 @@ async function start() {
   // 左クリック = 殴る、右クリック = 情報モーダル、ドラッグ = 持ち上げて放る
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
+  // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
+  let buildMode: 'farm' | 'channel' | 'path' | null = null;
+  const plotBuildCosts: Record<'farm' | 'channel' | 'path', { wood: number; stone: number }> = {
+    farm:    { wood: 2, stone: 0 },
+    channel: { wood: 0, stone: 1 },
+    path:    { wood: 0, stone: 1 },
+  };
+  function setBuildMode(m: typeof buildMode) {
+    buildMode = m;
+    document.querySelectorAll<HTMLButtonElement>('.plot-build-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.plotKind === m);
+    });
+    const hint = document.getElementById('plot-build-hint');
+    if (hint) {
+      hint.textContent = m
+        ? `${m === 'farm' ? '畑' : m === 'channel' ? '水路' : '道'} モード：cleared プロットを左クリック／再押下で解除`
+        : 'ボタンを押してから cleared 地を左クリック';
+    }
+  }
+  document.querySelectorAll<HTMLButtonElement>('.plot-build-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.plotKind as 'farm' | 'channel' | 'path';
+      setBuildMode(buildMode === kind ? null : kind);
+    });
+  });
+  // 空クリック → 建設モードなら該当プロットを建てる
+  stage.app.canvas.addEventListener('kszk-empty-click', (e) => {
+    if (!buildMode) return;
+    const detail = (e as CustomEvent).detail as { worldX: number; worldY: number };
+    const target = world.plots.find(
+      (p) => detail.worldX >= p.pos.x && detail.worldX <= p.pos.x + p.w
+        && detail.worldY >= p.pos.y && detail.worldY <= p.pos.y + p.h,
+    );
+    if (!target) return;
+    if (target.kind !== 'cleared') {
+      flashToast('cleared プロットだけに建てられます', 'info');
+      return;
+    }
+    const cost = plotBuildCosts[buildMode];
+    if (world.resources.wood < cost.wood || world.resources.stone < cost.stone) {
+      flashToast(`資源不足 (🪵${cost.wood} 🪨${cost.stone})`, 'info');
+      return;
+    }
+    world.resources.wood -= cost.wood;
+    world.resources.stone -= cost.stone;
+    target.kind = buildMode;
+    target.devLevel = 2;
+    target.workSec = 0;
+    flashToast(`${buildMode === 'farm' ? '🌾 畑' : buildMode === 'channel' ? '💧 水路' : '🛤 道'} を建設した`, 'info');
+    // 連打しやすいよう建設モードは継続（再押下で解除）
+  });
 
   // Stage に当たり判定を登録：ちびわふ優先、次に NPC。
   // ちびわふは半径 26px、NPC は NPC_DEFS.scale に応じたやや広め。
