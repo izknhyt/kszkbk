@@ -63,9 +63,9 @@ export const NPC_DEFS: Record<NpcId, NpcDef> = {
     reactOnDeath: false,
     reactOnBirth: true,
     reactOnOndo: false,
-    // 村の要。高耐久だが死んだら復活しない（Infinity）。
+    // 村の要。高耐久。死ぬと村はパニック＋出産停止になるが、120秒で戻ってくる。
     maxHp: 220,
-    respawnSec: Infinity,
+    respawnSec: 120,
   },
 };
 
@@ -176,7 +176,7 @@ export function pickLine(pool: string[]): string {
   return pool[Math.floor(Math.random() * pool.length)]!;
 }
 
-// 各NPC共通の復活台詞（ココン/スズ/ルー 用）。id ごとに分岐させる。
+// 各NPC共通の復活台詞。id ごとに分岐させる。
 export const COCOON_REVIVE_LINES = [
   'ただいま〜', 'あれ？ いきてる', 'なぜかいるわふ', 'ママぁ…もどってきた',
   'かえってきちゃった', '…？',
@@ -187,14 +187,86 @@ export const SUZU_REVIVE_LINES = [
 export const LOU_REVIVE_LINES = [
   '……がぅ', '………', '……もそ',
 ];
+// フラナは "ママ帰還" 感のある台詞（村全体の大イベント）
+export const FURANA_REVIVE_LINES = [
+  'ただいま…生き返ったわ', 'あなたたち…ママ戻ってきたわよ',
+  'まだ死ねない…みんないるもの', '……ふぅ、夢ね', 'ママよー',
+];
 
 // NPCId から復活台詞を返す
 export function reviveLinesFor(id: NpcId): string[] {
   if (id === 'cocoon') return COCOON_REVIVE_LINES;
   if (id === 'suzu') return SUZU_REVIVE_LINES;
   if (id === 'lou') return LOU_REVIVE_LINES;
-  // furana は復活しないのでここに来ないが、念のため
+  if (id === 'furana') return FURANA_REVIVE_LINES;
   return ['……'];
+}
+
+// =========================================================================
+// NPC が掴まれ／振り回され／投げられ／着地した時のセリフ（個性別）
+//   ちびわふの "わふ" 語尾は使わず、各 NPC のキャラに合わせた発話にする。
+// =========================================================================
+export interface NpcGrabLineSets {
+  shake: string[];   // 振り回され最中
+  thrown: string[];  // 空中を飛んでる瞬間
+  landed: string[];  // 着地した瞬間
+}
+
+export const NPC_GRAB_LINES: Record<NpcId, NpcGrabLineSets> = {
+  furana: {
+    shake: [
+      'やめなさーい！', 'ふにゃ〜！', 'くらくらする〜', 'まわるーー！',
+      'きゃああ！', 'やめてってば！', 'ごめんなさーい！',
+    ],
+    thrown: [
+      '飛んでる〜！？', 'きゃああ！', 'なんで私が…', 'いやあああ',
+    ],
+    landed: [
+      'どさっ', 'いたたた…', 'あなた…覚えてなさい', 'ぐぬぬ…',
+    ],
+  },
+  suzu: {
+    shake: [
+      'ちょっとー！', 'ひぎ！', 'やめ…やめて！', 'てちょうが！',
+      'ひっ', 'データとれない！', 'ぐるぐるしないで！',
+    ],
+    thrown: [
+      '飛んでる！？', 'てちょうがーー', 'ぎゃー', 'ママー助けて！',
+    ],
+    landed: [
+      'ど…どさ', 'あたたた', 'ママ呼ぶからね！', 'もうしらない！',
+    ],
+  },
+  cocoon: {
+    shake: [
+      'はなせー！', 'くそー！', 'ちくしょう！', 'ママーー！',
+      'ぶっとばすぞ！', 'めがまわるー', 'うるさい！はなせ！',
+    ],
+    thrown: [
+      'うわああ！', 'どこーー！？', 'ぎゃああ', 'ママあ！',
+    ],
+    landed: [
+      'どさっ', 'いてー', 'やったなー覚えてろー', 'ひどいー！',
+    ],
+  },
+  lou: {
+    shake: ['……', '……ぐぅ', '……？', '……う', '…ねかせて'],
+    thrown: ['……！？', '……ぇ', '…ふわ'],
+    landed: ['……', '……ぐ', '……まだ寝てる', '…ん'],
+  },
+};
+
+export function pickNpcShakeLine(id: NpcId): string {
+  const p = NPC_GRAB_LINES[id].shake;
+  return p[Math.floor(Math.random() * p.length)]!;
+}
+export function pickNpcThrowLine(id: NpcId): string {
+  const p = NPC_GRAB_LINES[id].thrown;
+  return p[Math.floor(Math.random() * p.length)]!;
+}
+export function pickNpcLandedLine(id: NpcId): string {
+  const p = NPC_GRAB_LINES[id].landed;
+  return p[Math.floor(Math.random() * p.length)]!;
 }
 
 export const COCOON_DEATH_LINES = [

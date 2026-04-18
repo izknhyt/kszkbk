@@ -27,7 +27,14 @@ import { RANK_DEFS } from './sim/rank';
 import { TRAIT_DEFS } from './sim/traits';
 import { DEATH_CAUSES as DEATHS } from './sim/deaths';
 import { PARAM_COLOR, PARAM_KEYS, PARAM_LABEL } from './sim/personality';
-import { NPC_DEFS, type NpcId, type NpcState } from './sim/npcs';
+import {
+  NPC_DEFS,
+  pickNpcLandedLine,
+  pickNpcShakeLine,
+  pickNpcThrowLine,
+  type NpcId,
+  type NpcState,
+} from './sim/npcs';
 import type { Chibiwafu, HitTarget, VillageRank } from './types';
 import { clearSave, load, save } from './meta/save';
 import { CONFIG, type TimeScale } from './config';
@@ -228,7 +235,7 @@ async function start() {
       if (died) { dragSession = null; return; }
     }
     if (dragSession.bubbleCooldown <= 0 && segment > 2) {
-      spawnBubble(world.bubbles, n.pos, pickGodShakeLine(), 'speech', 0.9);
+      spawnBubble(world.bubbles, n.pos, pickNpcShakeLine(id), 'speech', 0.9);
       dragSession.bubbleCooldown = 80;
     }
   }
@@ -388,11 +395,11 @@ function dropNpc(world: WorldState, id: NpcId, wx: number, wy: number, throwDist
   // 着地：距離に応じて NPC へのダメージ。ちびわふより倍率低め。
   const dmg = Math.round(3 + Math.min(20, throwDist * 0.06));
   if (throwDist > 80) {
-    spawnBubble(world.bubbles, n.pos, pickGodThrowLine(), 'speech', 0.9);
+    spawnBubble(world.bubbles, n.pos, pickNpcThrowLine(id), 'speech', 0.9);
   }
   const died = damageNpc(world, n, dmg);
   if (!died) {
-    spawnBubble(world.bubbles, n.pos, pickGodLandedLine(), 'speech', 1.2);
+    spawnBubble(world.bubbles, n.pos, pickNpcLandedLine(id), 'speech', 1.2);
   }
 }
 
