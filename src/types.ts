@@ -152,26 +152,19 @@ export interface PlacedBuilding {
 
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
-// 開拓プロット。格子状ではなく座標ベースの矩形セル。
-export type PlotKind =
-  | 'wasteland'  // 荒地（初期状態、障害物まみれ）
-  | 'cleared'    // 均された土地（建物/畑の土台）
-  | 'farm'       // 畑
-  | 'path'       // 道
-  | 'water'      // 水源
-  | 'channel';   // 水路
+// フリー配置の開拓要素（水源・水路・畑・道）。
+// タイル/グリッド無しで任意の座標に置ける。水の伝播は距離ベースで判定。
+export type FeatureKind = 'water' | 'channel' | 'path' | 'farm';
 
-export interface Plot {
+export interface Feature {
   id: string;
   pos: Vec2;
-  w: number;
-  h: number;
-  kind: PlotKind;
-  devLevel: number;   // 0-3（開拓進行度）
-  workSec: number;    // 作業累積秒。閾値で devLevel が上がる
+  kind: FeatureKind;
+  devLevel: number;   // 0-3（畑の成長段階・道の使用摩耗など）
+  workSec: number;    // 作業累積秒
 }
 
-// 障害物（荒地に配置。ちびわふが叩いて減らす、破壊で木材/石材を生産）
+// 障害物（荒地に散在。ちびわふが叩いて減らす、破壊で木材/石材を生産）
 export type ObstacleKind = 'rock' | 'stump' | 'bush';
 
 export interface Obstacle {
@@ -180,7 +173,6 @@ export interface Obstacle {
   kind: ObstacleKind;
   hp: number;
   maxHp: number;
-  plotId: string;     // 所属プロット
 }
 
 // プレイヤー操作の対象（ちびわふ or NPC）。

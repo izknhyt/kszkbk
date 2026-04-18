@@ -112,8 +112,8 @@ async function start() {
     const hint = document.getElementById('plot-build-hint');
     if (hint) {
       hint.textContent = m
-        ? `${m === 'farm' ? '畑' : m === 'channel' ? '水路' : '道'} モード：cleared プロットを左クリック／再押下で解除`
-        : 'ボタンを押してから cleared 地を左クリック';
+        ? `${m === 'farm' ? '畑' : m === 'channel' ? '水路' : '道'} モード：地面を左クリックで設置／再押下で解除`
+        : 'ボタンを押してから地面の好きな場所を左クリック';
     }
   }
   document.querySelectorAll<HTMLButtonElement>('.plot-build-btn').forEach((btn) => {
@@ -122,17 +122,29 @@ async function start() {
       setBuildMode(buildMode === kind ? null : kind);
     });
   });
-  // 空クリック → 建設モードなら該当プロットを建てる
+  // 空クリック → 建設モードならクリック位置に feature を置く
   stage.app.canvas.addEventListener('kszk-empty-click', (e) => {
     if (!buildMode) return;
     const detail = (e as CustomEvent).detail as { worldX: number; worldY: number };
-    const target = world.plots.find(
-      (p) => detail.worldX >= p.pos.x && detail.worldX <= p.pos.x + p.w
-        && detail.worldY >= p.pos.y && detail.worldY <= p.pos.y + p.h,
+    const x = detail.worldX;
+    const y = detail.worldY;
+    // 川エリアには建てられない（path は橋代わりにできるが今回は未実装）
+    if (y > 414) {
+      flashToast('川には建てられない', 'info');
+      return;
+    }
+    // 陸地の外も拒否
+    if (x < 20 || x > world.bounds.w - 20 || y < 20) {
+      flashToast('範囲外です', 'info');
+      return;
+    }
+    // 既存 feature と 28px 以上離す
+    const TOO_CLOSE = 28;
+    const conflicts = world.features.some(
+      (f) => Math.hypot(f.pos.x - x, f.pos.y - y) < TOO_CLOSE,
     );
-    if (!target) return;
-    if (target.kind !== 'cleared') {
-      flashToast('cleared プロットだけに建てられます', 'info');
+    if (conflicts) {
+      flashToast('近くに建物あり', 'info');
       return;
     }
     const cost = plotBuildCosts[buildMode];
@@ -142,11 +154,11 @@ async function start() {
     }
     world.resources.wood -= cost.wood;
     world.resources.stone -= cost.stone;
-    target.kind = buildMode;
-    target.devLevel = 2;
-    target.workSec = 0;
-    flashToast(`${buildMode === 'farm' ? '🌾 畑' : buildMode === 'channel' ? '💧 水路' : '🛤 道'} を建設した`, 'info');
-    // 連打しやすいよう建設モードは継続（再押下で解除）
+    // feature 追加（id はランダム）
+    const id = `feat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    world.features.push({ id, pos: { x, y }, kind: buildMode, devLevel: 2, workSec: 0 });
+    flashToast(`${buildMode === 'farm' ? '🌾 畑' : buildMode === 'channel' ? '💧 水路' : '🛤 道'} を建てた`, 'info');
+    // 建設モードは継続
   });
 
   // Stage に当たり判定を登録：ちびわふ優先、次に NPC。

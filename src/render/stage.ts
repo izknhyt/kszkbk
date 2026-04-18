@@ -323,10 +323,10 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     setBounds(world.bounds.w, world.bounds.h);
     drawPhaseTint(world.dayPhase);
 
-    // 開拓プロット（仮グラフィックで色違いの矩形のみ）+ 障害物
+    // 開拓要素（feature: 水源・水路・畑・道）+ 障害物。全てフリー座標。
     plotLayer.removeChildren();
-    for (const p of world.plots) {
-      plotLayer.addChild(drawPlot(p));
+    for (const f of world.features) {
+      plotLayer.addChild(drawFeature(f));
     }
     for (const obs of world.obstacles) {
       plotLayer.addChild(drawObstacle(obs));
@@ -1101,34 +1101,29 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
   layer.addChild(vignette);
 }
 
-// 開拓プロットの仮描画（画像なしのプレースホルダ。後で差し替え想定）
-function drawPlot(p: import('../types').Plot): Container {
+// 開拓 feature の仮描画。kind 別に円形アイコン＋devLevel。
+function drawFeature(f: import('../types').Feature): Container {
   const c = new Container();
   const g = new Graphics();
-  // kind 別に色分け
-  const kindColor: Record<import('../types').PlotKind, number> = {
-    wasteland: 0x7a6040,   // 茶色（荒地）
-    cleared  : 0xb99a68,   // 明るい土色
-    farm     : 0x7ba851,   // 緑（畑）
-    path     : 0x9a8668,   // 灰茶（踏み固め）
-    water    : 0x4a7ea8,   // 青（水源）
-    channel  : 0x6a9acf,   // 水色（水路）
+  const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18 : 16;
+  const kindColor: Record<import('../types').FeatureKind, number> = {
+    water:   0x3a6ea0,
+    channel: 0x6ba2d2,
+    farm:    0x6ea241,
+    path:    0x8b7048,
   };
-  const fillColor = kindColor[p.kind];
-  const alpha = p.kind === 'wasteland' ? 0.35 : 0.55;
-  g.roundRect(0, 0, p.w, p.h, 6)
-    .fill({ color: fillColor, alpha })
-    .stroke({ color: 0x3a2a1a, width: 1, alpha: 0.4 });
-  c.addChild(g);
-  // devLevel を小さい点で左上に表示（0-3）
-  if (p.devLevel > 0) {
-    const dots = new Graphics();
-    for (let i = 0; i < p.devLevel; i++) {
-      dots.circle(8 + i * 7, 8, 2).fill({ color: 0xffffff, alpha: 0.85 });
-    }
-    c.addChild(dots);
+  g.circle(0, 0, radius).fill({ color: kindColor[f.kind], alpha: 0.78 }).stroke({ color: 0x2a1a10, width: 1.5 });
+  // 畑は devLevel に応じて緑が濃くなる
+  if (f.kind === 'farm' && f.devLevel >= 3) {
+    g.circle(0, 0, radius - 6).fill({ color: 0x9ad066, alpha: 0.5 });
   }
-  c.position.set(p.pos.x, p.pos.y);
+  // 水源は波マーク
+  if (f.kind === 'water') {
+    g.moveTo(-radius * 0.6, -2).lineTo(-radius * 0.2, -6).lineTo(radius * 0.2, -2).lineTo(radius * 0.6, -6)
+      .stroke({ color: 0xffffff, width: 2, alpha: 0.7 });
+  }
+  c.addChild(g);
+  c.position.set(f.pos.x, f.pos.y);
   return c;
 }
 

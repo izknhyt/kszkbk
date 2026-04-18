@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, FlightState, Obstacle, ObstacleKind, PlacedBuilding, Plot, PlotKind, Season, Vec2, VillageRank } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Feature, FlightState, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -161,153 +161,107 @@ export interface WorldState {
   npcs: NpcState[];
   bubbles: Bubble[];
   landmarks: Landmark[];
-  // 開拓プロット（荒地 → 均し済み → 畑等に進化）
-  plots: Plot[];
-  // 障害物（プロット内にあってちびわふが叩いて消す）
+  // 開拓要素（水源・水路・畑・道）。自由配置、距離ベースで接続判定。
+  features: Feature[];
+  // 障害物（マップに散在。ちびわふが叩いて消す）
   obstacles: Obstacle[];
 }
 
-// 荒地プロット内に障害物をばら撒く
-function createInitialObstacles(plots: Plot[]): Obstacle[] {
+// フリー配置障害物：陸地（y 60〜380）かつフラナ拠点から離れた場所にランダム散在
+function createInitialObstacles(bounds: { w: number; h: number }): Obstacle[] {
   const list: Obstacle[] = [];
-  let seq = 0;
   const kinds: ObstacleKind[] = ['rock', 'stump', 'bush'];
   const hpMap: Record<ObstacleKind, number> = { rock: 30, stump: 25, bush: 15 };
-  for (const p of plots) {
-    if (p.kind !== 'wasteland') continue;
-    const n = 2 + Math.floor(Math.random() * 2);  // 2-3 個
-    for (let i = 0; i < n; i++) {
-      const k = kinds[Math.floor(Math.random() * kinds.length)]!;
-      const margin = 14;
-      list.push({
-        id: `obs-${seq++}`,
-        pos: {
-          x: p.pos.x + margin + Math.random() * (p.w - margin * 2),
-          y: p.pos.y + margin + Math.random() * (p.h - margin * 2),
-        },
-        kind: k,
-        hp: hpMap[k],
-        maxHp: hpMap[k],
-        plotId: p.id,
-      });
-    }
+  const centerX = bounds.w / 2;
+  const centerY = 220;  // フラナ拠点
+  const minSpacing = 40;
+  const target = 24;  // 目標個数
+  let attempts = 0;
+  let seq = 0;
+  while (list.length < target && attempts < 500) {
+    attempts++;
+    const x = 60 + Math.random() * (bounds.w - 120);
+    const y = 80 + Math.random() * 300;
+    // フラナ拠点から 80px 以内は避ける
+    if (Math.hypot(x - centerX, y - centerY) < 80) continue;
+    // 既存障害物からも離す
+    if (list.some((o) => Math.hypot(o.pos.x - x, o.pos.y - y) < minSpacing)) continue;
+    const k = kinds[Math.floor(Math.random() * kinds.length)]!;
+    list.push({
+      id: `obs-${seq++}`,
+      pos: { x, y },
+      kind: k,
+      hp: hpMap[k],
+      maxHp: hpMap[k],
+    });
   }
   return list;
 }
 
-// 初期プロット配置：陸地帯に格子状に 4x4 = 16 枚。
-// 中央にフラナの拠点、水源 1 箇所、残りは wasteland。
-function createInitialPlots(bounds: { w: number; h: number }): Plot[] {
-  const plots: Plot[] = [];
-  const cols = 4;
-  const rows = 4;
-  const plotW = 90;
-  const plotH = 70;
-  const gapX = 20;
-  const gapY = 18;
-  const totalW = cols * plotW + (cols - 1) * gapX;
-  const startX = (bounds.w - totalW) / 2;
-  const startY = 100;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const id = `plot-${r}-${c}`;
-      // フラナ拠点のすぐ下あたり（row 1 col 1-2）は cleared で開始
-      // それ以外は wasteland
-      const initKind: PlotKind = (r === 1 && (c === 1 || c === 2)) ? 'cleared' : 'wasteland';
-      const initDev = initKind === 'cleared' ? 1 : 0;
-      plots.push({
-        id,
-        pos: { x: startX + c * (plotW + gapX), y: startY + r * (plotH + gapY) },
-        w: plotW,
-        h: plotH,
-        kind: initKind,
-        devLevel: initDev,
-        workSec: 0,
-      });
-    }
-  }
-  // 左端の 1 つを水源にする（象徴的）
-  const waterPlot = plots.find((p) => p.id === 'plot-0-0');
-  if (waterPlot) { waterPlot.kind = 'water'; waterPlot.devLevel = 3; }
-  // 水源の右・下に水路を敷いて、最初から畑化できる土台を作る
-  const channel1 = plots.find((p) => p.id === 'plot-0-1');
-  if (channel1) { channel1.kind = 'channel'; channel1.devLevel = 2; }
-  const channel2 = plots.find((p) => p.id === 'plot-1-0');
-  if (channel2) { channel2.kind = 'channel'; channel2.devLevel = 2; }
-  return plots;
+// 初期 feature 配置：水源 1、水路 2（水源近傍）、畑 1（水路近傍）
+function createInitialFeatures(bounds: { w: number; h: number }): Feature[] {
+  const features: Feature[] = [];
+  let seq = 0;
+  const mkId = () => `feat-${seq++}`;
+  // 水源：画面左寄り中段
+  const waterPos: Vec2 = { x: bounds.w * 0.22, y: 180 };
+  features.push({ id: mkId(), pos: waterPos, kind: 'water', devLevel: 3, workSec: 0 });
+  // 水路 2 本：水源の右隣に並べる
+  features.push({ id: mkId(), pos: { x: waterPos.x + 55, y: waterPos.y }, kind: 'channel', devLevel: 2, workSec: 0 });
+  features.push({ id: mkId(), pos: { x: waterPos.x + 110, y: waterPos.y }, kind: 'channel', devLevel: 2, workSec: 0 });
+  // 畑 1：水路の先
+  features.push({ id: mkId(), pos: { x: waterPos.x + 165, y: waterPos.y }, kind: 'farm', devLevel: 2, workSec: 0 });
+  return features;
 }
 
-// プロット id から grid 座標 (row, col) を抽出する
-function plotGridPos(id: string): { r: number; c: number } | null {
-  const m = /^plot-(\d+)-(\d+)$/.exec(id);
-  if (!m) return null;
-  return { r: Number(m[1]), c: Number(m[2]) };
-}
+// 接続距離：water/channel 同士はこの半径以内で繋がる
+const WATER_LINK_RADIUS = 70;
+// 畑が water/channel の効果を受ける最大距離
+const FARM_IRRIGATION_RADIUS = 65;
 
-// 4 近傍のプロット id を返す
-function neighborPlotIds(id: string): string[] {
-  const p = plotGridPos(id);
-  if (!p) return [];
-  return [
-    `plot-${p.r - 1}-${p.c}`,
-    `plot-${p.r + 1}-${p.c}`,
-    `plot-${p.r}-${p.c - 1}`,
-    `plot-${p.r}-${p.c + 1}`,
-  ];
-}
-
-// 水が届いている plot id の集合を flood fill で計算する。
-// water → channel → channel → ... 繋がったものが "watered"。
-// farm 判定ではこの集合に隣接するかを確認する。
-export function computeWateredPlotIds(w: WorldState): Set<string> {
+// 水が届いている feature id 集合を flood fill で計算する。
+// water を種にして、channel/water 同士が WATER_LINK_RADIUS 以内なら伝播。
+export function computeWateredFeatureIds(w: WorldState): Set<string> {
   const watered = new Set<string>();
-  const queue: string[] = [];
-  for (const p of w.plots) {
-    if (p.kind === 'water') { watered.add(p.id); queue.push(p.id); }
+  const queue: Feature[] = [];
+  for (const f of w.features) {
+    if (f.kind === 'water') { watered.add(f.id); queue.push(f); }
   }
-  const byId = new Map(w.plots.map((p) => [p.id, p]));
   while (queue.length > 0) {
-    const id = queue.shift()!;
-    for (const nid of neighborPlotIds(id)) {
-      if (watered.has(nid)) continue;
-      const np = byId.get(nid);
-      if (!np) continue;
-      if (np.kind === 'channel' || np.kind === 'water') {
-        watered.add(nid);
-        queue.push(nid);
+    const cur = queue.shift()!;
+    for (const f of w.features) {
+      if (watered.has(f.id)) continue;
+      if (f.kind !== 'channel' && f.kind !== 'water') continue;
+      if (Math.hypot(f.pos.x - cur.pos.x, f.pos.y - cur.pos.y) <= WATER_LINK_RADIUS) {
+        watered.add(f.id);
+        queue.push(f);
       }
     }
   }
   return watered;
 }
 
-// 畑 / 土地の進化・食料生産を走らせる。
-// 1) 水路隣接の cleared プロットは workSec が蓄積して 10 秒で farm に昇格
-// 2) 水路隣接の farm プロットは dt * 0.08 食料を生産
+// 食料生産 + 畑の成長。watered な水路/水源から FARM_IRRIGATION_RADIUS 内にある
+// farm feature は 0.08/秒で食料生産、workSec 蓄積で devLevel が上がる。
 export function updateInfra(w: WorldState, dt: number) {
-  const watered = computeWateredPlotIds(w);
-  const byId = new Map(w.plots.map((p) => [p.id, p]));
-  for (const p of w.plots) {
-    const adjToWater = neighborPlotIds(p.id).some((nid) => watered.has(nid));
-    if (p.kind === 'cleared' && adjToWater) {
-      p.workSec += dt;
-      if (p.workSec >= 10) {
-        p.kind = 'farm';
-        p.devLevel = 2;
-        p.workSec = 0;
-      }
-    }
-    if (p.kind === 'farm' && adjToWater) {
-      w.resources.food += dt * 0.08;
-      // 畑の進化：food を出し続けると devLevel が上がる (見た目だけ)
-      p.workSec += dt;
-      if (p.devLevel < 3 && p.workSec >= 30) {
-        p.devLevel = 3;
-      }
-    }
+  if (w.features.length === 0) return;
+  const watered = computeWateredFeatureIds(w);
+  const wateredFeatures = w.features.filter((f) => watered.has(f.id));
+  for (const f of w.features) {
+    if (f.kind !== 'farm') continue;
+    const irrigated = wateredFeatures.some(
+      (wf) => Math.hypot(wf.pos.x - f.pos.x, wf.pos.y - f.pos.y) <= FARM_IRRIGATION_RADIUS,
+    );
+    if (!irrigated) continue;
+    w.resources.food += dt * 0.08;
+    f.workSec += dt;
+    if (f.devLevel < 3 && f.workSec >= 30) f.devLevel = 3;
   }
-  // byId は lint 逃れ
-  void byId;
+}
+
+// feature 近傍判定ヘルパ（他モジュール用）
+export function isFarmFeature(f: Feature): boolean {
+  return f.kind === 'farm';
 }
 
 function createDex(): Record<DeathCauseId, DexEntry> {
@@ -368,18 +322,18 @@ export function createWorld(): WorldState {
     npcs: createNpcs(bounds),
     bubbles: [],
     landmarks: landmarkList(bounds),
-    plots: [] as Plot[],
+    features: [] as Feature[],
     obstacles: [] as Obstacle[],
   };
 }
 
-// プロットと障害物を生成してワールドに載せる。createWorld / load 後に呼ぶ。
+// 初期 feature/障害物 を生成してワールドに載せる。createWorld / load 後に呼ぶ。
 export function ensurePlots(w: WorldState) {
-  if (!w.plots || w.plots.length === 0) {
-    w.plots = createInitialPlots(w.bounds);
+  if (!w.features || w.features.length === 0) {
+    w.features = createInitialFeatures(w.bounds);
   }
   if (!w.obstacles || w.obstacles.length === 0) {
-    w.obstacles = createInitialObstacles(w.plots);
+    w.obstacles = createInitialObstacles(w.bounds);
   }
 }
 
@@ -979,12 +933,11 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   c.fatigue = Math.max(0, Math.min(100, c.fatigue));
   if (c.hunger >= 100) { kill(w, c, 'hunger_death'); return; }
   if (c.fatigue >= 100) { kill(w, c, 'fatigue_death'); return; }
-  // 畑の上に立っている空腹のちびわふ：1 food 消費して食事状態に入る
+  // 畑に 24px 以内で立ってる空腹のちびわふ：1 food 消費して食事状態に入る
   if (c.state === 'idle' && c.hunger > 30 && w.resources.food >= 1) {
-    for (const plot of w.plots) {
-      if (plot.kind !== 'farm') continue;
-      if (c.pos.x < plot.pos.x || c.pos.x > plot.pos.x + plot.w) continue;
-      if (c.pos.y < plot.pos.y || c.pos.y > plot.pos.y + plot.h) continue;
+    for (const f of w.features) {
+      if (f.kind !== 'farm') continue;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) > 24) continue;
       w.resources.food -= 1;
       setState(c, 'eating', 2.5);
       spawnBubble(w.bubbles, c.pos, 'もぐもぐわふ', 'speech', 1.2);
@@ -1195,10 +1148,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       noukouPositions: w.buildings.filter((b) => b.defId === 'noukou').map((b) => b.pos),
       taikoPositions: w.buildings.filter((b) => b.defId === 'taiko').map((b) => b.pos),
       obstaclePositions: w.obstacles.map((o) => o.pos),
-      farmPositions: w.plots.filter((p) => p.kind === 'farm').map((p) => ({
-        x: p.pos.x + p.w / 2,
-        y: p.pos.y + p.h / 2,
-      })),
+      farmPositions: w.features.filter((f) => f.kind === 'farm').map((f) => ({ x: f.pos.x, y: f.pos.y })),
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {
@@ -1896,12 +1846,12 @@ const OBSTACLE_DROP_AMOUNT: Record<ObstacleKind, number> = {
 function updateLabor(w: WorldState, dt: number) {
   if (w.obstacles.length === 0) return;
   for (const obs of w.obstacles) {
-    // 18px 以内のちびわふ（活動可能な状態のみ）をカウント
+    // 28px 以内のちびわふ（活動可能な状態のみ）をカウント
     let workers = 0;
     for (const c of w.chibis) {
       if (!isAlive(c)) continue;
       if (c.state === 'sleep' || c.state === 'dead' || c.state === 'hurt') continue;
-      if (distance(c.pos, obs.pos) > 18) continue;
+      if (distance(c.pos, obs.pos) > 28) continue;
       workers++;
       // 作業中のちびわふは空腹・疲労が早める（ちびわふ側に直接加算）
       c.fatigue += dt * 0.25;
@@ -1912,7 +1862,7 @@ function updateLabor(w: WorldState, dt: number) {
     obs.hp -= dt * 0.5 * workers;
     // バブル：作業中の気配（5% * workers / 秒）
     if (Math.random() < dt * 0.5 * workers) {
-      const near = w.chibis.find((c) => isAlive(c) && distance(c.pos, obs.pos) < 18);
+      const near = w.chibis.find((c) => isAlive(c) && distance(c.pos, obs.pos) < 28);
       if (near) {
         const line = obs.kind === 'rock' ? 'えいっわふ' : obs.kind === 'stump' ? 'ぬくわふ！' : 'むしるわふ';
         spawnBubble(w.bubbles, near.pos, line, 'speech', 0.8);
@@ -1925,20 +1875,8 @@ function updateLabor(w: WorldState, dt: number) {
     for (const c of cleared) {
       const drop = OBSTACLE_DROPS[c.kind];
       w.resources[drop] += OBSTACLE_DROP_AMOUNT[c.kind];
-      // プロットの workSec を累積
-      const plot = w.plots.find((p) => p.id === c.plotId);
-      if (plot) plot.workSec += 5;
     }
     w.obstacles = w.obstacles.filter((o) => o.hp > 0);
-    // 荒地プロット内の障害物が尽きたら cleared に昇格
-    for (const p of w.plots) {
-      if (p.kind !== 'wasteland') continue;
-      const remaining = w.obstacles.filter((o) => o.plotId === p.id).length;
-      if (remaining === 0) {
-        p.kind = 'cleared';
-        p.devLevel = 1;
-      }
-    }
   }
 }
 
