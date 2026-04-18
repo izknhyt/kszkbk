@@ -1,12 +1,12 @@
-import { Application, Container, Graphics, Sprite, Text, TextStyle } from 'pixi.js';
+import { Application, Container, Graphics, Rectangle, Sprite, Text, TextStyle, Texture } from 'pixi.js';
 import type { WorldState } from '../sim/world';
-import type { Chibiwafu, DayPhase, Season } from '../types';
+import type { Chibiwafu, DayPhase, PlacedBuilding, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
 import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
 import type { Bubble } from '../sim/bubbles';
 import { TRAIT_DEFS } from '../sim/traits';
 import { CONFIG } from '../config';
-import { landmarkActive, type Landmark } from '../sim/landmarks';
+import { landmarkActive, type Landmark, type LandmarkKind } from '../sim/landmarks';
 import { frameFor, loadSpriteLibrary, type SpriteLibrary } from './sprites';
 
 const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number; accents: number }> = {
@@ -52,6 +52,22 @@ interface BubbleView {
   container: Container;
 }
 
+interface EnvironmentArt {
+  background: Texture | null;
+  buildingFrames: Partial<Record<PlacedBuilding['defId'], Texture>>;
+  landmarkFrames: Partial<Record<LandmarkKind, Texture>>;
+}
+
+const BUILDING_FRAME_ORDER: PlacedBuilding['defId'][] = ['noukou', 'kouba', 'hakaba', 'taiko', 'ubuya'];
+const LANDMARK_FRAME_ORDER: LandmarkKind[] = [
+  'stonebread_rock',
+  'philosophy_stone',
+  'mudwater_pool',
+  'beer_barrel',
+  'flower_patch',
+  'kusozako_totem',
+];
+
 export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const app = new Application();
   await app.init({
@@ -83,12 +99,13 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   );
 
   const lib = await loadSpriteLibrary('/chibiwafu.png');
+  const envArt = await loadEnvironmentArt();
 
   let currentSeason: Season = 'spring';
   // ワールドの実効寸法。村Lv に応じて徐々に広がる。world.bounds が権威。
   let currentBoundsW: number = CONFIG.WORLD_W;
   let currentBoundsH: number = CONFIG.WORLD_H;
-  drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason);
+  drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason, envArt);
   const furana = drawFurana();
   fxLayer.addChild(furana);
 
@@ -280,7 +297,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     if (s === currentSeason) return;
     currentSeason = s;
     bgLayer.removeChildren();
-    drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason);
+    drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason, envArt);
   }
 
   // 村Lv 上昇でワールド寸法が広がったら背景を描き直す。頻度は稀（Lv up 時のみ）。
@@ -289,7 +306,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     currentBoundsW = w;
     currentBoundsH = h;
     bgLayer.removeChildren();
-    drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason);
+    drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason, envArt);
     clampCamera();
     applyCamera();
   }
@@ -304,7 +321,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     landmarkLayer.removeChildren();
     for (const lm of world.landmarks) {
       if (!landmarkActive(lm, world.season)) continue;
-      landmarkLayer.addChild(drawLandmark(lm));
+      landmarkLayer.addChild(drawLandmark(lm, envArt));
     }
 
     // buildings
@@ -322,44 +339,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const def = BUILDINGS[b.defId];
       const v = buildingViews[i]!;
       v.removeChildren();
-      // sqrt スケーリング：Lv1=1.0×, Lv5=1.3×, Lv10=1.45×, Lv99=2.49×
-      const s = 1 + Math.sqrt(Math.max(0, b.level - 1)) * 0.15;
-      const g = new Graphics();
-      g.rect(-24 * s, -20 * s, 48 * s, 40 * s).fill({ color: buildingColor(b.defId) }).stroke({ color: 0x3a2a1a, width: 2 });
-      g.poly([-28 * s, -20 * s, 0, -36 * s, 28 * s, -20 * s]).fill({ color: 0x8b5a2b }).stroke({ color: 0x3a2a1a, width: 2 });
-      // Lv2+ は旗
-      if (b.level >= 2) {
-        g.rect(0, -36 * s - 12, 2, 12).fill({ color: 0x3a2a1a });
-        g.rect(2, -36 * s - 12, 10, 7).fill({ color: 0xe8735a });
-      }
-      // Lv5+ で二段屋根
-      if (b.level >= 5) {
-        g.poly([-20 * s, -36 * s, 0, -46 * s, 20 * s, -36 * s]).fill({ color: 0xc05a3a }).stroke({ color: 0x3a2a1a, width: 1 });
-      }
-      // Lv10+ で屋根に金箔
-      if (b.level >= 10) {
-        g.circle(0, -46 * s, 4).fill({ color: 0xffd35a }).stroke({ color: 0x3a2a1a, width: 1 });
-      }
-      // Lv30+ で紫オーラ
-      if (b.level >= 30) {
-        g.circle(0, -20 * s, 8).fill({ color: 0x9b6de2, alpha: 0.5 });
-      }
-      // Lv50+ で複数の金飾り
-      if (b.level >= 50) {
-        g.circle(-14 * s, -36 * s, 3).fill({ color: 0xffd35a });
-        g.circle(14 * s, -36 * s, 3).fill({ color: 0xffd35a });
-      }
-      // Lv99 で虹色リング
-      if (b.level >= 99) {
-        g.circle(0, 0, 32 * s).stroke({ color: 0xff66aa, width: 2, alpha: 0.6 });
-      }
-      const t = new Text({
-        text: `${def?.name.split('（')[0] ?? b.defId} Lv${b.level}`,
-        style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 10, fill: 0x3a2a1a }),
-      });
-      t.anchor.set(0.5, 0);
-      t.position.set(0, 22 * s);
-      v.addChild(g, t);
+      const structure = drawBuildingStructure(b, def?.name.split('（')[0] ?? b.defId, envArt);
+      v.addChild(structure);
       v.position.set(b.pos.x, b.pos.y);
     }
 
@@ -577,6 +558,299 @@ function renderEventOverlay(under: Container, over: Container, world: WorldState
   }
 }
 
+async function loadEnvironmentArt(): Promise<EnvironmentArt> {
+  const art: EnvironmentArt = {
+    background: null,
+    buildingFrames: {},
+    landmarkFrames: {},
+  };
+
+  try {
+    const background = await loadImage('/mockup/background.png');
+    art.background = Texture.from(background);
+  } catch (err) {
+    console.warn('[stage] background art load failed, falling back to procedural background', err);
+  }
+
+  try {
+    const buildingSheet = await loadImage('/mockup/buildings.png');
+    const base = textureFromProcessedCanvas(buildingSheet);
+    const cellW = Math.floor(buildingSheet.width / BUILDING_FRAME_ORDER.length);
+    const cellH = buildingSheet.height;
+    BUILDING_FRAME_ORDER.forEach((id, index) => {
+      art.buildingFrames[id] = new Texture({
+        source: base.source,
+        frame: new Rectangle(index * cellW, 0, cellW, cellH),
+      });
+    });
+  } catch (err) {
+    console.warn('[stage] building art load failed, keeping procedural buildings', err);
+  }
+
+  try {
+    const propsSheet = await loadImage('/mockup/props.png');
+    const base = textureFromProcessedCanvas(propsSheet);
+    const cols = 3;
+    const rows = 3;
+    const cellW = Math.floor(propsSheet.width / cols);
+    const cellH = Math.floor(propsSheet.height / rows);
+    LANDMARK_FRAME_ORDER.forEach((kind, index) => {
+      const row = Math.floor(index / cols);
+      const col = index % cols;
+      art.landmarkFrames[kind] = new Texture({
+        source: base.source,
+        frame: new Rectangle(col * cellW, row * cellH, cellW, cellH),
+      });
+    });
+  } catch (err) {
+    console.warn('[stage] landmark art load failed, keeping procedural landmarks', err);
+  }
+
+  return art;
+}
+
+function textureFromProcessedCanvas(img: HTMLImageElement): Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2d context unavailable');
+  ctx.drawImage(img, 0, 0);
+  removeBackgroundFloodFill(ctx, img.width, img.height);
+  return Texture.from(canvas);
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`image load failed: ${url}`));
+    img.src = url;
+  });
+}
+
+function removeBackgroundFloodFill(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  const id = ctx.getImageData(0, 0, w, h);
+  const d = id.data;
+  const visited = new Uint8Array(w * h);
+  const isNearWhite = (i: number): boolean => {
+    const o = i * 4;
+    return d[o]! >= 240 && d[o + 1]! >= 240 && d[o + 2]! >= 240;
+  };
+  const stack: number[] = [];
+  const seeds = [0, w - 1, (h - 1) * w, h * w - 1];
+  for (const s of seeds) if (isNearWhite(s)) stack.push(s);
+  while (stack.length > 0) {
+    const i = stack.pop()!;
+    if (visited[i]) continue;
+    if (!isNearWhite(i)) continue;
+    visited[i] = 1;
+    d[i * 4 + 3] = 0;
+    const x = i % w;
+    const y = (i / w) | 0;
+    if (x > 0) stack.push(i - 1);
+    if (x < w - 1) stack.push(i + 1);
+    if (y > 0) stack.push(i - w);
+    if (y < h - 1) stack.push(i + w);
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+function drawBuildingStructure(b: PlacedBuilding, label: string, envArt: EnvironmentArt): Container {
+  const c = new Container();
+  const s = 1 + Math.sqrt(Math.max(0, b.level - 1)) * 0.15;
+  c.addChild(drawGroundShadow(28 * s, 10 * s, 9 * s, 0.18));
+
+  const buildingTexture = envArt.buildingFrames[b.defId];
+  if (buildingTexture) {
+    const sprite = new Sprite(buildingTexture);
+    sprite.anchor.set(0.5, 0.72);
+    sprite.scale.set((110 / Math.max(buildingTexture.width, 1)) * s);
+    c.addChild(sprite);
+  } else {
+    switch (b.defId) {
+      case 'noukou': {
+        const plot = new Graphics();
+        plot.roundRect(-30 * s, -10 * s, 60 * s, 26 * s, 10 * s)
+          .fill({ color: 0x9a6d3d })
+          .stroke({ color: 0x4d341c, width: 2 });
+        plot.rect(-30 * s, 4 * s, 60 * s, 7 * s).fill({ color: 0x648041, alpha: 0.75 });
+        for (let i = -2; i <= 2; i++) {
+          plot.rect(i * 10 * s - 2 * s, -7 * s, 4 * s, 14 * s).fill({ color: 0xbe8d54, alpha: 0.75 });
+        }
+        const shed = new Graphics();
+        shed.roundRect(-12 * s, -30 * s, 24 * s, 16 * s, 6 * s)
+          .fill({ color: 0xd1bc8b })
+          .stroke({ color: 0x4d341c, width: 2 });
+        shed.poly([-16 * s, -18 * s, 0, -34 * s, 16 * s, -18 * s])
+          .fill({ color: 0x6b5130 })
+          .stroke({ color: 0x4d341c, width: 2 });
+        const scarecrow = new Graphics();
+        scarecrow.rect(18 * s, -20 * s, 2 * s, 18 * s).fill({ color: 0x4d341c });
+        scarecrow.rect(12 * s, -15 * s, 14 * s, 2 * s).fill({ color: 0x4d341c });
+        scarecrow.circle(19 * s, -21 * s, 4 * s).fill({ color: 0xe6d0a6 }).stroke({ color: 0x4d341c, width: 1 });
+        c.addChild(plot, shed, scarecrow);
+        break;
+      }
+      case 'kouba': {
+        const forge = new Graphics();
+        forge.roundRect(-24 * s, -16 * s, 48 * s, 30 * s, 7 * s)
+          .fill({ color: 0x5c585c })
+          .stroke({ color: 0x2f2727, width: 2 });
+        forge.poly([-28 * s, -16 * s, -8 * s, -30 * s, 14 * s, -26 * s, 28 * s, -12 * s])
+          .fill({ color: 0x6f3d2d })
+          .stroke({ color: 0x2f2727, width: 2 });
+        forge.roundRect(-8 * s, -2 * s, 16 * s, 12 * s, 3 * s).fill({ color: 0x2d2321 });
+        forge.circle(0, 4 * s, 5 * s).fill({ color: 0xffb347, alpha: 0.9 });
+        forge.circle(0, 4 * s, 9 * s).fill({ color: 0xff7a3d, alpha: 0.22 });
+        const chimney = new Graphics();
+        chimney.rect(10 * s, -34 * s, 8 * s, 18 * s).fill({ color: 0x433738 }).stroke({ color: 0x2f2727, width: 2 });
+        chimney.circle(16 * s, -38 * s, 4 * s).fill({ color: 0x8a7d7a, alpha: 0.45 });
+        chimney.circle(20 * s, -44 * s, 5 * s).fill({ color: 0x8a7d7a, alpha: 0.3 });
+        c.addChild(forge, chimney);
+        break;
+      }
+      case 'hakaba': {
+        const yard = new Graphics();
+        yard.roundRect(-28 * s, -12 * s, 56 * s, 24 * s, 9 * s)
+          .fill({ color: 0xbfb1a3 })
+          .stroke({ color: 0x524338, width: 2 });
+        yard.rect(-22 * s, -16 * s, 44 * s, 4 * s).fill({ color: 0x524338 });
+        for (let i = 0; i < 4; i++) {
+          yard.rect((-18 + i * 12) * s, -14 * s, 2 * s, 16 * s).fill({ color: 0x524338 });
+        }
+        const stoneA = new Graphics();
+        stoneA.roundRect(-16 * s, -24 * s, 12 * s, 18 * s, 5 * s)
+          .fill({ color: 0xe2d9cf })
+          .stroke({ color: 0x6b5c55, width: 2 });
+        stoneA.rect(-12 * s, -12 * s, 4 * s, 2 * s).fill({ color: 0x6b5c55 });
+        const stoneB = new Graphics();
+        stoneB.roundRect(2 * s, -20 * s, 16 * s, 14 * s, 5 * s)
+          .fill({ color: 0xd5cbc0 })
+          .stroke({ color: 0x6b5c55, width: 2 });
+        const lantern = new Graphics();
+        lantern.circle(20 * s, -20 * s, 4 * s).fill({ color: 0xffd35a, alpha: 0.9 });
+        lantern.rect(19 * s, -16 * s, 2 * s, 10 * s).fill({ color: 0x5a4a39 });
+        c.addChild(yard, stoneA, stoneB, lantern);
+        break;
+      }
+      case 'taiko': {
+        const tower = new Graphics();
+        tower.rect(-20 * s, -8 * s, 5 * s, 24 * s).fill({ color: 0x734728 });
+        tower.rect(15 * s, -8 * s, 5 * s, 24 * s).fill({ color: 0x734728 });
+        tower.rect(-18 * s, -8 * s, 36 * s, 5 * s).fill({ color: 0x734728 });
+        tower.poly([-28 * s, -16 * s, 0, -36 * s, 28 * s, -16 * s])
+          .fill({ color: 0xb14632 })
+          .stroke({ color: 0x5a311d, width: 2 });
+        tower.circle(0, -4 * s, 12 * s).fill({ color: 0xd4a25a }).stroke({ color: 0x5a311d, width: 3 });
+        tower.circle(0, -4 * s, 4 * s).fill({ color: 0x7d3b2a });
+        tower.rect(-2 * s, -15 * s, 4 * s, 22 * s).fill({ color: 0x5a311d, alpha: 0.45 });
+        const banners = new Graphics();
+        banners.rect(-22 * s, -28 * s, 2 * s, 15 * s).fill({ color: 0x5a311d });
+        banners.rect(20 * s, -28 * s, 2 * s, 15 * s).fill({ color: 0x5a311d });
+        banners.rect(-20 * s, -25 * s, 10 * s, 7 * s).fill({ color: 0xe8735a });
+        banners.rect(12 * s, -25 * s, 10 * s, 7 * s).fill({ color: 0xffd35a });
+        c.addChild(tower, banners);
+        break;
+      }
+      case 'ubuya': {
+        const hut = new Graphics();
+        hut.ellipse(0, 0, 25 * s, 16 * s).fill({ color: 0xf4cfd7 }).stroke({ color: 0x7a4b52, width: 2 });
+        hut.poly([-24 * s, 0, 0, -28 * s, 24 * s, 0])
+          .fill({ color: 0xe8aeb8 })
+          .stroke({ color: 0x7a4b52, width: 2 });
+        hut.roundRect(-7 * s, -2 * s, 14 * s, 12 * s, 5 * s).fill({ color: 0xfff6f3 }).stroke({ color: 0x7a4b52, width: 1 });
+        const charm = new Graphics();
+        charm.rect(-1 * s, -24 * s, 2 * s, 10 * s).fill({ color: 0x7a4b52 });
+        charm.circle(0, -10 * s, 4 * s).fill({ color: 0xffe6a8 });
+        c.addChild(hut, charm);
+        break;
+      }
+      default: {
+        const fallback = new Graphics();
+        fallback.roundRect(-24 * s, -18 * s, 48 * s, 34 * s, 7 * s)
+          .fill({ color: buildingColor(b.defId) })
+          .stroke({ color: 0x3a2a1a, width: 2 });
+        c.addChild(fallback);
+      }
+    }
+  }
+
+  addBuildingTierAccents(c, b, s);
+
+  const t = new Text({
+    text: `${label} Lv${b.level}`,
+    style: new TextStyle({
+      fontFamily: 'serif',
+      fontSize: 10,
+      fontWeight: 'bold',
+      fill: 0x3a2a1a,
+    }),
+  });
+  t.anchor.set(0.5, 0);
+  t.position.set(0, 28 * s);
+  c.addChild(t);
+  return c;
+}
+
+function addBuildingTierAccents(container: Container, b: PlacedBuilding, s: number) {
+  if (b.level >= 2) {
+    const pennant = new Graphics();
+    pennant.rect(0, -34 * s, 2 * s, 16 * s).fill({ color: 0x4d341c });
+    pennant.poly([2 * s, -33 * s, 12 * s, -30 * s, 2 * s, -24 * s]).fill({ color: 0xe8735a });
+    container.addChild(pennant);
+  }
+  if (b.level >= 5) {
+    const trim = new Graphics();
+    trim.circle(-18 * s, -14 * s, 4 * s).fill({ color: 0xfff2c5 });
+    trim.circle(18 * s, -14 * s, 4 * s).fill({ color: 0xfff2c5 });
+    container.addChild(trim);
+  }
+  if (b.level >= 10) {
+    const crest = new Graphics();
+    crest.circle(0, -34 * s, 5 * s).fill({ color: 0xffd35a }).stroke({ color: 0x6d4d1f, width: 1 });
+    container.addChild(crest);
+  }
+  if (b.level >= 30) {
+    const aura = new Graphics();
+    aura.circle(0, -4 * s, 24 * s).stroke({ color: buildingAuraColor(b.defId), width: 2, alpha: 0.45 });
+    aura.circle(0, -4 * s, 14 * s).stroke({ color: buildingAuraColor(b.defId), width: 1, alpha: 0.3 });
+    container.addChild(aura);
+  }
+  if (b.level >= 50) {
+    const streamers = new Graphics();
+    streamers.rect(-22 * s, -28 * s, 3 * s, 12 * s).fill({ color: 0xffd35a });
+    streamers.rect(-14 * s, -32 * s, 3 * s, 12 * s).fill({ color: 0xe8735a });
+    streamers.rect(11 * s, -32 * s, 3 * s, 12 * s).fill({ color: 0xffd35a });
+    streamers.rect(19 * s, -28 * s, 3 * s, 12 * s).fill({ color: 0xe8735a });
+    container.addChild(streamers);
+  }
+  if (b.level >= 99) {
+    const halo = new Graphics();
+    halo.circle(0, 0, 34 * s).stroke({ color: 0xff66aa, width: 2, alpha: 0.55 });
+    halo.circle(0, 0, 39 * s).stroke({ color: 0xffd35a, width: 1, alpha: 0.45 });
+    container.addChild(halo);
+  }
+}
+
+function drawGroundShadow(rx: number, ry: number, y: number, alpha: number): Graphics {
+  const shadow = new Graphics();
+  shadow.ellipse(0, y, rx, ry).fill({ color: 0x1d140d, alpha });
+  return shadow;
+}
+
+function buildingAuraColor(id: string): number {
+  switch (id) {
+    case 'noukou': return 0x96c75c;
+    case 'kouba': return 0xff9a4d;
+    case 'hakaba': return 0xbab0c8;
+    case 'taiko': return 0xffb24a;
+    case 'ubuya': return 0xff99b5;
+    default: return 0xffffff;
+  }
+}
+
 function calcScale(lib: SpriteLibrary): number {
   if (!lib.hasSheet) return 1;
   const t = lib.frames[0]!;
@@ -662,83 +936,177 @@ function drawNpc(n: NpcState): Container {
   return c;
 }
 
-function drawBackground(layer: Container, w: number, h: number, season: Season) {
+function drawBackground(layer: Container, w: number, h: number, season: Season, envArt: EnvironmentArt) {
   layer.removeChildren();
+  if (envArt.background) {
+    const bgSprite = new Sprite(envArt.background);
+    bgSprite.width = w;
+    bgSprite.height = h;
+    layer.addChild(bgSprite);
+
+    const seasonTint = new Graphics();
+    const overlay = seasonOverlay(season);
+    seasonTint.rect(0, 0, w, h).fill({ color: overlay.color, alpha: overlay.alpha });
+    layer.addChild(seasonTint);
+
+    const vignette = new Graphics();
+    vignette.rect(0, 0, w, 24).fill({ color: 0x000000, alpha: 0.04 });
+    vignette.rect(0, h - 34, w, 34).fill({ color: 0x000000, alpha: 0.08 });
+    vignette.rect(0, 0, 24, h).fill({ color: 0x000000, alpha: 0.035 });
+    vignette.rect(w - 24, 0, 24, h).fill({ color: 0x000000, alpha: 0.035 });
+    layer.addChild(vignette);
+    return;
+  }
+
   const palette = SEASON_COLORS[season];
   const grass = new Graphics();
   grass.rect(0, 0, w, h).fill({ color: palette.grass });
   layer.addChild(grass);
 
-  const dirt = new Graphics();
-  dirt.ellipse(w * 0.55, h * 0.35, w * 0.45, h * 0.3).fill({ color: palette.dirt });
-  layer.addChild(dirt);
+  const morningGlow = new Graphics();
+  morningGlow.ellipse(w * 0.24, h * 0.16, w * 0.28, h * 0.16).fill({ color: 0xfff2cc, alpha: 0.18 });
+  layer.addChild(morningGlow);
+
+  const upperMeadow = new Graphics();
+  upperMeadow.ellipse(w * 0.25, h * 0.22, w * 0.22, h * 0.12).fill({ color: 0xd9d08e, alpha: 0.28 });
+  upperMeadow.ellipse(w * 0.78, h * 0.17, w * 0.18, h * 0.11).fill({ color: 0xb0c985, alpha: 0.24 });
+  upperMeadow.ellipse(w * 0.52, h * 0.48, w * 0.35, h * 0.14).fill({ color: 0xcbd792, alpha: 0.2 });
+  layer.addChild(upperMeadow);
+
+  const cropBeds = new Graphics();
+  for (let i = 0; i < 5; i++) {
+    const x = 90 + i * (w * 0.12);
+    cropBeds.roundRect(x, 88 + (i % 2) * 8, w * 0.1, 48, 10).fill({ color: i % 2 === 0 ? 0xa3b85e : 0x8ca04d, alpha: 0.52 });
+    cropBeds.roundRect(x + 8, 98 + (i % 2) * 8, w * 0.1 - 16, 6, 4).fill({ color: 0xd8c085, alpha: 0.4 });
+    cropBeds.roundRect(x + 8, 112 + (i % 2) * 8, w * 0.1 - 16, 6, 4).fill({ color: 0xd8c085, alpha: 0.32 });
+  }
+  layer.addChild(cropBeds);
+
+  const commons = new Graphics();
+  commons.ellipse(w * 0.54, h * 0.34, w * 0.32, h * 0.17).fill({ color: palette.dirt, alpha: 0.95 });
+  commons.ellipse(w * 0.5, h * 0.33, w * 0.18, h * 0.09).fill({ color: 0xf1e0bb, alpha: 0.85 });
+  commons.ellipse(w * 0.68, h * 0.3, w * 0.11, h * 0.06).fill({ color: 0xe9d0a4, alpha: 0.75 });
+  layer.addChild(commons);
+
+  const roads = new Graphics();
+  roads.ellipse(w * 0.46, 318, w * 0.18, 26).fill({ color: 0xe7d5af, alpha: 0.86 });
+  roads.rotation = -0.08;
+  const bridgeRoad = new Graphics();
+  bridgeRoad.ellipse(220, 390, 150, 24).fill({ color: 0xe7d5af, alpha: 0.9 });
+  bridgeRoad.rotation = -0.28;
+  layer.addChild(roads, bridgeRoad);
 
   const river = new Graphics();
   river.rect(0, 420, w, h - 420).fill({ color: palette.river });
-  river.rect(0, 420, w, 4).fill({ color: 0x3a2a1a, alpha: 0.35 });
+  river.rect(0, 420, w, 4).fill({ color: 0x3a2a1a, alpha: 0.25 });
+  for (let i = 0; i < 12; i++) {
+    river.ellipse(80 + i * 86, 458 + (i % 3) * 18, 22, 4).fill({ color: 0xf5e8c8, alpha: 0.22 });
+  }
   layer.addChild(river);
 
+  const shoreline = new Graphics();
+  shoreline.rect(0, 412, w, 12).fill({ color: 0xe6d8b9, alpha: 0.92 });
+  for (let i = 0; i < 18; i++) {
+    shoreline.circle(20 + i * (w / 18), 421 + (i % 2) * 2, 5).fill({ color: 0xfaf3e1, alpha: 0.45 });
+  }
+  layer.addChild(shoreline);
+
   const bridge = new Graphics();
-  bridge.rect(188, 414, 24, 80).fill({ color: 0x8b5a2b }).stroke({ color: 0x3a2a1a, width: 1 });
+  bridge.roundRect(186, 410, 28, 90, 6).fill({ color: 0x81532c }).stroke({ color: 0x3a2a1a, width: 1.5 });
+  for (let i = 0; i < 6; i++) {
+    bridge.rect(189, 420 + i * 12, 22, 4).fill({ color: 0xb78853 });
+  }
+  bridge.rect(189, 410, 4, 90).fill({ color: 0x65411f });
+  bridge.rect(207, 410, 4, 90).fill({ color: 0x65411f });
   layer.addChild(bridge);
 
-  for (let i = 0; i < 18; i++) {
-    const tuft = new Graphics();
-    const x = Math.random() * w;
-    const y = Math.random() * 400;
-    tuft.circle(x, y, 3 + Math.random() * 5).fill({ color: palette.accents, alpha: 0.45 });
-    layer.addChild(tuft);
+  for (let i = 0; i < 14; i++) {
+    const flowers = new Graphics();
+    const x = 70 + (i * 83) % (w - 120);
+    const y = 70 + ((i * 47) % 320);
+    flowers.circle(x, y, 4).fill({ color: palette.accents, alpha: 0.5 });
+    flowers.circle(x + 9, y - 4, 3).fill({ color: 0xfff3d8, alpha: 0.45 });
+    flowers.circle(x - 7, y + 5, 2.5).fill({ color: 0xbad27d, alpha: 0.45 });
+    layer.addChild(flowers);
   }
+
+  for (let i = 0; i < 9; i++) {
+    const stones = new Graphics();
+    const x = 90 + i * 105;
+    const y = 386 - (i % 2) * 18;
+    stones.ellipse(x, y, 12, 7).fill({ color: 0xb7aa9b, alpha: 0.55 });
+    stones.ellipse(x + 12, y + 4, 8, 5).fill({ color: 0x938579, alpha: 0.4 });
+    layer.addChild(stones);
+  }
+
+  const vignette = new Graphics();
+  vignette.rect(0, 0, w, 24).fill({ color: 0x000000, alpha: 0.04 });
+  vignette.rect(0, h - 34, w, 34).fill({ color: 0x000000, alpha: 0.08 });
+  vignette.rect(0, 0, 24, h).fill({ color: 0x000000, alpha: 0.035 });
+  vignette.rect(w - 24, 0, 24, h).fill({ color: 0x000000, alpha: 0.035 });
+  layer.addChild(vignette);
 }
 
-function drawLandmark(lm: Landmark): Container {
+function drawLandmark(lm: Landmark, envArt: EnvironmentArt): Container {
   const c = new Container();
   c.position.set(lm.pos.x, lm.pos.y);
-  const g = new Graphics();
-  switch (lm.kind) {
-    case 'stonebread_rock': {
-      // ゴツゴツの岩＋乗った石パン
-      g.ellipse(0, 0, 22, 14).fill({ color: 0x888077 }).stroke({ color: 0x3a2a1a, width: 2 });
-      g.ellipse(-6, -8, 10, 6).fill({ color: 0x7a6a55 }).stroke({ color: 0x3a2a1a, width: 1 });
-      g.rect(-7, -16, 14, 6).fill({ color: 0xc9a36b }).stroke({ color: 0x3a2a1a, width: 1 });
-      break;
-    }
-    case 'philosophy_stone': {
-      // 背の高い縦長の石（哲学的）
-      g.rect(-8, -24, 16, 28).fill({ color: 0x666677 }).stroke({ color: 0x3a2a1a, width: 2 });
-      g.rect(-4, -20, 8, 4).fill({ color: 0x333344 });
-      break;
-    }
-    case 'mudwater_pool': {
-      g.ellipse(0, 0, 28, 10).fill({ color: 0x5c4422, alpha: 0.9 }).stroke({ color: 0x3a2a1a, width: 1 });
-      g.ellipse(-5, -3, 8, 2).fill({ color: 0x8a6a42, alpha: 0.5 });
-      break;
-    }
-    case 'beer_barrel': {
-      g.rect(-10, -14, 20, 22).fill({ color: 0x8a5a2b }).stroke({ color: 0x3a2a1a, width: 2 });
-      g.rect(-10, -10, 20, 2).fill({ color: 0x3a2a1a });
-      g.rect(-10, 2, 20, 2).fill({ color: 0x3a2a1a });
-      g.ellipse(0, -14, 10, 3).fill({ color: 0x4a3422 });
-      break;
-    }
-    case 'flower_patch': {
-      for (let i = 0; i < 5; i++) {
-        const a = (i / 5) * Math.PI * 2;
-        const x = Math.cos(a) * 8;
-        const y = Math.sin(a) * 6;
-        g.circle(x, y, 3).fill({ color: 0xf5b6c0 });
-        g.circle(x, y, 1).fill({ color: 0xffd35a });
+  c.addChild(drawGroundShadow(18, 6, 9, 0.14));
+  const artTexture = envArt.landmarkFrames[lm.kind];
+  if (artTexture) {
+    const sprite = new Sprite(artTexture);
+    sprite.anchor.set(0.5, 0.7);
+    sprite.scale.set(52 / Math.max(artTexture.width, 1));
+    c.addChild(sprite);
+  } else {
+    const g = new Graphics();
+    switch (lm.kind) {
+      case 'stonebread_rock': {
+        g.ellipse(0, 0, 24, 14).fill({ color: 0x8c8378 }).stroke({ color: 0x3a2a1a, width: 2 });
+        g.ellipse(-8, -8, 11, 7).fill({ color: 0x6d6050 }).stroke({ color: 0x3a2a1a, width: 1 });
+        g.roundRect(-10, -18, 20, 7, 3).fill({ color: 0xd0a36a }).stroke({ color: 0x3a2a1a, width: 1 });
+        g.rect(-8, -18, 16, 2).fill({ color: 0x8f5a2e, alpha: 0.7 });
+        break;
       }
-      break;
+      case 'philosophy_stone': {
+        g.roundRect(-9, -26, 18, 30, 5).fill({ color: 0x6e6b79 }).stroke({ color: 0x3a2a1a, width: 2 });
+        g.rect(-5, -18, 10, 3).fill({ color: 0x353744 });
+        g.circle(0, -7, 2).fill({ color: 0xf0e8d2 });
+        break;
+      }
+      case 'mudwater_pool': {
+        g.ellipse(0, 0, 30, 12).fill({ color: 0x5c4422, alpha: 0.9 }).stroke({ color: 0x3a2a1a, width: 1 });
+        g.ellipse(-7, -3, 9, 3).fill({ color: 0x8a6a42, alpha: 0.5 });
+        g.circle(9, -2, 2).fill({ color: 0xdcbf87, alpha: 0.55 });
+        break;
+      }
+      case 'beer_barrel': {
+        g.rect(-10, -14, 20, 22).fill({ color: 0x8a5a2b }).stroke({ color: 0x3a2a1a, width: 2 });
+        g.rect(-10, -10, 20, 2).fill({ color: 0x3a2a1a });
+        g.rect(-10, 2, 20, 2).fill({ color: 0x3a2a1a });
+        g.ellipse(0, -14, 10, 3).fill({ color: 0x4a3422 });
+        g.circle(12, -4, 3).fill({ color: 0xf2e2ad });
+        break;
+      }
+      case 'flower_patch': {
+        for (let i = 0; i < 5; i++) {
+          const a = (i / 5) * Math.PI * 2;
+          const x = Math.cos(a) * 8;
+          const y = Math.sin(a) * 6;
+          g.circle(x, y, 3).fill({ color: 0xf5b6c0 });
+          g.circle(x, y, 1).fill({ color: 0xffd35a });
+        }
+        g.circle(0, 0, 2).fill({ color: 0x9abf61 });
+        break;
+      }
+      case 'kusozako_totem': {
+        g.rect(-2, -30, 4, 34).fill({ color: 0x6b4a2b }).stroke({ color: 0x3a2a1a, width: 1 });
+        g.rect(-8, -30, 16, 6).fill({ color: 0xe8735a }).stroke({ color: 0x3a2a1a, width: 1 });
+        g.rect(-6, -18, 12, 4).fill({ color: 0xffd35a }).stroke({ color: 0x3a2a1a, width: 1 });
+        break;
+      }
     }
-    case 'kusozako_totem': {
-      // 中央にぽつんと立つ棒（村の象徴）
-      g.rect(-2, -30, 4, 34).fill({ color: 0x6b4a2b }).stroke({ color: 0x3a2a1a, width: 1 });
-      g.rect(-8, -30, 16, 6).fill({ color: 0xe8735a }).stroke({ color: 0x3a2a1a, width: 1 });
-      break;
-    }
+    c.addChild(g);
   }
-  c.addChild(g);
   const label = new Text({
     text: lm.label,
     style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 9, fill: 0x3a2a1a, fontStyle: 'italic' }),
@@ -748,6 +1116,15 @@ function drawLandmark(lm: Landmark): Container {
   label.alpha = 0.6;
   c.addChild(label);
   return c;
+}
+
+function seasonOverlay(season: Season): { color: number; alpha: number } {
+  switch (season) {
+    case 'spring': return { color: 0xfff4d8, alpha: 0.05 };
+    case 'summer': return { color: 0xffe28a, alpha: 0.08 };
+    case 'autumn': return { color: 0xc98039, alpha: 0.11 };
+    case 'winter': return { color: 0xc8d6ea, alpha: 0.12 };
+  }
 }
 
 function drawFurana(): Container {
