@@ -1127,8 +1127,10 @@ function updateNpcs(w: WorldState, dt: number) {
 }
 
 // フラナの意思的移動：目的地を決め、徐々に歩く（テレポートしない）。
-// target が null / 近づいたら wanderTimer が切れ次第、次の目的地を選ぶ。
+// 機嫌悪い時は近くのちびわふに向かって積極的に突進する。
 function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
+  // 機嫌悪い時は速度 1.6 倍（怒りの突進）
+  const currentSpeed = n.mood < 35 ? n.speed * 1.6 : n.speed;
   // 目的地に近づいてきたら到着扱い
   if (n.target && distance(n.pos, n.target) < 6) {
     n.target = null;
@@ -1136,8 +1138,8 @@ function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
   if (n.target == null) {
     n.wanderTimer -= dt;
     if (n.wanderTimer > 0) return;
-    // 一呼吸置いて次の目的地を決める（0.8-2秒の間）
-    n.wanderTimer = 0.8 + Math.random() * 1.2;
+    // 機嫌悪いほど次の目的地を早く決める（突進モード）
+    n.wanderTimer = n.mood < 35 ? 0.3 + Math.random() * 0.4 : 0.8 + Math.random() * 1.2;
     n.target = pickFuranaTarget(w, n);
   }
   // 目的地に向かってじわじわ歩く
@@ -1145,13 +1147,31 @@ function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
     const dx = n.target.x - n.pos.x;
     const dy = n.target.y - n.pos.y;
     const d = Math.max(0.001, Math.hypot(dx, dy));
-    n.pos.x += (dx / d) * n.speed * dt;
-    n.pos.y += (dy / d) * n.speed * dt;
+    n.pos.x += (dx / d) * currentSpeed * dt;
+    n.pos.y += (dy / d) * currentSpeed * dt;
     n.faceLeft = dx < 0;
   }
 }
 
 function pickFuranaTarget(w: WorldState, n: NpcState): Vec2 {
+  // 機嫌悪い時（<35）は、画面中どこでも最寄りのちびわふに突進（ロックオン）
+  if (n.mood < 35) {
+    const chibis = w.chibis.filter((c) => isAlive(c));
+    if (chibis.length > 0) {
+      let nearest: Chibiwafu | undefined;
+      let bestD = Infinity;
+      for (const c of chibis) {
+        const d = distance(c.pos, n.pos);
+        if (d < bestD) { nearest = c; bestD = d; }
+      }
+      if (nearest) {
+        return {
+          x: nearest.pos.x + (Math.random() - 0.5) * 12,
+          y: nearest.pos.y + (Math.random() - 0.5) * 10,
+        };
+      }
+    }
+  }
   const roll = Math.random();
   // 40% ちびわふ集団へ（最寄りの子の近く）
   if (roll < 0.4) {
@@ -1221,7 +1241,10 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     n.abuseCooldown = 2 + Math.random() * 2;
     return;
   }
-  n.abuseCooldown = 4 + Math.random() * 5;
+  // 機嫌悪いほど連続攻撃の間隔が短い
+  n.abuseCooldown = n.mood < 25 ? 1.5 + Math.random() * 1.5
+    : n.mood < 45 ? 2.5 + Math.random() * 2.5
+    : 4 + Math.random() * 5;
 
   // 発動率：機嫌悪いほど行動したがる（unhappy = キレやすい）
   //   mood 90→0.2  (ごきげんで手を出さない)
@@ -1282,28 +1305,36 @@ function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punc
   const action = Math.random();
 
   if (action < throwR) {
-    // ぶん投げ：50% 川へ / 50% ランダム遠投
+    // ぶん投げ：遠くへぶっ飛ばす（250-450px）。50% 川へ / 50% ランダム遠投
     n.state = 'angry';
     n.stateTimer = 1.8;
-    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_THROW), 'npc-speech', 1.6);
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_THROW), 'npc-speech', 1.8);
+    spawnBubble(w.bubbles, { x: n.pos.x, y: n.pos.y - 20 }, '💨', 'stomp', 0.7);
     pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をぶん投げた（機嫌${Math.round(n.mood)}）`);
+
+    const startPos = { x: target.pos.x, y: target.pos.y };
     const toRiver = Math.random() < 0.5;
     if (toRiver) {
-      target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + (Math.random() - 0.5) * 200));
+      // 川方向へ 250-400px 横飛ばし、y は川エリア
+      const dir = target.pos.x < w.bounds.w / 2 ? 1 : -1;
+      target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + dir * (250 + Math.random() * 150)));
       target.pos.y = 430 + Math.random() * 40;
       pushLife(target, Math.floor(target.ageSec), 'フラナに川へぶん投げられた');
     } else {
+      // 遠くに遠投：方向ランダム、距離 280-450px
       const ang = Math.random() * Math.PI * 2;
-      const dist = 140 + Math.random() * 100;
+      const dist = 280 + Math.random() * 170;
       target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + Math.cos(ang) * dist));
       target.pos.y = Math.max(40, Math.min(400, target.pos.y + Math.sin(ang) * dist));
       pushLife(target, Math.floor(target.ageSec), 'フラナにぶん投げられた');
     }
     target.target = null;
-    setState(target, 'surprised', 0.6);
-    spawnBubble(w.bubbles, target.pos, 'とんでるわふ〜！', 'speech', 1);
-    // 投げはさらに軽ダメージ（着地で HP 減）。低い機嫌ほど痛い
-    const throwDmg = n.mood < 25 ? 8 + Math.floor(Math.random() * 8) : 3 + Math.floor(Math.random() * 5);
+    setState(target, 'surprised', 1.3);
+    // 視認性強化：発射点と着地点の両方でバブル
+    spawnBubble(w.bubbles, startPos, '💫', 'stomp', 0.6);
+    spawnBubble(w.bubbles, target.pos, 'とんでるわふ〜！', 'speech', 1.4);
+    // 投げダメージ（着地痛い）。低い機嫌ほど痛い
+    const throwDmg = n.mood < 25 ? 10 + Math.floor(Math.random() * 10) : 4 + Math.floor(Math.random() * 6);
     damageChibi(w, target, throwDmg, 'cocoon_abuse');
     return;
   }
