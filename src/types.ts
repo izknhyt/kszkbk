@@ -93,7 +93,8 @@ export type DeathCauseId =
   | 'kamisama_punch'          // プレイヤー（神様）の鉄槌で死亡
   | 'kamisama_drown'          // プレイヤーに水に投げ込まれて死亡
   | 'kamisama_shake'          // プレイヤーに掴まれて振り回され衰弱死
-  | 'kamisama_throw';         // プレイヤーに投げつけられ地面に激突死
+  | 'kamisama_throw'          // プレイヤーに投げつけられ地面に激突死
+  | 'mama_lost';              // フラナ（ママ）を失って心が折れて死亡
 
 export interface DeathCause {
   id: DeathCauseId;

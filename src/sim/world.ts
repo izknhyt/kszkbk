@@ -19,6 +19,10 @@ import {
   COCOON_LINES_ABUSE,
   COCOON_LINES_DEATH,
   COCOON_REVIVE_LINES,
+  FURANA_LINES_DEATH,
+  FURANA_LINES_HURT,
+  FURANA_LINES_IDLE,
+  FURANA_LINES_PAT,
   LOU_LINES,
   NPC_DEFS,
   SUZU_LINES_BIRTH,
@@ -395,6 +399,49 @@ export function damageChibi(w: WorldState, c: Chibiwafu, amount: number, causeId
   return false;
 }
 
+// NPC に HP ダメージ。0 以下で dead フラグを立てる。戻り値 = 死んだか。
+// フラナが死ぬと panic モード発動。復活は npcs 側の respawnSec に従う（フラナは Infinity）。
+export function damageNpc(w: WorldState, n: NpcState, amount: number): boolean {
+  if (n.dead) return false;
+  n.hp = Math.max(0, n.hp - amount);
+  if (n.hp <= 0) {
+    n.dead = true;
+    n.respawnTimer = NPC_DEFS[n.id].respawnSec;
+    // 死亡セリフ
+    if (n.id === 'furana') {
+      spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_DEATH), 'speech', 3);
+      onFuranaDeath(w);
+    } else if (n.id === 'cocoon') {
+      spawnBubble(w.bubbles, n.pos, pickLine(COCOON_DEATH_LINES), 'speech', 2.5);
+    } else {
+      spawnBubble(w.bubbles, n.pos, 'やられた…', 'speech', 2);
+    }
+    return true;
+  }
+  // HP 残ってるときの "いた！" 反応
+  if (n.id === 'furana') {
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_HURT), 'speech', 1.6);
+  }
+  return false;
+}
+
+// フラナ死亡時の一斉リアクション：ちびわふ全員に衝撃。スズとココンも嘆く。
+function onFuranaDeath(w: WorldState) {
+  for (const c of w.chibis) {
+    if (!isAlive(c)) continue;
+    setState(c, 'cry', 3);
+    if (Math.random() < 0.6) {
+      const line = pickLine(['ママー！', 'うそわふ！', 'ママしんじゃったわふ…', 'なんでわふ！？', 'ぎゃーわふ！']);
+      spawnBubble(w.bubbles, c.pos, line, 'speech', 2.2);
+    }
+    pushLife(c, Math.floor(c.ageSec), 'ママが死んだ');
+  }
+  const suzu = w.npcs.find((x) => x.id === 'suzu');
+  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, 'フラナ様ーー！', 'speech', 3);
+  const cocoon = w.npcs.find((x) => x.id === 'cocoon');
+  if (cocoon && !cocoon.dead) spawnBubble(w.bubbles, cocoon.pos, 'ママ…ママ…', 'speech', 3);
+}
+
 // lifeLog に1行追加。上限30件（古いものから削除）。
 const LIFE_LOG_MAX = 30;
 function pushLife(c: Chibiwafu, sec: number, text: string) {
@@ -404,7 +451,9 @@ function pushLife(c: Chibiwafu, sec: number, text: string) {
 export { pushLife };
 
 // 出産：人口不足率に応じてインターバル短縮。空に近ければ burst 出産。
+// フラナ（ママ）が死亡中はそもそも生まれない。
 function spawnIfRoom(w: WorldState) {
+  if (!isFuranaAlive(w)) return;
   const living = w.chibis.filter(isAlive).length;
   const cap = populationCap(w);
   if (living >= cap) return;
@@ -843,21 +892,93 @@ function compactCorpses(w: WorldState) {
 function updateNpcs(w: WorldState, dt: number) {
   for (const n of w.npcs) {
     if (n.dead) {
-      n.respawnTimer -= dt;
-      if (n.respawnTimer <= 0) {
-        n.dead = false;
-        n.pos = { ...n.home };
-        n.abuseCooldown = 4;
-        spawnBubble(w.bubbles, n.pos, pickLine(COCOON_REVIVE_LINES), 'speech', 2.5);
+      // respawnSec が Infinity のNPC（フラナ）は復活しない
+      if (Number.isFinite(n.respawnTimer)) {
+        n.respawnTimer -= dt;
+        if (n.respawnTimer <= 0) {
+          n.dead = false;
+          n.hp = n.maxHp;
+          n.pos = { ...n.home };
+          n.abuseCooldown = 4;
+          spawnBubble(w.bubbles, n.pos, pickLine(COCOON_REVIVE_LINES), 'speech', 2.5);
+        }
       }
       continue;
     }
     wanderNpc(n, dt);
     if (n.id === 'cocoon') updateCocoonAbuse(w, n, dt);
+    if (n.id === 'furana') updateFuranaBehavior(w, n, dt);
     if (n.id === 'lou' && Math.random() < 0.0007) {
       spawnBubble(w.bubbles, n.pos, pickLine(LOU_LINES), 'speech', 1.6);
     }
   }
+  // world.furanaPos は後方互換のため npc フラナの pos を常にミラーする
+  const furana = w.npcs.find((n) => n.id === 'furana');
+  if (furana && !furana.dead) w.furanaPos = { ...furana.pos };
+}
+
+// フラナの挙動：ときどき近くのちびわふを "めっ" とする（低ダメージ hurt のみ、kill しない）
+// たまに独り言。ちびわふの多数派 mama param が高い個体はすでに自然に集まってくる。
+function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
+  n.abuseCooldown -= dt;
+  // 独り言（～30秒に1回くらい）
+  if (Math.random() < 0.001) {
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_IDLE), 'speech', 2);
+  }
+  if (n.abuseCooldown > 0) return;
+  const candidates = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 70);
+  if (candidates.length === 0) {
+    n.abuseCooldown = 2 + Math.random() * 2;
+    return;
+  }
+  // 20% の確率で一番近くの子を "めっ"（残りはスルー、フラナは優しいので）
+  n.abuseCooldown = 5 + Math.random() * 5;
+  if (Math.random() > 0.2) return;
+  // mama 高い子ほど狙われやすい（甘えてまとわりつくので）
+  const weights = candidates.map((c) => 1 + Math.max(0, c.params.mama - 50) * 0.03);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let roll = Math.random() * total;
+  let target: Chibiwafu | undefined;
+  for (let i = 0; i < candidates.length; i++) {
+    roll -= weights[i]!;
+    if (roll < 0) { target = candidates[i]!; break; }
+  }
+  if (!target) return;
+  spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_PAT), 'speech', 1.6);
+  setState(target, 'hurt', 0.8);
+  spawnBubble(w.bubbles, target.pos, 'きゃんわふ！', 'speech', 1.1);
+  pushLife(target, Math.floor(target.ageSec), 'フラナにめっされた');
+  // フラナは kill しない（HPダメージなし、state hurt のみ）
+}
+
+// フラナが死ぬとちびわふ界は地獄。出産停止＋パニック継続。
+export function isFuranaAlive(w: WorldState): boolean {
+  const f = w.npcs.find((n) => n.id === 'furana');
+  return !!f && !f.dead;
+}
+
+// パニック：フラナが死んで以降、ちびわふは徐々に心が折れる。
+// 毎 tick 小確率で cry 状態、低確率で mama_lost 死亡。
+function applyFuranaLossPanic(w: WorldState, dt: number) {
+  if (isFuranaAlive(w)) return;
+  for (const c of w.chibis) {
+    if (!isAlive(c)) continue;
+    // 50秒に 1度くらい cry 誘発、長引く
+    if (c.state !== 'cry' && Math.random() < 0.003) {
+      setState(c, 'cry', 2.5);
+      if (Math.random() < 0.5) {
+        const line = Math.random() < 0.5 ? 'ママいないわふ…' : 'ママどこわふ！？';
+        spawnBubble(w.bubbles, c.pos, line, 'speech', 1.8);
+      }
+    }
+    // 低確率で心折れ死（大体 60-120 秒に 1体くらい、全体）
+    // 個体の mama param が高いほど折れやすい
+    const brokenRate = 0.00008 * (1 + c.params.mama * 0.03);
+    if (Math.random() < brokenRate * dt * 20) {  // dt*20 で tick 補正
+      kill(w, c, 'mama_lost');
+    }
+  }
+  void dt;
 }
 
 function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
@@ -994,6 +1115,7 @@ export function tickWorld(w: WorldState, dt: number) {
   processChats(w, dt);
   compactCorpses(w);
   updateNpcs(w, dt);
+  applyFuranaLossPanic(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
   if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);
