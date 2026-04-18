@@ -2,7 +2,7 @@ import type { WorldState } from '../sim/world';
 import { peekNextId, resetIdCounter } from '../sim/chibiwafu';
 
 const KEY = 'kszkbk:save:v1';
-const CURRENT_VERSION = 3;
+const CURRENT_VERSION = 4;
 
 // v1: P2-a 前。16 dex。
 // v2: P2-a 以降。24 dex（Uncommon 含む）。live chibis は persist しないので
@@ -10,7 +10,7 @@ const CURRENT_VERSION = 3;
 //     側で 0 埋めされる（load は id ごとに上書き、欠けたものはそのまま残る）。
 // v3: totalPointsEarned を追加（村Lv の成長源）。v1/v2 からの load では
 //     `points` 初期値をそのまま totalPointsEarned として引き継ぐ。
-type SaveVersion = 1 | 2 | 3;
+type SaveVersion = 1 | 2 | 3 | 4;
 
 interface SaveData {
   version: SaveVersion;
@@ -24,6 +24,12 @@ interface SaveData {
   dex: WorldState['dex'];
   buildings: WorldState['buildings'];
   recentDeaths: WorldState['recentDeaths'];
+  // v4+: 寿命統計
+  sumDeathAgeSec?: number;
+  longestLifeSec?: number;
+  longestLifeName?: string;
+  shortestLifeSec?: number;
+  shortestLifeName?: string;
 }
 
 export function save(w: WorldState) {
@@ -39,6 +45,11 @@ export function save(w: WorldState) {
     dex: w.dex,
     buildings: w.buildings,
     recentDeaths: w.recentDeaths.slice(0, 24),
+    sumDeathAgeSec: w.sumDeathAgeSec,
+    longestLifeSec: w.longestLifeSec,
+    longestLifeName: w.longestLifeName,
+    shortestLifeSec: w.shortestLifeSec,
+    shortestLifeName: w.shortestLifeName,
   };
   try {
     localStorage.setItem(KEY, JSON.stringify(data));
@@ -52,7 +63,7 @@ export function load(w: WorldState): boolean {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw) as SaveData;
-    if (data.version !== 1 && data.version !== 2 && data.version !== 3) return false;
+    if (data.version !== 1 && data.version !== 2 && data.version !== 3 && data.version !== 4) return false;
     resetIdCounter(data.nextId || 1);
     w.points = data.points;
     // v3+: totalPointsEarned あり / 旧版: points をそのまま累計として流用
@@ -68,6 +79,12 @@ export function load(w: WorldState): boolean {
     }
     w.buildings = data.buildings ?? [];
     w.recentDeaths = data.recentDeaths ?? [];
+    // v4+ 統計が無ければ 0/Infinity で初期化（すでに createWorld で設定済み）
+    if (typeof data.sumDeathAgeSec === 'number') w.sumDeathAgeSec = data.sumDeathAgeSec;
+    if (typeof data.longestLifeSec === 'number') w.longestLifeSec = data.longestLifeSec;
+    if (typeof data.longestLifeName === 'string') w.longestLifeName = data.longestLifeName;
+    if (typeof data.shortestLifeSec === 'number') w.shortestLifeSec = data.shortestLifeSec;
+    if (typeof data.shortestLifeName === 'string') w.shortestLifeName = data.shortestLifeName;
     return true;
   } catch {
     return false;

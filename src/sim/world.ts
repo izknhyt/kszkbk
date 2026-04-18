@@ -26,8 +26,11 @@ import {
   FURANA_LINES_CHAT,
   FURANA_LINES_DEATH,
   FURANA_LINES_DEATH_REACTION,
+  FURANA_LINES_HAPPY,
+  FURANA_LINES_HATE,
   FURANA_LINES_IDLE,
   FURANA_LINES_PAT,
+  FURANA_LINES_THROW,
   FURANA_LINES_WEIRD_DEATH,
   LOU_LINES,
   NPC_DEFS,
@@ -115,6 +118,12 @@ export interface WorldState {
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
+  // --- 統計（セッション累積。平均寿命・最長寿・最短寿）-------------------
+  sumDeathAgeSec: number;
+  longestLifeSec: number;
+  longestLifeName: string;
+  shortestLifeSec: number;
+  shortestLifeName: string;
   dex: Record<DeathCauseId, DexEntry>;
   recentDeaths: DeathLogEntry[];
   newDiscoveries: DeathCauseId[]; // 前フレームで新規発見された図鑑ID
@@ -172,6 +181,11 @@ export function createWorld(): WorldState {
     totalDeaths: 0,
     totalBirths: 0,
     stompCount: 0,
+    sumDeathAgeSec: 0,
+    longestLifeSec: 0,
+    longestLifeName: '—',
+    shortestLifeSec: Infinity,
+    shortestLifeName: '—',
     dex: createDex(),
     recentDeaths: [],
     newDiscoveries: [],
@@ -260,6 +274,7 @@ function scheduleEvents(w: WorldState, dt: number) {
       intensity: CONFIG.ONDO_KILL_RATE,
     };
     reactNpcsToOndo(w);
+    dampenFuranaMood(w, 5);
   } else {
     w.event = {
       kind: 'fire',
@@ -267,6 +282,7 @@ function scheduleEvents(w: WorldState, dt: number) {
       remaining: CONFIG.FIRE_DURATION_SEC,
       intensity: CONFIG.FIRE_KILL_RATE,
     };
+    dampenFuranaMood(w, 10);
   }
 }
 
@@ -296,7 +312,7 @@ function maybeTriggerBokaigi(w: WorldState, dt: number) {
     if (Math.random() > 0.3) { w.bokaigiCooldown = 6 + Math.random() * 6; return; }
   }
   const suzu = w.npcs.find((n) => n.id === 'suzu');
-  if (suzu) spawnBubble(w.bubbles, suzu.pos, '棒会議ひらくよ', 'npc-speech', 2.2);
+  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, '棒会議ひらくよ', 'npc-speech', 2.2);
   w.bokaigiMarkerTimer = 2.5;
   const victimCount = Math.min(alive.length, 1 + Math.floor(Math.random() * CONFIG.BOKAIGI_VICTIMS_MAX));
 
@@ -356,7 +372,7 @@ function maybeStartTaikoFestival(w: WorldState) {
     intensity: CONFIG.TAIKO_FESTIVAL_KILL_RATE,
   };
   const suzu = w.npcs.find((n) => n.id === 'suzu');
-  if (suzu) spawnBubble(w.bubbles, suzu.pos, '太鼓祭〜！', 'npc-speech', 2.5);
+  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, '太鼓祭〜！', 'npc-speech', 2.5);
 }
 
 function logDeath(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
@@ -377,6 +393,22 @@ function logDeath(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   w.points += gained;
   w.totalPointsEarned += gained;
   w.totalDeaths += 1;
+  // 統計：寿命の合計・最長・最短を更新
+  const ageSec = c.ageSec;
+  w.sumDeathAgeSec += ageSec;
+  if (ageSec > w.longestLifeSec) {
+    w.longestLifeSec = ageSec;
+    w.longestLifeName = c.name;
+  }
+  if (ageSec < w.shortestLifeSec) {
+    w.shortestLifeSec = ageSec;
+    w.shortestLifeName = c.name;
+  }
+}
+
+// 平均寿命（秒）を返す。死者 0 なら 0。
+export function averageLifespan(w: WorldState): number {
+  return w.totalDeaths > 0 ? w.sumDeathAgeSec / w.totalDeaths : 0;
 }
 
 // 累計ポイント → 村Lv (1-99)。緩やかに伸びる平方根曲線（徐々に発展する感）。
@@ -446,6 +478,8 @@ export function damageNpc(w: WorldState, n: NpcState, amount: number): boolean {
   // どのNPCでも専用の hurt 台詞を吐く
   spawnBubble(w.bubbles, n.pos, pickLine(hurtLinesFor(n.id)), 'npc-speech', 1.6);
   if (n.id === 'furana') {
+    // 殴られると機嫌が大幅に下がる
+    n.mood = Math.max(0, n.mood - 18);
     // スズが近くにいたらママ心配で反応（35%）
     const suzu = w.npcs.find((x) => x.id === 'suzu');
     if (suzu && !suzu.dead && Math.random() < 0.35) {
@@ -1152,9 +1186,24 @@ function pickFuranaTarget(w: WorldState, n: NpcState): Vec2 {
 // 近くに密集してるほど（まとわりつき過多）イライラ率が上がる。
 function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   n.abuseCooldown -= dt;
-  // 独り言（～10秒に 1回くらい、頻繁めに喋る）
+  // HP 自然回復：hurt 以外の時 +1 HP / 秒（maxHp を上限）。
+  if (n.state !== 'hurt' && n.hp < n.maxHp) {
+    n.hp = Math.min(n.maxHp, n.hp + dt * 1);
+  }
+  // 機嫌が 70（平常値）に向けて自然に戻る（10秒で 0.5 程度）
+  const drift = (70 - n.mood) * 0.003 * dt * 20;  // dt*20 で tick 補正
+  n.mood += drift;
+  // 近くのちびわふが多すぎると徐々に不機嫌（まとわりつき疲れ）
+  const nearby = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 60).length;
+  if (nearby >= 5) n.mood -= dt * 0.3 * (nearby - 4);
+  n.mood = Math.max(0, Math.min(100, n.mood));
+
+  // 独り言：機嫌で使い分け（8秒に 1回くらい）
   if (Math.random() < 0.005) {
-    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_IDLE), 'npc-speech', 2);
+    const pool = n.mood >= 70 ? FURANA_LINES_HAPPY
+      : n.mood < 30 ? FURANA_LINES_HATE
+      : FURANA_LINES_IDLE;
+    spawnBubble(w.bubbles, n.pos, pickLine(pool), 'npc-speech', 2);
   }
   if (n.abuseCooldown > 0) return;
   const candidates = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 70);
@@ -1163,12 +1212,16 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     return;
   }
   n.abuseCooldown = 4 + Math.random() * 5;
-  // 発動率：通常 30%。近くに 4匹以上いるとイライラして 60% まで上昇。
+
+  // 機嫌で発動率と荒さが変わる
+  // 発動率: mood 90→0.15 / mood 70→0.3 / mood 30→0.55 / mood 0→0.8
   const crowded = candidates.length >= 4;
-  const triggerChance = crowded ? 0.6 : 0.3;
+  let triggerChance = 0.3 + (60 - n.mood) * 0.008;
+  if (crowded) triggerChance += 0.2;
+  triggerChance = Math.max(0.05, Math.min(0.85, triggerChance));
   if (Math.random() > triggerChance) return;
 
-  // ターゲット：mama 高い子ほど狙われやすい（甘えてまとわりつくので）
+  // ターゲット：mama 高い子ほど狙われやすい
   const weights = candidates.map((c) => 1 + Math.max(0, c.params.mama - 50) * 0.03);
   const total = weights.reduce((a, b) => a + b, 0);
   let roll = Math.random() * total;
@@ -1179,25 +1232,50 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   }
   if (!target) return;
 
-  // イライラ率：混み具合 40% + ランダム。通常は soft "めっ"。
-  const irritated = crowded ? Math.random() < 0.55 : Math.random() < 0.25;
-  if (irritated) {
-    // 本気パンチ：ちびわふに HP 6-14 ダメージ、hurt 1.3秒。殺すこともある。
+  // 機嫌による挙動分岐
+  if (n.mood < 20 && Math.random() < 0.4) {
+    // 激怒モード：ぶん投げて川へ（mudriver へ飛ばす）
+    n.state = 'angry';
+    n.stateTimer = 1.8;
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_THROW), 'npc-speech', 1.6);
+    // ちびわふを川の方へ投げ飛ばす
+    target.pos.x = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + (Math.random() - 0.5) * 200));
+    target.pos.y = 430 + Math.random() * 40;  // 川エリア
+    target.target = null;
+    setState(target, 'surprised', 0.6);
+    spawnBubble(w.bubbles, target.pos, 'とんでるわふ〜！', 'speech', 1);
+    pushLife(target, Math.floor(target.ageSec), 'フラナに川へ投げ飛ばされた');
+    return;
+  }
+
+  // 通常時：機嫌が低いほど irritated（本気パンチ）確率↑
+  // mood 80→0.15, mood 60→0.35, mood 30→0.7, mood 0→0.95
+  let irritationChance = 0.25 + (60 - n.mood) * 0.01;
+  if (crowded) irritationChance += 0.25;
+  irritationChance = Math.max(0.05, Math.min(0.95, irritationChance));
+  if (Math.random() < irritationChance) {
+    // 本気パンチ
     n.state = 'angry';
     n.stateTimer = 1.5;
     spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_ANGRY), 'npc-speech', 1.8);
     const dmg = 6 + Math.floor(Math.random() * 9);
     setState(target, 'hurt', 1.3);
     spawnBubble(w.bubbles, target.pos, 'ぎゃーわふ！', 'speech', 1.2);
-    pushLife(target, Math.floor(target.ageSec), 'フラナにイライラして殴られた');
-    damageChibi(w, target, dmg, 'cocoon_abuse'); // 死因は既存の"大人に殴られた"系を流用
+    pushLife(target, Math.floor(target.ageSec), `フラナ(機嫌${Math.round(n.mood)})に殴られた`);
+    damageChibi(w, target, dmg, 'cocoon_abuse');
   } else {
-    // soft "めっ"：state hurt のみ、HP 減らず
+    // soft "めっ"
     spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_PAT), 'npc-speech', 1.6);
     setState(target, 'hurt', 0.8);
     spawnBubble(w.bubbles, target.pos, 'きゃんわふ！', 'speech', 1.1);
     pushLife(target, Math.floor(target.ageSec), 'フラナにめっされた');
   }
+}
+
+// イベント発生時にフラナの機嫌を下げる
+function dampenFuranaMood(w: WorldState, amount: number) {
+  const f = w.npcs.find((n) => n.id === 'furana');
+  if (f) f.mood = Math.max(0, f.mood - amount);
 }
 
 // フラナが死ぬとちびわふ界は地獄。出産停止＋パニック継続。
@@ -1312,7 +1390,7 @@ function killCocoon(w: WorldState, n: NpcState) {
 
 function reactNpcsToBirth(w: WorldState) {
   const suzu = w.npcs.find((n) => n.id === 'suzu');
-  if (!suzu) return;
+  if (!suzu || suzu.dead) return;
   if (Math.random() < 0.3) {
     spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_BIRTH), 'npc-speech', 2);
   }
@@ -1353,6 +1431,7 @@ function reactNpcsToDeath(w: WorldState, c: Chibiwafu) {
 
 function reactNpcsToOndo(w: WorldState) {
   for (const n of w.npcs) {
+    if (n.dead) continue;
     if (!NPC_DEFS[n.id].reactOnOndo) continue;
     spawnBubble(w.bubbles, n.pos, pickLine(SUZU_LINES_ONDO), 'npc-speech', 2.2);
   }

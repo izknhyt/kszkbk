@@ -92,6 +92,9 @@ export interface NpcState {
   speed: number;
   // 画像の左右反転フラグ
   faceLeft: boolean;
+  // フラナの機嫌 0-100。他NPCは未使用だが一応持たせる。
+  // 殴られる/うるさい/イベントで下がり、時間経過で 70 に向けて戻る。
+  mood: number;
 }
 
 export const SUZU_LINES_DEATH = [
@@ -153,6 +156,7 @@ function mkNpc(id: NpcId, home: Vec2, abuseCooldown = 0): NpcState {
     target: null,
     speed: id === 'furana' ? 22 : 0,
     faceLeft: false,
+    mood: 70,
   };
 }
 
@@ -324,6 +328,20 @@ export function hurtLinesFor(id: NpcId): string[] {
 export const FURANA_LINES_ANGRY = [
   'うるさいわふ！', 'しつこいわふ！', 'いいかげんにするわふ！', 'もうげんかいわふ！',
   'どうしてわふ…', 'だめっていってるわふ！', 'ぎゃーわふ！',
+];
+// 機嫌最悪時にちびわふを川へ投げる／嫌う時の台詞
+export const FURANA_LINES_HATE = [
+  'もうやだわふ！', 'あっちいけわふ！', 'きらいわふ！', 'きえてわふ！',
+  'あなたなんてしらないわふ！', 'もうイヤわふ！', 'でていってわふ！',
+];
+// ぶん投げ時の掛け声
+export const FURANA_LINES_THROW = [
+  'えいっわふ！', 'そらっわふ！', 'どっかいけわふ！', 'とんでけわふ！',
+];
+// 機嫌が良い時の独り言・称賛
+export const FURANA_LINES_HAPPY = [
+  'いい子わふ〜', 'みんなかわいいわふ', 'きょうもへいわわふ', 'しあわせわふ',
+  'ママさいこうわふ', 'ぽかぽかわふ〜',
 ];
 
 // フラナの死亡台詞

@@ -412,10 +412,10 @@ function dropNpc(world: WorldState, id: NpcId, wx: number, wy: number, throwDist
   n.pos.x = wx;
   n.pos.y = wy;
   if (wy > 414) {
-    // 水中に投げ込まれた NPC：ちびわふと違って即死させず、固定 40 HP のダメージに留める
-    // （神話的に泳げる扱い。繰り返し投げればいずれ死ぬ）
+    // 水中に投げ込まれた NPC：即死させず 10 HP の軽ダメージだけ。
+    // ちびわふと違って NPC は泳げる設定。何度も放り込めば死ぬがすぐには死なない。
     spawnBubble(world.bubbles, n.pos, 'わぷっ…', 'npc-speech', 1.2);
-    damageNpc(world, n, 40);
+    damageNpc(world, n, 10);
     return;
   }
   // 着地：距離に応じて NPC へのダメージ。ちびわふ (0.10) より低く 0.04 倍。
@@ -443,18 +443,30 @@ function showNpcModal(n: NpcState) {
   modal.classList.remove('hidden');
   const def = NPC_DEFS[n.id];
   (document.getElementById('modal-name')!).textContent = def.name;
-  (document.getElementById('modal-age')!).textContent = `HP ${n.hp} / ${n.maxHp}`;
+  (document.getElementById('modal-age')!).textContent = `HP ${Math.round(n.hp)} / ${n.maxHp}`;
   (document.getElementById('modal-traits')!).innerHTML = '';
   (document.getElementById('modal-epitaph')!).textContent = '';
   (document.getElementById('modal-epitaph')!).classList.remove('show');
-  (document.getElementById('modal-params')!).innerHTML =
+  const hpPct = (n.hp / n.maxHp) * 100;
+  let paramsHtml =
     `<div class="param-row"><span class="label">HP</span>` +
-    `<span class="bar"><span class="fill" style="width:${(n.hp / n.maxHp) * 100}%;background:#d85";></span></span>` +
-    `<span class="value">${n.hp}</span></div>`;
+    `<span class="bar"><span class="fill" style="width:${hpPct}%;background:#d85"></span></span>` +
+    `<span class="value">${Math.round(n.hp)}</span></div>`;
+  // フラナは機嫌も表示
+  if (n.id === 'furana') {
+    const moodPct = Math.max(0, Math.min(100, n.mood));
+    const moodColor = moodPct >= 60 ? '#6bc47a' : moodPct >= 30 ? '#f0b94a' : '#d85c5c';
+    const moodLabel = moodPct >= 70 ? 'ごきげん' : moodPct >= 40 ? 'ふつう' : moodPct >= 20 ? 'イライラ' : 'ぶち切れ';
+    paramsHtml +=
+      `<div class="param-row"><span class="label">機嫌</span>` +
+      `<span class="bar"><span class="fill" style="width:${moodPct}%;background:${moodColor}"></span></span>` +
+      `<span class="value">${Math.round(moodPct)} (${moodLabel})</span></div>`;
+  }
+  (document.getElementById('modal-params')!).innerHTML = paramsHtml;
   (document.getElementById('modal-flavors')!).innerHTML =
-    n.id === 'furana' ? '<li>村の母。死ぬと出産停止＋ちびわふ大パニック。</li>'
+    n.id === 'furana' ? '<li>村の母。死ぬと出産停止＋ちびわふ大パニック。機嫌が悪くなると手加減しなくなる。</li>'
     : n.id === 'cocoon' ? '<li>いじめっ子。ちびわふを叩く。</li>'
-    : n.id === 'suzu' ? '<li>村の点呼係。</li>'
+    : n.id === 'suzu' ? '<li>村の点呼係。ママ想い。</li>'
     : '<li>……</li>';
   (document.getElementById('modal-life')!).innerHTML = '';
 }

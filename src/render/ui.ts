@@ -1,7 +1,7 @@
 import { BUILDINGS } from '../city/buildings';
 import { DEATH_CAUSES } from '../sim/deaths';
 import type { WorldState } from '../sim/world';
-import { buildingCost, getUpgradeInfo, populationCap, totalDexCount, uniqueDexFound } from '../sim/world';
+import { averageLifespan, buildingCost, getUpgradeInfo, populationCap, totalDexCount, uniqueDexFound } from '../sim/world';
 import { DAY_PHASE_LABEL, SEASON_LABEL } from '../sim/events';
 import { RANK_DEFS, nextRank } from '../sim/rank';
 import type { DeathCauseId } from '../types';
@@ -72,6 +72,17 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   byId('stat-season').textContent = `${SEASON_LABEL[w.season]} ${w.dayCount}日目 ${DAY_PHASE_LABEL[w.dayPhase]}`;
   byId('stat-gen').textContent = String(w.totalBirths);
   byId('stat-stomp').textContent = String(w.stompCount);
+  // 統計：平均寿命 / 最長寿 / 最短寿
+  const avgEl = document.getElementById('stat-avg-life');
+  const longEl = document.getElementById('stat-longest-life');
+  const shortEl = document.getElementById('stat-shortest-life');
+  if (avgEl) avgEl.textContent = `${averageLifespan(w).toFixed(1)}s`;
+  if (longEl) longEl.textContent = w.longestLifeSec > 0
+    ? `${Math.floor(w.longestLifeSec)}s (${w.longestLifeName})`
+    : '—';
+  if (shortEl) shortEl.textContent = w.shortestLifeSec !== Infinity
+    ? `${Math.floor(w.shortestLifeSec)}s (${w.shortestLifeName})`
+    : '—';
   byId('stat-tick').textContent = String(w.tick);
   byId('stat-time').textContent = `${Math.floor(w.timeSec)}s`;
 
