@@ -13,6 +13,7 @@ import {
 import { RANK_DEFS } from './sim/rank';
 import { TRAIT_DEFS } from './sim/traits';
 import { DEATH_CAUSES as DEATHS } from './sim/deaths';
+import { PARAM_COLOR, PARAM_KEYS, PARAM_LABEL } from './sim/personality';
 import type { Chibiwafu, VillageRank } from './types';
 import { clearSave, load, save } from './meta/save';
 import { CONFIG, type TimeScale } from './config';
@@ -227,6 +228,22 @@ function showChibiModal(c: Chibiwafu, isEpitaph: boolean) {
   } else {
     epitaphEl.classList.remove('show');
     epitaphEl.textContent = '';
+  }
+
+  // パラメータバー
+  const paramsEl = document.getElementById('modal-params')!;
+  paramsEl.innerHTML = '';
+  for (const key of PARAM_KEYS) {
+    const val = c.params[key];
+    const color = '#' + PARAM_COLOR[key].toString(16).padStart(6, '0');
+    const row = document.createElement('div');
+    row.className = 'param-row';
+    row.innerHTML = `
+      <span class="label">${PARAM_LABEL[key]}</span>
+      <span class="bar"><span class="fill" style="width:${val}%;background:${color}"></span></span>
+      <span class="value">${val}</span>
+    `;
+    paramsEl.appendChild(row);
   }
 
   lifeEl.innerHTML = '';

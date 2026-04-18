@@ -33,6 +33,14 @@ import { computeRank, maxBuildingLevel, upgradeCostFor, type RankContext } from 
 import { landmarkList, type Landmark } from './landmarks';
 import { maybeStartChat } from './chats';
 import { TRAIT_DEFS } from './traits';
+import {
+  applyTraitBias,
+  derivedChatCooldown,
+  derivedEatChance,
+  derivedHazardSusceptibility,
+  derivedStareChance,
+  rollParams,
+} from './personality';
 
 export interface DeathLogEntry {
   tick: number;
@@ -321,19 +329,21 @@ export function forceSpawn(w: WorldState) {
     cocoonNearFurana: cocoon ? distance(cocoon.pos, w.furanaPos) < 100 : false,
     event: w.event?.kind ?? null,
   });
-  // 特性でライフスパン調整：心配性は寿命半分（老衰が2倍早く来る）。
+  // 10軸パラメータを生成→特性で baseline 補正。
+  const rawParams = rollParams();
+  const params = applyTraitBias(rawParams, traits);
+  // ライフスパン：心配性は寿命半分、toughness が高いほど長生き。
   let maxAge = CONFIG.CHIBI_MAX_AGE_MIN_SEC + Math.random() * CONFIG.CHIBI_MAX_AGE_RANGE_SEC;
   if (traits.includes('shinpai')) maxAge *= 0.5;
+  maxAge *= 0.7 + params.tough * 0.006; // tough 0 → ×0.7, tough 100 → ×1.3
   const child = spawnChibiwafu({
     name,
     birthTick: w.tick,
     pos: { x: w.furanaPos.x + jitter(), y: w.furanaPos.y + 30 + Math.abs(jitter()) },
     maxAgeSec: maxAge,
     traits,
+    params,
   });
-  // 特性で移動速度調整：冒険家 +20%、浮世離れ -30%。
-  if (traits.includes('bouken')) child.speed *= 1.2;
-  if (traits.includes('ukiyo')) child.speed *= 0.7;
   setState(child, 'surprised', 1.5);
   const traitLabel = traits.length > 0 ? `（${traits.map((t) => TRAIT_DEFS[t].name).join('・')}）` : '';
   pushLife(child, 0, `生まれた${traitLabel}`);
@@ -428,6 +438,8 @@ function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone
         if (m != null) rate *= m;
       }
     }
+    // パラメータ補正（運の悪さ・丈夫さ）
+    rate *= derivedHazardSusceptibility(c.params);
     if (Math.random() < rate * dt) {
       kill(w, c, zone.causeId);
       return true;
@@ -450,24 +462,22 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     if (roll < 0.05) setState(c, 'cry', 0.8);
     else if (roll < 0.08) setState(c, 'dazed', 0.6);
     else if (roll < 0.10) setState(c, 'sleep', 1.5);
-    // 浮世離れ：哲学石を目指してたらそこで立ち止まって空を見る
+    // 哲学石に着いたら空を見る（philo パラメータで確率決定）
     else if (
-      c.traits.includes('ukiyo') &&
       c.targetLandmarkId === 'philosophy' &&
       c.target &&
       distance(c.pos, c.target) < 10 &&
-      Math.random() < 0.4
+      Math.random() < derivedStareChance(c.params)
     ) {
       setState(c, 'staring', 2.5);
       pushLife(c, Math.floor(c.ageSec), '哲学石で空を見た');
     }
-    // 食いしん坊：石パン岩／泥水池に着いたら食事モーション
+    // 食事スポットに着いたら食事（appetite パラメータで確率決定）
     else if (
-      c.traits.includes('gourmand') &&
       (c.targetLandmarkId === 'stonebread' || c.targetLandmarkId === 'mudpool' || c.targetLandmarkId === 'beer') &&
       c.target &&
       distance(c.pos, c.target) < 10 &&
-      Math.random() < 0.5
+      Math.random() < derivedEatChance(c.params)
     ) {
       setState(c, 'eating', 1.8);
       const where = c.targetLandmarkId === 'stonebread' ? '石パン岩' : c.targetLandmarkId === 'mudpool' ? '泥水池' : '泥水ビール樽';
@@ -512,6 +522,8 @@ function processChats(w: WorldState, dt: number) {
       spawnBubble(w.bubbles, { x: b.pos.x, y: b.pos.y + 6 }, chat.lineB, 'speech', chat.duration * 0.4);
       pushLife(a, Math.floor(a.ageSec), `${b.name} と話した`);
       pushLife(b, Math.floor(b.ageSec), `${a.name} と話した`);
+      a.chatCooldown = derivedChatCooldown(a.params);
+      b.chatCooldown = derivedChatCooldown(b.params);
       break; // a は1人と話せば十分
     }
   }

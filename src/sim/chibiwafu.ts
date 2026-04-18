@@ -1,6 +1,11 @@
 import type { ChibiState, Chibiwafu, TraitId, Vec2 } from '../types';
-import { CONFIG } from '../config';
 import { landmarkActive, landmarkList, type Landmark, type LandmarkKind } from './landmarks';
+import {
+  derivedMamaRadius,
+  derivedRiverTrespass,
+  derivedSpeed,
+  type ChibiParams,
+} from './personality';
 import type { Season } from '../types';
 
 let nextId = 1;
@@ -14,6 +19,7 @@ export interface SpawnArgs {
   pos: Vec2;
   maxAgeSec: number;
   traits: TraitId[];
+  params: ChibiParams;
 }
 
 export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
@@ -28,10 +34,11 @@ export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
     stateTimer: 0,
     deathTick: null,
     deathCauseId: null,
-    speed: CONFIG.CHIBI_SPEED_MIN + Math.random() * CONFIG.CHIBI_SPEED_RANGE,
+    speed: derivedSpeed(args.params),
     maxAgeSec: args.maxAgeSec,
     faceLeft: Math.random() < 0.5,
     traits: [...args.traits],
+    params: { ...args.params },
     lifeLog: [],
     chatCooldown: 2,
     targetLandmarkId: null,
@@ -50,7 +57,6 @@ export function isAlive(c: Chibiwafu): boolean {
 // 陸地の上限 y（これより下は泥川）。wanderStep の target 計算で利用。
 // 川に落ちる奴はたまにはいる（冒険家など）ので target 抽選で 6% だけ越境を許す。
 const DRY_Y_LIMIT = 410;
-const RIVER_TRESPASS_CHANCE = 0.06;
 
 // 特性に応じた目的地バイアス。対象ランドマークの種類ごとに確率を持つ。
 const TRAIT_LANDMARK_PREF: Partial<Record<TraitId, { kind: LandmarkKind; chance: number }[]>> = {
@@ -98,19 +104,20 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
     let newLandmarkId: string | null = null;
 
     if (env) {
-      // --- 特性別の強い行動誘導 ---
-      // 心配性：フラナから60px以内
-      if (c.traits.includes('shinpai')) {
+      // --- パラメータ駆動：ママ依存が高いほどフラナ近くに留まる ---
+      const mamaRadius = derivedMamaRadius(c.params, Math.max(bounds.w, bounds.h));
+      const wantsMama = c.params.mama > 60 && Math.random() < (c.params.mama - 50) / 100;
+      if (wantsMama) {
         const ang = Math.random() * Math.PI * 2;
-        const r = 20 + Math.random() * 40;
+        const r = 20 + Math.random() * mamaRadius * 0.3;
         newTarget = { x: env.furana.x + Math.cos(ang) * r, y: env.furana.y + Math.sin(ang) * r };
       }
       // 戦闘狂：ココンに向かう 60%
       if (!newTarget && c.traits.includes('ikusa') && env.cocoonPos && Math.random() < 0.6) {
         newTarget = { x: env.cocoonPos.x + (Math.random() - 0.5) * 30, y: env.cocoonPos.y + (Math.random() - 0.5) * 30 };
       }
-      // 冒険家：川・橋寄りに 35%
-      if (!newTarget && c.traits.includes('bouken') && Math.random() < 0.35) {
+      // 勇気：高いほど川/橋へ寄る
+      if (!newTarget && Math.random() < (c.params.courage - 50) * 0.008) {
         newTarget = {
           x: margin + Math.random() * (bounds.w - margin * 2),
           y: 380 + Math.random() * 60,
@@ -121,7 +128,7 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         const np = env.noukouPositions[Math.floor(Math.random() * env.noukouPositions.length)]!;
         newTarget = { x: np.x + (Math.random() - 0.5) * 40, y: np.y + (Math.random() - 0.5) * 30 };
       }
-      // ランドマーク指向
+      // ランドマーク指向（パラメータ＋特性）
       if (!newTarget) {
         const lm = pickLandmarkTarget(c, env);
         if (lm) {
@@ -131,14 +138,30 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
       }
     }
 
-    // fallback: 自由徘徊
+    // fallback: 自由徘徊（ママ依存でフラナ近くに寄せつつ、勇気で川を許容）
     if (!newTarget) {
-      const allowRiver = Math.random() < RIVER_TRESPASS_CHANCE || c.traits.includes('bouken');
+      const riverChance = derivedRiverTrespass(c.params);
+      const allowRiver = Math.random() < riverChance;
       const maxY = allowRiver ? bounds.h - margin : Math.min(DRY_Y_LIMIT, bounds.h - margin);
-      newTarget = {
-        x: margin + Math.random() * (bounds.w - margin * 2),
-        y: margin + Math.random() * (maxY - margin),
-      };
+
+      // mama 値で中心寄せ：フラナからの距離を mamaRadius 以内に収めやすくする
+      if (env && c.params.mama > 40) {
+        const maxR = derivedMamaRadius(c.params, Math.max(bounds.w, bounds.h));
+        for (let tries = 0; tries < 5; tries++) {
+          const tx = margin + Math.random() * (bounds.w - margin * 2);
+          const ty = margin + Math.random() * (maxY - margin);
+          if (distance({ x: tx, y: ty }, env.furana) <= maxR) {
+            newTarget = { x: tx, y: ty };
+            break;
+          }
+        }
+      }
+      if (!newTarget) {
+        newTarget = {
+          x: margin + Math.random() * (bounds.w - margin * 2),
+          y: margin + Math.random() * (maxY - margin),
+        };
+      }
     }
 
     c.target = newTarget;

@@ -1,4 +1,5 @@
 import type { Chibiwafu, TraitId } from '../types';
+import { derivedChatChance } from './personality';
 
 // =========================================================================
 // すれ違い立ち話
@@ -48,7 +49,8 @@ export function maybeStartChat(c1: Chibiwafu, c2: Chibiwafu): ChatAttempt | null
   if (c1.chatCooldown > 0 || c2.chatCooldown > 0) return null;
   if (c1.state !== 'idle' && c1.state !== 'surprised') return null;
   if (c2.state !== 'idle' && c2.state !== 'surprised') return null;
-  if (Math.random() > 0.12) return null;
+  // 社交性の平均で発動確率が決まる
+  if (Math.random() > derivedChatChance(c1.params, c2.params)) return null;
   return {
     a: c1,
     b: c2,

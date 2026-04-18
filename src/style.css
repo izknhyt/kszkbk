@@ -412,6 +412,50 @@ button:active { transform: translateY(1px); }
   display: none;
 }
 .chibi-modal-epitaph.show { display: block; }
+.chibi-modal-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 10px 0 4px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.chibi-modal-params {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px 10px;
+  margin-bottom: 6px;
+}
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+}
+.param-row .label {
+  min-width: 40px;
+  color: #555;
+}
+.param-row .bar {
+  flex: 1;
+  height: 6px;
+  background: #eaded0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.param-row .fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.param-row .value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  min-width: 20px;
+  text-align: right;
+  font-size: 10px;
+}
+
 .chibi-modal-life {
   list-style: none;
   margin: 0;

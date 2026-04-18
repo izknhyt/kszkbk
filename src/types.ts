@@ -33,6 +33,8 @@ export interface Chibiwafu {
   maxAgeSec: number;
   faceLeft: boolean;
   traits: TraitId[];
+  // 10軸のパーソナリティ（連続値 0-100）。挙動は基本これで決まる。
+  params: import('./sim/personality').ChibiParams;
   // --- P5: 生活 --------------------------------------------------------
   // 最近誰と話したか等、個体のイベントログ。死亡時に墓碑として見せる。
   lifeLog: LifeEvent[];
