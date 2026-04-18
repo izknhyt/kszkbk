@@ -252,8 +252,17 @@ async function start() {
   });
 
   const modal = document.getElementById('chibi-modal')!;
-  modal.querySelector('.chibi-modal-backdrop')!.addEventListener('click', closeChibiModal);
-  document.getElementById('modal-close')!.addEventListener('click', closeChibiModal);
+  // モーダルを閉じた時は pinnedId もクリア（でないと個体死亡時に再度開いてしまう）
+  function closeAndUnpin() {
+    closeChibiModal();
+    pinnedId = null;
+    pinnedWasAlive = false;
+  }
+  modal.querySelector('.chibi-modal-backdrop')!.addEventListener('click', closeAndUnpin);
+  document.getElementById('modal-close')!.addEventListener('click', closeAndUnpin);
+
+  // ピン中の個体が「生きている → 死んだ」の境界を 1 度だけ検出するためのフラグ
+  let pinnedWasAlive = false;
 
   function loop(now: number) {
     const dtReal = Math.min(0.2, (now - prev) / 1000);
@@ -292,19 +301,27 @@ async function start() {
     }
 
     // ピンした個体が死んだら自動で epitaph モーダルに切り替え
+    // 毎フレーム再描画すると閉じられなくなるので、生→死の境界で1度だけ表示、
+    // 以降は isOpen の時だけ内容を更新する。
     if (pinnedId != null) {
       const living = world.chibis.find((c) => c.id === pinnedId);
-      if (!living) {
-        const corpse = world.corpses.find((c) => c.id === pinnedId);
-        if (corpse) {
-          showChibiModal(corpse, true);
-        } else {
-          pinnedId = null;
-        }
-      } else {
-        // Liveで開きっぱなしなら内容を更新
-        const isOpen = !modal.classList.contains('hidden');
+      const isOpen = !modal.classList.contains('hidden');
+      if (living) {
+        pinnedWasAlive = true;
         if (isOpen) showChibiModal(living, false);
+      } else {
+        const corpse = world.corpses.find((c) => c.id === pinnedId);
+        if (corpse && pinnedWasAlive) {
+          // 死んだ瞬間 1 度だけ epitaph を出す。閉じた後は再表示しない。
+          showChibiModal(corpse, true);
+          pinnedWasAlive = false;
+        } else if (!corpse) {
+          pinnedId = null;
+          pinnedWasAlive = false;
+        } else if (isOpen) {
+          // 死後、モーダルが開きっぱなしなら内容だけ追従させる
+          showChibiModal(corpse, true);
+        }
       }
     }
 
