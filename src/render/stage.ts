@@ -86,6 +86,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   app.stage.addChild(cameraLayer);
 
   const bgLayer = new Container();
+  const plotLayer = new Container();  // 開拓プロット（地面レイヤの上、ランドマーク下）
   const landmarkLayer = new Container();
   const buildingLayer = new Container();
   const eventUnderLayer = new Container(); // 下レイヤ（ring／disk）
@@ -95,7 +96,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const fxLayer = new Container();
   const eventOverLayer = new Container(); // 上レイヤ（火炎／粉塵）
   cameraLayer.addChild(
-    bgLayer, landmarkLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, fxLayer, eventOverLayer,
+    bgLayer, plotLayer, landmarkLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, fxLayer, eventOverLayer,
   );
 
   const lib = await loadSpriteLibrary('/chibiwafu.png', '/chibiwafu');
@@ -316,6 +317,12 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     setSeason(world.season);
     setBounds(world.bounds.w, world.bounds.h);
     drawPhaseTint(world.dayPhase);
+
+    // 開拓プロット（仮グラフィックで色違いの矩形のみ）
+    plotLayer.removeChildren();
+    for (const p of world.plots) {
+      plotLayer.addChild(drawPlot(p));
+    }
 
     // landmarks (描き直しは季節が変わった時のみ。ここでは常時再描画して単純化)
     landmarkLayer.removeChildren();
@@ -1084,6 +1091,37 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
   vignette.rect(0, 0, 24, h).fill({ color: 0x000000, alpha: 0.035 });
   vignette.rect(w - 24, 0, 24, h).fill({ color: 0x000000, alpha: 0.035 });
   layer.addChild(vignette);
+}
+
+// 開拓プロットの仮描画（画像なしのプレースホルダ。後で差し替え想定）
+function drawPlot(p: import('../types').Plot): Container {
+  const c = new Container();
+  const g = new Graphics();
+  // kind 別に色分け
+  const kindColor: Record<import('../types').PlotKind, number> = {
+    wasteland: 0x7a6040,   // 茶色（荒地）
+    cleared  : 0xb99a68,   // 明るい土色
+    farm     : 0x7ba851,   // 緑（畑）
+    path     : 0x9a8668,   // 灰茶（踏み固め）
+    water    : 0x4a7ea8,   // 青（水源）
+    channel  : 0x6a9acf,   // 水色（水路）
+  };
+  const fillColor = kindColor[p.kind];
+  const alpha = p.kind === 'wasteland' ? 0.35 : 0.55;
+  g.roundRect(0, 0, p.w, p.h, 6)
+    .fill({ color: fillColor, alpha })
+    .stroke({ color: 0x3a2a1a, width: 1, alpha: 0.4 });
+  c.addChild(g);
+  // devLevel を小さい点で左上に表示（0-3）
+  if (p.devLevel > 0) {
+    const dots = new Graphics();
+    for (let i = 0; i < p.devLevel; i++) {
+      dots.circle(8 + i * 7, 8, 2).fill({ color: 0xffffff, alpha: 0.85 });
+    }
+    c.addChild(dots);
+  }
+  c.position.set(p.pos.x, p.pos.y);
+  return c;
 }
 
 function drawLandmark(lm: Landmark, envArt: EnvironmentArt): Container {

@@ -152,6 +152,25 @@ export interface PlacedBuilding {
 
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
+// 開拓プロット。格子状ではなく座標ベースの矩形セル。
+export type PlotKind =
+  | 'wasteland'  // 荒地（初期状態、障害物まみれ）
+  | 'cleared'    // 均された土地（建物/畑の土台）
+  | 'farm'       // 畑
+  | 'path'       // 道
+  | 'water'      // 水源
+  | 'channel';   // 水路
+
+export interface Plot {
+  id: string;
+  pos: Vec2;
+  w: number;
+  h: number;
+  kind: PlotKind;
+  devLevel: number;   // 0-3（開拓進行度）
+  workSec: number;    // 作業累積秒。閾値で devLevel が上がる
+}
+
 // プレイヤー操作の対象（ちびわふ or NPC）。
 // stage.ts の hitTest と main.ts の punch/drag/drop イベントで共有。
 export type HitTarget =

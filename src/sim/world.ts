@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, FlightState, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, FlightState, PlacedBuilding, Plot, PlotKind, Season, Vec2, VillageRank } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -161,6 +161,45 @@ export interface WorldState {
   npcs: NpcState[];
   bubbles: Bubble[];
   landmarks: Landmark[];
+  // 開拓プロット（荒地 → 均し済み → 畑等に進化）
+  plots: Plot[];
+}
+
+// 初期プロット配置：陸地帯に格子状に 4x4 = 16 枚。
+// 中央にフラナの拠点、水源 1 箇所、残りは wasteland。
+function createInitialPlots(bounds: { w: number; h: number }): Plot[] {
+  const plots: Plot[] = [];
+  const cols = 4;
+  const rows = 4;
+  const plotW = 90;
+  const plotH = 70;
+  const gapX = 20;
+  const gapY = 18;
+  const totalW = cols * plotW + (cols - 1) * gapX;
+  const startX = (bounds.w - totalW) / 2;
+  const startY = 100;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const id = `plot-${r}-${c}`;
+      // フラナ拠点のすぐ下あたり（row 1 col 1-2）は cleared で開始
+      // それ以外は wasteland
+      const initKind: PlotKind = (r === 1 && (c === 1 || c === 2)) ? 'cleared' : 'wasteland';
+      const initDev = initKind === 'cleared' ? 1 : 0;
+      plots.push({
+        id,
+        pos: { x: startX + c * (plotW + gapX), y: startY + r * (plotH + gapY) },
+        w: plotW,
+        h: plotH,
+        kind: initKind,
+        devLevel: initDev,
+        workSec: 0,
+      });
+    }
+  }
+  // 左端の 1 つを水源にする（象徴的）
+  const waterPlot = plots.find((p) => p.id === 'plot-0-0');
+  if (waterPlot) { waterPlot.kind = 'water'; waterPlot.devLevel = 3; }
+  return plots;
 }
 
 function createDex(): Record<DeathCauseId, DexEntry> {
@@ -221,6 +260,7 @@ export function createWorld(): WorldState {
     npcs: createNpcs(bounds),
     bubbles: [],
     landmarks: landmarkList(bounds),
+    plots: createInitialPlots(bounds),
   };
 }
 
