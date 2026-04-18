@@ -182,9 +182,9 @@ export const HAZARDS: HazardZone[] = [
     kind: 'random',
     ratePerSec: 0.05,
     bypassSafeZone: true,
-    requiresAnyTrait: ['bouken', 'ikusa'],
+    requiresAnyTrait: ['bouken', 'ikusa', 'taiko_kko'],
     requiresEvent: 'taiko_festival',
-    note: '太鼓祭にテンション上がった冒険家／戦闘狂がやぐらに飛び込む',
+    note: '太鼓祭にテンション上がった冒険家／戦闘狂／太鼓っ子がやぐらに飛び込む',
   },
   {
     id: 'suzu_kazoe_shikujiri',
@@ -194,6 +194,56 @@ export const HAZARDS: HazardZone[] = [
     bypassSafeZone: true,
     requiresYoungSec: 4,
     note: '生後4秒以内に消えてしまい、スズの点呼に間に合わない',
+  },
+
+  // P6 追加 Uncommon
+  {
+    id: 'morashi_fall',
+    causeId: 'morashi_fall',
+    kind: 'random',
+    ratePerSec: 0.006,
+    bypassSafeZone: true,
+    requiresAnyTrait: ['morashi'],
+    note: 'もらし常習が自分の水たまりで滑って溺れる',
+  },
+  {
+    id: 'oshaberi_choked',
+    causeId: 'oshaberi_choked',
+    kind: 'random',
+    ratePerSec: 0.025,
+    bypassSafeZone: true,
+    requiresAnyTrait: ['oshaberi'],
+    requiresEvent: 'ondo',
+    note: 'おしゃべりが音頭中に喋り過ぎて息切れ',
+  },
+  {
+    id: 'tabikko_boundary',
+    causeId: 'tabikko_boundary',
+    kind: 'rect',
+    rect: { x: 0, y: 0, w: 60, h: 9999 },
+    ratePerSec: 0.08,
+    bypassSafeZone: true,
+    requiresAnyTrait: ['tabikko'],
+    note: 'ワールド左端に到達した旅っ子が行方不明になる',
+  },
+  {
+    id: 'tabikko_boundary_r',
+    causeId: 'tabikko_boundary',
+    kind: 'rect',
+    rect: { x: 1040, y: 0, w: 200, h: 9999 }, // WORLD_W=1100 のほぼ右端
+    ratePerSec: 0.08,
+    bypassSafeZone: true,
+    requiresAnyTrait: ['tabikko'],
+    note: 'ワールド右端に到達した旅っ子が行方不明になる',
+  },
+  {
+    id: 'tetsugakusha_shoushitsu',
+    causeId: 'tetsugakusha_shoushitsu',
+    kind: 'random',
+    ratePerSec: 0.008,
+    bypassSafeZone: true,
+    requiresAnyTrait: ['tetsugakusha'],
+    note: '哲学者が深く考えすぎて消える',
   },
 ];
 

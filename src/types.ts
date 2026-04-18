@@ -76,7 +76,13 @@ export type DeathCauseId =
   | 'ikusa_taezetsu'
   | 'noumin_umore'
   | 'suzu_kazoe_shikujiri'
-  | 'taiko_tobikomi';
+  | 'taiko_tobikomi'
+  // --- P6 追加 Uncommon ----------------------------------------------------
+  | 'morashi_fall'           // もらし常習が自分の水たまりで溺れる
+  | 'oshaberi_choked'        // おしゃべりが音頭中に喋り過ぎて息切れ
+  | 'tabikko_boundary'       // 旅っ子がワールドの端で行方不明
+  | 'tetsugakusha_shoushitsu'// 哲学者が考えすぎて輪郭が消えた
+  | 'bo_meijin_tenka';       // 棒名人が棒会議でみんなを転倒させる
 
 export interface DeathCause {
   id: DeathCauseId;

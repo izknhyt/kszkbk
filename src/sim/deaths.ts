@@ -181,6 +181,48 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 28,
     template: (n) => `${n}は太鼓の真ん中に飛び込むのが一番目立つと信じた。`,
   },
+
+  // --- P6 ------
+  morashi_fall: {
+    id: 'morashi_fall',
+    title: 'もらしで転倒→溺死',
+    rare: false,
+    uncommon: true,
+    points: 19,
+    template: (n) => `${n}はもらした水たまりで足を滑らせ、自分の痕跡に沈んだ。`,
+  },
+  oshaberi_choked: {
+    id: 'oshaberi_choked',
+    title: 'おしゃべりの息切れ',
+    rare: false,
+    uncommon: true,
+    points: 21,
+    template: (n) => `${n}は音頭中もしゃべり続け、酸素を忘れて息絶えた。`,
+  },
+  tabikko_boundary: {
+    id: 'tabikko_boundary',
+    title: '旅っ子の境界越え',
+    rare: false,
+    uncommon: true,
+    points: 23,
+    template: (n) => `${n}は村のふちを越えようと踏み出し、誰にも見つからなくなった。`,
+  },
+  tetsugakusha_shoushitsu: {
+    id: 'tetsugakusha_shoushitsu',
+    title: '哲学者の自己消失',
+    rare: false,
+    uncommon: true,
+    points: 30,
+    template: (n) => `${n}は「自分とは何か」に答えが出た瞬間、跡形もなく消えた。`,
+  },
+  bo_meijin_tenka: {
+    id: 'bo_meijin_tenka',
+    title: '棒名人の返り討ち（他個体が犠牲）',
+    rare: false,
+    uncommon: true,
+    points: 26,
+    template: (n) => `${n}は棒名人の一閃を真横から受け、踊りながら退場した。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;

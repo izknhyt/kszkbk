@@ -31,7 +31,7 @@ import { spawnBubble, updateBubbles, type Bubble } from './bubbles';
 import { rollTraits } from './traits';
 import { computeRank, maxBuildingLevel, upgradeCostFor, type RankContext } from './rank';
 import { landmarkList, type Landmark } from './landmarks';
-import { maybeStartChat } from './chats';
+import { maybeStartChat, pickOshaberiLine } from './chats';
 import { TRAIT_DEFS } from './traits';
 import {
   applyTraitBias,
@@ -230,15 +230,46 @@ function maybeTriggerBokaigi(w: WorldState, dt: number) {
   if (suzu) spawnBubble(w.bubbles, suzu.pos, '棒会議ひらくよ', 'speech', 2.2);
   w.bokaigiMarkerTimer = 2.5;
   const victimCount = Math.min(alive.length, 1 + Math.floor(Math.random() * CONFIG.BOKAIGI_VICTIMS_MAX));
+
+  // 棒名人がいれば、70% で通常犠牲者をひねり出した上で棒名人が生還。
+  // 棒好きは逆に志願して犠牲になりやすい（重み2倍）。
+  const weights = alive.map((c) => {
+    if (c.traits.includes('bo_meijin')) return 0.05;  // ほぼ選ばれない
+    if (c.traits.includes('bo_suki'))   return 2.5;   // 志願
+    return 1.0;
+  });
   const picked = new Set<number>();
-  for (let i = 0; i < victimCount; i++) {
-    for (let t = 0; t < 10; t++) {
-      const idx = Math.floor(Math.random() * alive.length);
-      if (picked.has(idx)) continue;
-      picked.add(idx);
-      kill(w, alive[idx]!, 'bokaigi');
-      break;
+  const pickOneIndex = (): number | null => {
+    const remaining = alive.map((_, i) => i).filter((i) => !picked.has(i));
+    if (remaining.length === 0) return null;
+    const total = remaining.reduce((a, i) => a + weights[i]!, 0);
+    let r = Math.random() * total;
+    for (const i of remaining) {
+      r -= weights[i]!;
+      if (r <= 0) return i;
     }
+    return remaining[remaining.length - 1]!;
+  };
+
+  // 棒名人による返り討ち：居れば1人はその棒名人が横で振って他の子を巻添え
+  const meijin = alive.find((c) => c.traits.includes('bo_meijin'));
+  if (meijin && Math.random() < 0.7) {
+    const idx = pickOneIndex();
+    if (idx != null) {
+      picked.add(idx);
+      const victim = alive[idx]!;
+      if (victim !== meijin) {
+        pushLife(meijin, Math.floor(meijin.ageSec), '棒会議で棒を振って1体を巻添えにした');
+        kill(w, victim, 'bo_meijin_tenka');
+      }
+    }
+  }
+
+  for (let i = 0; i < victimCount; i++) {
+    const idx = pickOneIndex();
+    if (idx == null) break;
+    picked.add(idx);
+    kill(w, alive[idx]!, 'bokaigi');
   }
   w.bokaigiCooldown = CONFIG.BOKAIGI_COOLDOWN_SEC + Math.random() * 15;
 }
@@ -489,6 +520,28 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     }
     else setState(c, 'idle', 0.4 + Math.random());
   }
+
+  // --- 特性別の可視挙動 ---------------------------------------------------
+  // 泣き虫：idle 中にランダムで泣き出す（15-30秒に1回程度）
+  if (c.traits.includes('nakimushi') && c.state === 'idle' && Math.random() < 0.0025) {
+    setState(c, 'cry', 1.6);
+    spawnBubble(w.bubbles, c.pos, 'わふぅ〜', 'speech', 1.4);
+  }
+  // もらし常習：💧 吹き出しが周期的に出る（15-20秒毎くらい）
+  if (c.traits.includes('morashi') && Math.random() < 0.003) {
+    spawnBubble(w.bubbles, c.pos, '💧', 'stomp', 1.1);
+  }
+  // おしゃべり：idle 中、相手がいなくても一人で喋る
+  if (c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < 0.003) {
+    spawnBubble(w.bubbles, c.pos, pickOshaberiLine(), 'speech', 1.3);
+  }
+  // 哲学者：場所関係なく突然立ち止まって空を見る（20-30秒に1回程度）
+  if (c.traits.includes('tetsugakusha') && c.state === 'idle' && Math.random() < 0.0015) {
+    setState(c, 'staring', 3);
+    spawnBubble(w.bubbles, c.pos, '…', 'speech', 1.5);
+    pushLife(c, Math.floor(c.ageSec), '突然立ち止まって空を見つめた');
+  }
+
   // 移動（止まってるステート中は動かない）
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
     const cocoon = w.npcs.find((n) => n.id === 'cocoon');
@@ -498,6 +551,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       furana: w.furanaPos,
       cocoonPos: cocoon ? cocoon.pos : null,
       noukouPositions: w.buildings.filter((b) => b.defId === 'noukou').map((b) => b.pos),
+      taikoPositions: w.buildings.filter((b) => b.defId === 'taiko').map((b) => b.pos),
     });
   }
   runHazards(w, c, dt, hazards);

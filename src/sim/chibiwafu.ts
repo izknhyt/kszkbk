@@ -76,6 +76,7 @@ interface WanderEnv {
   furana: Vec2;
   cocoonPos: Vec2 | null;
   noukouPositions: Vec2[];
+  taikoPositions: Vec2[];
 }
 
 function pickLandmarkTarget(c: Chibiwafu, env: WanderEnv): Landmark | null {
@@ -124,6 +125,20 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
           x: margin + Math.random() * (bounds.w - margin * 2),
           y: 380 + Math.random() * 60,
         };
+      }
+      // 旅っ子：55% でワールドの左右端を目指す
+      if (!newTarget && c.traits.includes('tabikko') && Math.random() < 0.55) {
+        const goLeft = Math.random() < 0.5;
+        newTarget = {
+          x: goLeft ? margin + Math.random() * 80 : bounds.w - margin - Math.random() * 80,
+          y: 100 + Math.random() * 250,
+        };
+      }
+      // 太鼓っ子：60% で太鼓やぐらに寄る（taiko_kko は env.taikoPositions を使うのが本筋だが、
+      // とりあえず landmark 相当の別経路で処理せず、ここで buildings から拾う）
+      if (!newTarget && c.traits.includes('taiko_kko') && env.taikoPositions.length > 0 && Math.random() < 0.6) {
+        const tp = env.taikoPositions[Math.floor(Math.random() * env.taikoPositions.length)]!;
+        newTarget = { x: tp.x + (Math.random() - 0.5) * 40, y: tp.y + (Math.random() - 0.5) * 20 };
       }
       // 農民気質：農業区に 55%
       if (!newTarget && c.traits.includes('noumin') && env.noukouPositions.length > 0 && Math.random() < 0.55) {

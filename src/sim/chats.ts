@@ -23,9 +23,17 @@ const TRAIT_LINES: Partial<Record<TraitId, string[]>> = {
   ukiyo: ['なぜわふ', 'わふとは…', '無だ…', '空きれい'],
   ikusa: ['やるか？', 'どけ！', 'ぶつぞ', '棒よこせ'],
   noumin: ['種まくよ', '泥のにおい…', '豊作だ', '逆さに植えよう'],
+  tabikko: ['旅しよう', '遠くへ', 'あそこ行く', 'ここじゃない'],
+  oshaberi: ['ねえねえ！', 'きいて！', 'あのね！', 'すごいでしょ！'],
+  nakimushi: ['わふぅ〜', 'ふえぇ…', 'いたいの…', 'ママぁ…'],
+  morashi: ['出ちゃった…', 'なんか濡れる', 'あっ', 'ぴゅっ'],
+  bo_suki: ['棒！', '棒ほしい', '棒ふる', '棒で叩こう'],
+  tetsugakusha: ['存在とは…', 'なぜ在るのか', '時は流れ…', '…'],
 };
 
 function pickLine(c: Chibiwafu): string {
+  // 無口：ほぼ「…」しか言わない
+  if (c.traits.includes('mukuchi') && Math.random() < 0.85) return '…';
   // 特性を持ってたら 60% で特性セリフ、それ以外は generic
   for (const t of c.traits) {
     const pool = TRAIT_LINES[t];
@@ -33,6 +41,10 @@ function pickLine(c: Chibiwafu): string {
       return pool[Math.floor(Math.random() * pool.length)]!;
     }
   }
+  return GENERIC_LINES[Math.floor(Math.random() * GENERIC_LINES.length)]!;
+}
+
+export function pickOshaberiLine(): string {
   return GENERIC_LINES[Math.floor(Math.random() * GENERIC_LINES.length)]!;
 }
 
