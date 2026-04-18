@@ -421,11 +421,10 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
       v.container.position.set(n.pos.x, n.pos.y);
       // フラナはステート切替でフレーム差し替え & 左右反転
-      if (v.sprite) {
+      if (v.sprite && v.baseScale != null) {
         v.sprite.texture = frameFor(furanaLib, n.state);
-        const baseScale = 60 / Math.max(1, v.sprite.texture.height);
-        v.sprite.scale.x = (n.faceLeft ? -1 : 1) * baseScale;
-        v.sprite.scale.y = baseScale;
+        v.sprite.scale.x = (n.faceLeft ? -1 : 1) * v.baseScale;
+        v.sprite.scale.y = v.baseScale;
       }
       // 死亡中は薄くする
       v.container.alpha = n.dead ? 0.35 : 1.0;
@@ -897,12 +896,19 @@ function createChibiView(c: Chibiwafu, lib: SpriteLibrary): ChibiView {
 
 function createBubbleView(b: Bubble): BubbleView {
   const container = new Container();
+  // bubble 種別で色とフォントを変えて視覚的に区別する
+  const isNpc = b.kind === 'npc-speech';
+  const isStomp = b.kind === 'stomp';
+  const textColor = isStomp ? 0x6a4a22 : isNpc ? 0x4a1a1a : 0x3a2a1a;
+  const bgColor = isStomp ? 0xfff1c8 : isNpc ? 0xffe4d4 : 0xffffff;
+  const borderColor = isNpc ? 0xc46a3a : 0x3a2a1a;
+  const borderWidth = isNpc ? 1.5 : 1;
   const text = new Text({
     text: b.text,
     style: new TextStyle({
       fontFamily: 'sans-serif',
-      fontSize: b.kind === 'stomp' ? 10 : 11,
-      fill: b.kind === 'stomp' ? 0x6a4a22 : 0x3a2a1a,
+      fontSize: isStomp ? 10 : isNpc ? 12 : 11,
+      fill: textColor,
       fontWeight: 'bold',
     }),
   });
@@ -911,8 +917,8 @@ function createBubbleView(b: Bubble): BubbleView {
   const w = text.width + 10;
   const h = text.height + 6;
   bg.roundRect(-w / 2, -h - 2, w, h, 4)
-    .fill({ color: b.kind === 'stomp' ? 0xfff1c8 : 0xffffff, alpha: 0.9 })
-    .stroke({ color: 0x3a2a1a, width: 1 });
+    .fill({ color: bgColor, alpha: 0.92 })
+    .stroke({ color: borderColor, width: borderWidth });
   text.position.set(0, -4);
   container.addChild(bg, text);
   return { text, bg, container };
@@ -922,7 +928,8 @@ function createBubbleView(b: Bubble): BubbleView {
 // 毎tick render で state に応じてフレーム差し替え。
 interface NpcView {
   container: Container;
-  sprite?: Sprite;  // フラナのみ
+  sprite?: Sprite;     // フラナのみ
+  baseScale?: number;  // スプライトの基準スケール（全ステート共通）
 }
 
 function drawNpc(n: NpcState, furanaLib: SpriteLibrary): NpcView {
@@ -935,15 +942,19 @@ function drawNpc(n: NpcState, furanaLib: SpriteLibrary): NpcView {
   label.anchor.set(0.5, 1);
 
   if (n.id === 'furana' && furanaLib.hasSheet) {
-    // 画像ベースのフラナ。ちびわふ 48px に対して少し大きめの 60px を目安にする。
-    const spr = new Sprite(frameFor(furanaLib, n.state));
+    // 画像ベースのフラナ。
+    // 重要：各フレーム（立ち/寝/死体）は bbox の高さがバラバラなので、
+    // idle（立ちポーズ）の高さを基準に baseScale を決め、全ステートで共通化する。
+    // こうしないと短いポーズ（寝/死体）がでかく拡大されてしまう。
+    const idleTex = frameFor(furanaLib, 'idle');
     const targetH = 60;
-    const scale = targetH / Math.max(1, spr.texture.height);
-    spr.scale.set(scale);
+    const baseScale = targetH / Math.max(1, idleTex.height);
+    const spr = new Sprite(frameFor(furanaLib, n.state));
+    spr.scale.set(baseScale);
     spr.anchor.set(0.5, 0.85);
     label.position.set(0, -targetH * 0.8);
     c.addChild(spr, label);
-    return { container: c, sprite: spr };
+    return { container: c, sprite: spr, baseScale };
   }
 
   // 他 NPC は従来通り Graphics で描く

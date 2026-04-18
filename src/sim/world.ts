@@ -15,10 +15,15 @@ import { SEASONS, dayProgress, intensityAt, phaseFromProgress, seasonFromTime, t
 import { HAZARDS, hazardActiveInSeason, pointInZone, type HazardZone } from './hazards';
 import { CONFIG } from '../config';
 import {
+  CHIBI_TO_COCOON_LINES,
+  CHIBI_TO_FURANA_LINES,
+  CHIBI_TO_SUZU_LINES,
   COCOON_DEATH_LINES,
   COCOON_LINES_ABUSE,
+  COCOON_LINES_CHAT,
   COCOON_LINES_DEATH,
   FURANA_LINES_ANGRY,
+  FURANA_LINES_CHAT,
   FURANA_LINES_DEATH,
   FURANA_LINES_DEATH_REACTION,
   FURANA_LINES_HURT,
@@ -28,6 +33,7 @@ import {
   LOU_LINES,
   NPC_DEFS,
   SUZU_LINES_BIRTH,
+  SUZU_LINES_CHAT,
   SUZU_LINES_DEATH,
   SUZU_LINES_MAMA_DEATH,
   SUZU_LINES_MAMA_HURT,
@@ -290,7 +296,7 @@ function maybeTriggerBokaigi(w: WorldState, dt: number) {
     if (Math.random() > 0.3) { w.bokaigiCooldown = 6 + Math.random() * 6; return; }
   }
   const suzu = w.npcs.find((n) => n.id === 'suzu');
-  if (suzu) spawnBubble(w.bubbles, suzu.pos, '棒会議ひらくよ', 'speech', 2.2);
+  if (suzu) spawnBubble(w.bubbles, suzu.pos, '棒会議ひらくよ', 'npc-speech', 2.2);
   w.bokaigiMarkerTimer = 2.5;
   const victimCount = Math.min(alive.length, 1 + Math.floor(Math.random() * CONFIG.BOKAIGI_VICTIMS_MAX));
 
@@ -350,7 +356,7 @@ function maybeStartTaikoFestival(w: WorldState) {
     intensity: CONFIG.TAIKO_FESTIVAL_KILL_RATE,
   };
   const suzu = w.npcs.find((n) => n.id === 'suzu');
-  if (suzu) spawnBubble(w.bubbles, suzu.pos, '太鼓祭〜！', 'speech', 2.5);
+  if (suzu) spawnBubble(w.bubbles, suzu.pos, '太鼓祭〜！', 'npc-speech', 2.5);
 }
 
 function logDeath(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
@@ -425,12 +431,12 @@ export function damageNpc(w: WorldState, n: NpcState, amount: number): boolean {
     n.respawnTimer = NPC_DEFS[n.id].respawnSec;
     // 死亡セリフ
     if (n.id === 'furana') {
-      spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_DEATH), 'speech', 3);
+      spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_DEATH), 'npc-speech', 3);
       onFuranaDeath(w);
     } else if (n.id === 'cocoon') {
-      spawnBubble(w.bubbles, n.pos, pickLine(COCOON_DEATH_LINES), 'speech', 2.5);
+      spawnBubble(w.bubbles, n.pos, pickLine(COCOON_DEATH_LINES), 'npc-speech', 2.5);
     } else {
-      spawnBubble(w.bubbles, n.pos, 'やられた…', 'speech', 2);
+      spawnBubble(w.bubbles, n.pos, 'やられた…', 'npc-speech', 2);
     }
     return true;
   }
@@ -438,11 +444,11 @@ export function damageNpc(w: WorldState, n: NpcState, amount: number): boolean {
   n.state = 'hurt';
   n.stateTimer = 1.2;
   if (n.id === 'furana') {
-    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_HURT), 'speech', 1.6);
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_HURT), 'npc-speech', 1.6);
     // スズが近くにいたらママ心配で反応（30%）
     const suzu = w.npcs.find((x) => x.id === 'suzu');
     if (suzu && !suzu.dead && Math.random() < 0.3) {
-      spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_MAMA_HURT), 'speech', 2);
+      spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_MAMA_HURT), 'npc-speech', 2);
     }
   }
   return false;
@@ -460,9 +466,9 @@ function onFuranaDeath(w: WorldState) {
     pushLife(c, Math.floor(c.ageSec), 'ママが死んだ');
   }
   const suzu = w.npcs.find((x) => x.id === 'suzu');
-  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_MAMA_DEATH), 'speech', 3);
+  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_MAMA_DEATH), 'npc-speech', 3);
   const cocoon = w.npcs.find((x) => x.id === 'cocoon');
-  if (cocoon && !cocoon.dead) spawnBubble(w.bubbles, cocoon.pos, 'ママ…ママ…', 'speech', 3);
+  if (cocoon && !cocoon.dead) spawnBubble(w.bubbles, cocoon.pos, 'ママ…ママ…', 'npc-speech', 3);
 }
 
 // lifeLog に1行追加。上限30件（古いものから削除）。
@@ -984,6 +990,35 @@ function processChats(w: WorldState, dt: number) {
       break; // a は1人と話せば十分
     }
   }
+  // NPC とちびわふの会話：フラナ/スズ/ココン が 40px 以内の idle な子に話しかける
+  for (const n of w.npcs) {
+    if (n.dead) continue;
+    if (n.id === 'lou') continue; // ルーは無口
+    if (Math.random() > 0.004) continue; // per-tick 発火率
+    const partner = w.chibis.find(
+      (c) => isAlive(c) && c.state === 'idle' && c.chatCooldown <= 0 && distance(c.pos, n.pos) < 50,
+    );
+    if (!partner) continue;
+    const npcPool = n.id === 'furana' ? FURANA_LINES_CHAT
+      : n.id === 'suzu' ? SUZU_LINES_CHAT
+      : COCOON_LINES_CHAT;
+    const chibiPool = n.id === 'furana' ? CHIBI_TO_FURANA_LINES
+      : n.id === 'suzu' ? CHIBI_TO_SUZU_LINES
+      : CHIBI_TO_COCOON_LINES;
+    const duration = 2.2 + Math.random() * 1.2;
+    setState(partner, 'chatting', duration);
+    partner.chatCooldown = 8 + Math.random() * 6;
+    partner.faceLeft = n.pos.x < partner.pos.x;
+    spawnBubble(w.bubbles, n.pos, pickLine(npcPool), 'npc-speech', duration * 0.6);
+    spawnBubble(w.bubbles, { x: partner.pos.x, y: partner.pos.y + 6 }, pickLine(chibiPool), 'speech', duration * 0.4);
+    pushLife(partner, Math.floor(partner.ageSec), `${NPC_DEFS[n.id].name} と話した`);
+    // ココンに話しかけられた場合、たまにそのまま殴られる流れに（50%）
+    if (n.id === 'cocoon' && Math.random() < 0.5) {
+      setState(partner, 'hurt', 1);
+      spawnBubble(w.bubbles, partner.pos, 'いたわふ！', 'speech', 1);
+      pushLife(partner, Math.floor(partner.ageSec), 'ココンに殴られた（会話中）');
+    }
+  }
   // 雑に dt を使った減衰は updateChibi 側で実施済み
   void dt;
 }
@@ -1013,7 +1048,7 @@ function updateNpcs(w: WorldState, dt: number) {
           n.stateTimer = 0;
           n.pos = { ...n.home };
           n.abuseCooldown = 4;
-          spawnBubble(w.bubbles, n.pos, pickLine(reviveLinesFor(n.id)), 'speech', 2.5);
+          spawnBubble(w.bubbles, n.pos, pickLine(reviveLinesFor(n.id)), 'npc-speech', 2.5);
         }
       }
       continue;
@@ -1030,7 +1065,7 @@ function updateNpcs(w: WorldState, dt: number) {
       wanderNpc(n, dt);
       if (n.id === 'cocoon') updateCocoonAbuse(w, n, dt);
       if (n.id === 'lou' && Math.random() < 0.0007) {
-        spawnBubble(w.bubbles, n.pos, pickLine(LOU_LINES), 'speech', 1.6);
+        spawnBubble(w.bubbles, n.pos, pickLine(LOU_LINES), 'npc-speech', 1.6);
       }
     }
   }
@@ -1108,7 +1143,7 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   n.abuseCooldown -= dt;
   // 独り言（～10秒に 1回くらい、頻繁めに喋る）
   if (Math.random() < 0.005) {
-    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_IDLE), 'speech', 2);
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_IDLE), 'npc-speech', 2);
   }
   if (n.abuseCooldown > 0) return;
   const candidates = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 70);
@@ -1139,7 +1174,7 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     // 本気パンチ：ちびわふに HP 6-14 ダメージ、hurt 1.3秒。殺すこともある。
     n.state = 'angry';
     n.stateTimer = 1.5;
-    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_ANGRY), 'speech', 1.8);
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_ANGRY), 'npc-speech', 1.8);
     const dmg = 6 + Math.floor(Math.random() * 9);
     setState(target, 'hurt', 1.3);
     spawnBubble(w.bubbles, target.pos, 'ぎゃーわふ！', 'speech', 1.2);
@@ -1147,7 +1182,7 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     damageChibi(w, target, dmg, 'cocoon_abuse'); // 死因は既存の"大人に殴られた"系を流用
   } else {
     // soft "めっ"：state hurt のみ、HP 減らず
-    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_PAT), 'speech', 1.6);
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_PAT), 'npc-speech', 1.6);
     setState(target, 'hurt', 0.8);
     spawnBubble(w.bubbles, target.pos, 'きゃんわふ！', 'speech', 1.1);
     pushLife(target, Math.floor(target.ageSec), 'フラナにめっされた');
@@ -1209,7 +1244,7 @@ function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
   if (!target) return;
   // CD 短めで、頻繁に叩く
   n.abuseCooldown = 2 + Math.random() * 2;
-  spawnBubble(w.bubbles, n.pos, pickLine(COCOON_LINES_ABUSE), 'speech', 1.8);
+  spawnBubble(w.bubbles, n.pos, pickLine(COCOON_LINES_ABUSE), 'npc-speech', 1.8);
   setState(target, 'cry', 1);
   pushLife(target, Math.floor(target.ageSec), 'ココンに棒で突かれた');
 
@@ -1240,16 +1275,16 @@ function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
 function killCocoon(w: WorldState, n: NpcState) {
   n.dead = true;
   n.respawnTimer = 30 + Math.random() * 20;
-  spawnBubble(w.bubbles, n.pos, pickLine(COCOON_DEATH_LINES), 'speech', 2.5);
+  spawnBubble(w.bubbles, n.pos, pickLine(COCOON_DEATH_LINES), 'npc-speech', 2.5);
   const suzu = w.npcs.find((x) => x.id === 'suzu');
-  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, 'ココン！？', 'speech', 2);
+  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, 'ココン！？', 'npc-speech', 2);
 }
 
 function reactNpcsToBirth(w: WorldState) {
   const suzu = w.npcs.find((n) => n.id === 'suzu');
   if (!suzu) return;
   if (Math.random() < 0.3) {
-    spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_BIRTH), 'speech', 2);
+    spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_BIRTH), 'npc-speech', 2);
   }
 }
 
@@ -1272,16 +1307,16 @@ function reactNpcsToDeath(w: WorldState, c: Chibiwafu) {
       if (weird) {
         n.state = 'surprised';
         n.stateTimer = 1.2;
-        spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_WEIRD_DEATH), 'speech', 2.2);
+        spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_WEIRD_DEATH), 'npc-speech', 2.2);
       } else if (Math.random() < 0.45) {
-        spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_DEATH_REACTION), 'speech', 2);
+        spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_DEATH_REACTION), 'npc-speech', 2);
       }
       continue;
     }
     if (!def.reactOnDeath) continue;
     if (Math.random() < 0.35) {
       const pool = n.id === 'suzu' ? SUZU_LINES_DEATH : COCOON_LINES_DEATH;
-      spawnBubble(w.bubbles, n.pos, pickLine(pool), 'speech', 2);
+      spawnBubble(w.bubbles, n.pos, pickLine(pool), 'npc-speech', 2);
     }
   }
 }
@@ -1289,7 +1324,7 @@ function reactNpcsToDeath(w: WorldState, c: Chibiwafu) {
 function reactNpcsToOndo(w: WorldState) {
   for (const n of w.npcs) {
     if (!NPC_DEFS[n.id].reactOnOndo) continue;
-    spawnBubble(w.bubbles, n.pos, pickLine(SUZU_LINES_ONDO), 'speech', 2.2);
+    spawnBubble(w.bubbles, n.pos, pickLine(SUZU_LINES_ONDO), 'npc-speech', 2.2);
   }
 }
 
@@ -1354,7 +1389,7 @@ function onPhaseChange(w: WorldState, prev: DayPhase, next: DayPhase) {
   if (next === 'morning') {
     // 朝礼：スズが全員を起こす
     if (suzu && !suzu.dead) {
-      spawnBubble(w.bubbles, suzu.pos, 'あさだよ〜！', 'speech', 2.6);
+      spawnBubble(w.bubbles, suzu.pos, 'あさだよ〜！', 'npc-speech', 2.6);
     }
     // 寝ているちびわふを idle に戻す（目覚めバブル）
     for (const c of w.chibis) {
@@ -1366,12 +1401,12 @@ function onPhaseChange(w: WorldState, prev: DayPhase, next: DayPhase) {
   } else if (next === 'evening') {
     // 夕暮れ：お腹が空いた雰囲気
     if (suzu && !suzu.dead && Math.random() < 0.6) {
-      spawnBubble(w.bubbles, suzu.pos, 'ゆうはんのじかんだよ〜', 'speech', 2.4);
+      spawnBubble(w.bubbles, suzu.pos, 'ゆうはんのじかんだよ〜', 'npc-speech', 2.4);
     }
   } else if (next === 'night') {
     // 夜の挨拶：ランダムで寝入る子を出す
     if (suzu && !suzu.dead && Math.random() < 0.6) {
-      spawnBubble(w.bubbles, suzu.pos, 'よるだよ、ねんねしよ', 'speech', 2.4);
+      spawnBubble(w.bubbles, suzu.pos, 'よるだよ、ねんねしよ', 'npc-speech', 2.4);
     }
   }
   void prev;

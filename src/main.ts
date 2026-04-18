@@ -219,7 +219,7 @@ async function start() {
         swingDistAccum: 0, bubbleCooldown: 80,
       };
       const reaction = npcGrabReaction(id);
-      if (reaction) spawnBubble(world.bubbles, { x: n.pos.x, y: n.pos.y - 16 }, reaction, 'speech', 1.8);
+      if (reaction) spawnBubble(world.bubbles, { x: n.pos.x, y: n.pos.y - 16 }, reaction, 'npc-speech', 1.8);
     }
     const dx = wx - dragSession.lastX;
     const dy = wy - dragSession.lastY;
@@ -236,7 +236,7 @@ async function start() {
       if (died) { dragSession = null; return; }
     }
     if (dragSession.bubbleCooldown <= 0 && segment > 2) {
-      spawnBubble(world.bubbles, n.pos, pickNpcShakeLine(id), 'speech', 0.9);
+      spawnBubble(world.bubbles, n.pos, pickNpcShakeLine(id), 'npc-speech', 0.9);
       dragSession.bubbleCooldown = 80;
     }
   }
@@ -413,18 +413,18 @@ function dropNpc(world: WorldState, id: NpcId, wx: number, wy: number, throwDist
   n.pos.y = wy;
   if (wy > 414) {
     // 水に投げ込まれた NPC は HP 関係なく即死（神話的）
-    spawnBubble(world.bubbles, n.pos, 'わぷっ…', 'speech', 1.2);
+    spawnBubble(world.bubbles, n.pos, 'わぷっ…', 'npc-speech', 1.2);
     damageNpc(world, n, n.hp);
     return;
   }
   // 着地：距離に応じて NPC へのダメージ。ちびわふより倍率低め。
   const dmg = Math.round(3 + Math.min(20, throwDist * 0.06));
   if (throwDist > 80) {
-    spawnBubble(world.bubbles, n.pos, pickNpcThrowLine(id), 'speech', 0.9);
+    spawnBubble(world.bubbles, n.pos, pickNpcThrowLine(id), 'npc-speech', 0.9);
   }
   const died = damageNpc(world, n, dmg);
   if (!died) {
-    spawnBubble(world.bubbles, n.pos, pickNpcLandedLine(id), 'speech', 1.2);
+    spawnBubble(world.bubbles, n.pos, pickNpcLandedLine(id), 'npc-speech', 1.2);
   }
 }
 

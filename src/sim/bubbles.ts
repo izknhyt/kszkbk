@@ -1,6 +1,10 @@
 import type { Vec2 } from '../types';
 
-export type BubbleKind = 'speech' | 'stomp' | 'discovery';
+// speech: ちびわふ通常吹き出し
+// npc-speech: 大人キャラ（フラナ・スズ・ココン・ルー）の発言 or NPCが関わる会話
+// stomp: 踏み潰し／殴打のドッという表現
+// discovery: 図鑑新発見などの特別
+export type BubbleKind = 'speech' | 'npc-speech' | 'stomp' | 'discovery';
 
 export interface Bubble {
   id: number;
