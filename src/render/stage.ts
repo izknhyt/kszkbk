@@ -98,7 +98,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     bgLayer, landmarkLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, fxLayer, eventOverLayer,
   );
 
-  const lib = await loadSpriteLibrary('/chibiwafu.png');
+  const lib = await loadSpriteLibrary('/chibiwafu.png', '/chibiwafu');
+  const furanaLib = await loadSpriteLibrary('/furana.png', '/furana');
   const envArt = await loadEnvironmentArt();
 
   let currentSeason: Season = 'spring';
@@ -106,8 +107,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   let currentBoundsW: number = CONFIG.WORLD_W;
   let currentBoundsH: number = CONFIG.WORLD_H;
   drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason, envArt);
-  const furana = drawFurana();
-  fxLayer.addChild(furana);
+  // フラナは world.npcs の一員として npcLayer に描画される（drawNpc 経由）。
+  // 昔の procedural 描画は削除済み。
 
   // 位相ティント：カメラ外に置き、画面全体を覆う固定オーバーレイ。
   // app.stage 直下（cameraLayer の兄弟）にして zoom/pan の影響を受けないようにする。
@@ -282,7 +283,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const views = new Map<number, ChibiView>();
   const corpseViews = new Map<number, Sprite>();
   const buildingViews: Container[] = [];
-  const npcViews = new Map<NpcId, Container>();
+  const npcViews = new Map<NpcId, NpcView>();
   const bubbleViews = new Map<number, BubbleView>();
 
   function resize(_w: number, _h: number) {
@@ -315,7 +316,6 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     setSeason(world.season);
     setBounds(world.bounds.w, world.bounds.h);
     drawPhaseTint(world.dayPhase);
-    furana.position.set(world.furanaPos.x, world.furanaPos.y);
 
     // landmarks (描き直しは季節が変わった時のみ。ここでは常時再描画して単純化)
     landmarkLayer.removeChildren();
@@ -415,14 +415,17 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     for (const n of world.npcs) {
       let v = npcViews.get(n.id);
       if (!v) {
-        v = drawNpc(n);
-        npcLayer.addChild(v);
+        v = drawNpc(n, furanaLib);
+        npcLayer.addChild(v.container);
         npcViews.set(n.id, v);
       }
-      v.position.set(n.pos.x, n.pos.y);
-      // 死亡中は薄くする（ココン専用）
-      v.alpha = n.dead ? 0.25 : 1.0;
-      v.rotation = n.dead ? Math.PI * 0.5 : 0; // 倒れてる表現
+      v.container.position.set(n.pos.x, n.pos.y);
+      // フラナはステート切替でフレーム差し替え
+      if (v.sprite) v.sprite.texture = frameFor(furanaLib, n.state);
+      // 死亡中は薄くする
+      v.container.alpha = n.dead ? 0.35 : 1.0;
+      // フラナは絵が既に "dead" ポーズなので回転させない。他NPC（ココン等）は従来通り倒す
+      v.container.rotation = n.dead && n.id !== 'furana' ? Math.PI * 0.5 : 0;
     }
 
     // bubbles
@@ -910,9 +913,35 @@ function createBubbleView(b: Bubble): BubbleView {
   return { text, bg, container };
 }
 
-function drawNpc(n: NpcState): Container {
+// フラナ（スプライト描画）の Sprite への参照を保持する map。
+// 毎tick render で state に応じてフレーム差し替え。
+interface NpcView {
+  container: Container;
+  sprite?: Sprite;  // フラナのみ
+}
+
+function drawNpc(n: NpcState, furanaLib: SpriteLibrary): NpcView {
   const def = NPC_DEFS[n.id];
   const c = new Container();
+  const label = new Text({
+    text: def.name,
+    style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 11, fontWeight: 'bold', fill: 0x3a2a1a }),
+  });
+  label.anchor.set(0.5, 1);
+
+  if (n.id === 'furana' && furanaLib.hasSheet) {
+    // 画像ベースのフラナ
+    const spr = new Sprite(frameFor(furanaLib, n.state));
+    const targetH = 100 * def.scale;  // 130px 高さ目安
+    const scale = targetH / Math.max(1, spr.texture.height);
+    spr.scale.set(scale);
+    spr.anchor.set(0.5, 0.85);  // 足元が y=0 に来るように
+    label.position.set(0, -targetH * 0.82);
+    c.addChild(spr, label);
+    return { container: c, sprite: spr };
+  }
+
+  // 他 NPC は従来通り Graphics で描く
   const body = new Graphics();
   const s = def.scale;
   body.ellipse(0, 0, 22 * s, 28 * s).fill({ color: def.color }).stroke({ color: 0x3a2a1a, width: 2 });
@@ -920,20 +949,14 @@ function drawNpc(n: NpcState): Container {
   body.ellipse(14 * s, -16 * s, 5 * s, 8 * s).fill({ color: def.color }).stroke({ color: 0x3a2a1a, width: 1 });
   body.circle(-6 * s, -4 * s, 2.5 * s).fill({ color: 0x3a2a1a });
   body.circle(6 * s, -4 * s, 2.5 * s).fill({ color: 0x3a2a1a });
-  // accent: suzu gets a ribbon, cocoon gets a stick, lou gets nothing extra
   if (n.id === 'suzu') {
     body.rect(-4 * s, -22 * s, 8 * s, 4 * s).fill({ color: def.secondaryColor });
   } else if (n.id === 'cocoon') {
     body.rect(14 * s, -4 * s, 16 * s, 2).fill({ color: 0x6b4a2b });
   }
-  const label = new Text({
-    text: def.name,
-    style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 11, fontWeight: 'bold', fill: 0x3a2a1a }),
-  });
-  label.anchor.set(0.5, 1);
   label.position.set(0, -28);
   c.addChild(body, label);
-  return c;
+  return { container: c };
 }
 
 function drawBackground(layer: Container, w: number, h: number, season: Season, envArt: EnvironmentArt) {
@@ -1127,24 +1150,6 @@ function seasonOverlay(season: Season): { color: number; alpha: number } {
   }
 }
 
-function drawFurana(): Container {
-  const c = new Container();
-  const body = new Graphics();
-  body.ellipse(0, 0, 28, 34).fill({ color: 0xfff5de }).stroke({ color: 0x3a2a1a, width: 2 });
-  body.rect(-14, 8, 28, 12).fill({ color: 0xffffff }).stroke({ color: 0x3a2a1a, width: 1 });
-  body.circle(-8, -6, 3).fill({ color: 0x3a2a1a });
-  body.circle(8, -6, 3).fill({ color: 0x3a2a1a });
-  body.ellipse(-18, -18, 6, 10).fill({ color: 0xfff5de }).stroke({ color: 0x3a2a1a, width: 2 });
-  body.ellipse(18, -18, 6, 10).fill({ color: 0xfff5de }).stroke({ color: 0x3a2a1a, width: 2 });
-  const label = new Text({
-    text: 'フラナ',
-    style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 11, fontWeight: 'bold', fill: 0xe8735a }),
-  });
-  label.anchor.set(0.5, 1);
-  label.position.set(0, -40);
-  c.addChild(body, label);
-  return c;
-}
 
 function buildingColor(id: string): number {
   switch (id) {

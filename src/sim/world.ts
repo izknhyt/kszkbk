@@ -409,6 +409,8 @@ export function damageNpc(w: WorldState, n: NpcState, amount: number): boolean {
   n.hp = Math.max(0, n.hp - amount);
   if (n.hp <= 0) {
     n.dead = true;
+    n.state = 'dead';
+    n.stateTimer = 0;
     n.respawnTimer = NPC_DEFS[n.id].respawnSec;
     // 死亡セリフ
     if (n.id === 'furana') {
@@ -422,6 +424,8 @@ export function damageNpc(w: WorldState, n: NpcState, amount: number): boolean {
     return true;
   }
   // HP 残ってるときの "いた！" 反応
+  n.state = 'hurt';
+  n.stateTimer = 1.2;
   if (n.id === 'furana') {
     spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_HURT), 'speech', 1.6);
     // スズが近くにいたらママ心配で反応（30%）
@@ -900,18 +904,26 @@ function compactCorpses(w: WorldState) {
 function updateNpcs(w: WorldState, dt: number) {
   for (const n of w.npcs) {
     if (n.dead) {
+      n.state = 'dead';
       // respawnSec が Infinity のNPC（フラナ）は復活しない
       if (Number.isFinite(n.respawnTimer)) {
         n.respawnTimer -= dt;
         if (n.respawnTimer <= 0) {
           n.dead = false;
           n.hp = n.maxHp;
+          n.state = 'idle';
+          n.stateTimer = 0;
           n.pos = { ...n.home };
           n.abuseCooldown = 4;
           spawnBubble(w.bubbles, n.pos, pickLine(reviveLinesFor(n.id)), 'speech', 2.5);
         }
       }
       continue;
+    }
+    // ステート timer を減らして、切れたら idle に戻す（dead は上でキープ）
+    if (n.state !== 'idle') {
+      n.stateTimer -= dt;
+      if (n.stateTimer <= 0) { n.state = 'idle'; n.stateTimer = 0; }
     }
     wanderNpc(n, dt);
     if (n.id === 'cocoon') updateCocoonAbuse(w, n, dt);
@@ -961,6 +973,8 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   const irritated = crowded ? Math.random() < 0.55 : Math.random() < 0.25;
   if (irritated) {
     // 本気パンチ：ちびわふに HP 6-14 ダメージ、hurt 1.3秒。殺すこともある。
+    n.state = 'angry';
+    n.stateTimer = 1.5;
     spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_ANGRY), 'speech', 1.8);
     const dmg = 6 + Math.floor(Math.random() * 9);
     setState(target, 'hurt', 1.3);

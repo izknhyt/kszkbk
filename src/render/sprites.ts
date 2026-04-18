@@ -1,16 +1,10 @@
 import { Rectangle, Texture } from 'pixi.js';
 import type { ChibiState } from '../types';
 
-const SPLIT_SPRITE_URLS = [
-  '/chibiwafu/01_normal.png',
-  '/chibiwafu/02_crying.png',
-  '/chibiwafu/03_surprised.png',
-  '/chibiwafu/04_angry.png',
-  '/chibiwafu/05_sulking.png',
-  '/chibiwafu/06_dizzy.png',
-  '/chibiwafu/07_dirty.png',
-  '/chibiwafu/08_sleepy.png',
-  '/chibiwafu/09_dead.png',
+const SPLIT_BASENAMES = [
+  '01_normal', '02_crying', '03_surprised',
+  '04_angry', '05_sulking', '06_dizzy',
+  '07_dirty', '08_sleepy', '09_dead',
 ] as const;
 
 const STATE_INDEX: Record<ChibiState, number> = {
@@ -38,12 +32,17 @@ export interface SpriteLibrary {
 // 255に近いほど背景のみ抜く。アンチエイリアス混じりのピクセルまで抜くなら少し下げる。
 const CHROMA_THRESHOLD = 240;
 
-export async function loadSpriteLibrary(sheetUrl: string): Promise<SpriteLibrary> {
-  try {
-    const splitFrames = await loadSplitFrames();
-    if (splitFrames) return { frames: splitFrames, hasSheet: true };
-  } catch (err) {
-    console.warn('[sprites] split sprites load failed, falling back to sheet', err);
+// sheetUrl: 1枚まとめシート（例: '/chibiwafu.png'）
+// splitDir: split 画像を探すディレクトリ（例: '/chibiwafu' or '/furana'）。
+//           省略時は splitフォールバックなし、sheetのみ。
+export async function loadSpriteLibrary(sheetUrl: string, splitDir?: string): Promise<SpriteLibrary> {
+  if (splitDir) {
+    try {
+      const splitFrames = await loadSplitFrames(splitDir);
+      if (splitFrames) return { frames: splitFrames, hasSheet: true };
+    } catch (err) {
+      console.warn(`[sprites] split sprites load failed (${splitDir}), falling back to sheet`, err);
+    }
   }
 
   try {
@@ -86,8 +85,9 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-async function loadSplitFrames(): Promise<Texture[] | null> {
-  const loaded = await Promise.allSettled(SPLIT_SPRITE_URLS.map((url) => loadImage(url)));
+async function loadSplitFrames(splitDir: string): Promise<Texture[] | null> {
+  const urls = SPLIT_BASENAMES.map((b) => `${splitDir}/${b}.png`);
+  const loaded = await Promise.allSettled(urls.map((url) => loadImage(url)));
   if (loaded.some((item) => item.status !== 'fulfilled')) return null;
   return loaded.map((item) => {
     const img = item.status === 'fulfilled' ? item.value : null;

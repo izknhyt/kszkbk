@@ -1,4 +1,4 @@
-import type { Vec2 } from '../types';
+import type { ChibiState, Vec2 } from '../types';
 
 export type NpcId = 'suzu' | 'lou' | 'cocoon' | 'furana';
 
@@ -82,6 +82,9 @@ export interface NpcState {
   // HP。プレイヤーが殴る／投げる／振り回すで減少。
   hp: number;
   maxHp: number;
+  // 表示用ステート（フラナのスプライト切替に使う。他NPCは現状描画に影響しない）
+  state: ChibiState;
+  stateTimer: number;
 }
 
 export const SUZU_LINES_DEATH = [
@@ -138,6 +141,8 @@ function mkNpc(id: NpcId, home: Vec2, abuseCooldown = 0): NpcState {
     respawnTimer: 0,
     hp: def.maxHp,
     maxHp: def.maxHp,
+    state: 'idle',
+    stateTimer: 0,
   };
 }
 
