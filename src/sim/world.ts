@@ -229,7 +229,85 @@ function createInitialPlots(bounds: { w: number; h: number }): Plot[] {
   // 左端の 1 つを水源にする（象徴的）
   const waterPlot = plots.find((p) => p.id === 'plot-0-0');
   if (waterPlot) { waterPlot.kind = 'water'; waterPlot.devLevel = 3; }
+  // 水源の右・下に水路を敷いて、最初から畑化できる土台を作る
+  const channel1 = plots.find((p) => p.id === 'plot-0-1');
+  if (channel1) { channel1.kind = 'channel'; channel1.devLevel = 2; }
+  const channel2 = plots.find((p) => p.id === 'plot-1-0');
+  if (channel2) { channel2.kind = 'channel'; channel2.devLevel = 2; }
   return plots;
+}
+
+// プロット id から grid 座標 (row, col) を抽出する
+function plotGridPos(id: string): { r: number; c: number } | null {
+  const m = /^plot-(\d+)-(\d+)$/.exec(id);
+  if (!m) return null;
+  return { r: Number(m[1]), c: Number(m[2]) };
+}
+
+// 4 近傍のプロット id を返す
+function neighborPlotIds(id: string): string[] {
+  const p = plotGridPos(id);
+  if (!p) return [];
+  return [
+    `plot-${p.r - 1}-${p.c}`,
+    `plot-${p.r + 1}-${p.c}`,
+    `plot-${p.r}-${p.c - 1}`,
+    `plot-${p.r}-${p.c + 1}`,
+  ];
+}
+
+// 水が届いている plot id の集合を flood fill で計算する。
+// water → channel → channel → ... 繋がったものが "watered"。
+// farm 判定ではこの集合に隣接するかを確認する。
+export function computeWateredPlotIds(w: WorldState): Set<string> {
+  const watered = new Set<string>();
+  const queue: string[] = [];
+  for (const p of w.plots) {
+    if (p.kind === 'water') { watered.add(p.id); queue.push(p.id); }
+  }
+  const byId = new Map(w.plots.map((p) => [p.id, p]));
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    for (const nid of neighborPlotIds(id)) {
+      if (watered.has(nid)) continue;
+      const np = byId.get(nid);
+      if (!np) continue;
+      if (np.kind === 'channel' || np.kind === 'water') {
+        watered.add(nid);
+        queue.push(nid);
+      }
+    }
+  }
+  return watered;
+}
+
+// 畑 / 土地の進化・食料生産を走らせる。
+// 1) 水路隣接の cleared プロットは workSec が蓄積して 10 秒で farm に昇格
+// 2) 水路隣接の farm プロットは dt * 0.08 食料を生産
+export function updateInfra(w: WorldState, dt: number) {
+  const watered = computeWateredPlotIds(w);
+  const byId = new Map(w.plots.map((p) => [p.id, p]));
+  for (const p of w.plots) {
+    const adjToWater = neighborPlotIds(p.id).some((nid) => watered.has(nid));
+    if (p.kind === 'cleared' && adjToWater) {
+      p.workSec += dt;
+      if (p.workSec >= 10) {
+        p.kind = 'farm';
+        p.devLevel = 2;
+        p.workSec = 0;
+      }
+    }
+    if (p.kind === 'farm' && adjToWater) {
+      w.resources.food += dt * 0.08;
+      // 畑の進化：food を出し続けると devLevel が上がる (見た目だけ)
+      p.workSec += dt;
+      if (p.devLevel < 3 && p.workSec >= 30) {
+        p.devLevel = 3;
+      }
+    }
+  }
+  // byId は lint 逃れ
+  void byId;
 }
 
 function createDex(): Record<DeathCauseId, DexEntry> {
@@ -1898,6 +1976,7 @@ export function tickWorld(w: WorldState, dt: number) {
   updateNpcs(w, dt);
   applyFuranaLossPanic(w, dt);
   updateLabor(w, dt);
+  updateInfra(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
   if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);
