@@ -979,6 +979,19 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   c.fatigue = Math.max(0, Math.min(100, c.fatigue));
   if (c.hunger >= 100) { kill(w, c, 'hunger_death'); return; }
   if (c.fatigue >= 100) { kill(w, c, 'fatigue_death'); return; }
+  // 畑の上に立っている空腹のちびわふ：1 food 消費して食事状態に入る
+  if (c.state === 'idle' && c.hunger > 30 && w.resources.food >= 1) {
+    for (const plot of w.plots) {
+      if (plot.kind !== 'farm') continue;
+      if (c.pos.x < plot.pos.x || c.pos.x > plot.pos.x + plot.w) continue;
+      if (c.pos.y < plot.pos.y || c.pos.y > plot.pos.y + plot.h) continue;
+      w.resources.food -= 1;
+      setState(c, 'eating', 2.5);
+      spawnBubble(w.bubbles, c.pos, 'もぐもぐわふ', 'speech', 1.2);
+      pushLife(c, Math.floor(c.ageSec), '畑で食事した');
+      break;
+    }
+  }
   // 飛行中は wander/state transition を止めて物理だけ動かす
   if (c.flight) {
     flightStep(w, c, true, dt);
@@ -1182,6 +1195,10 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       noukouPositions: w.buildings.filter((b) => b.defId === 'noukou').map((b) => b.pos),
       taikoPositions: w.buildings.filter((b) => b.defId === 'taiko').map((b) => b.pos),
       obstaclePositions: w.obstacles.map((o) => o.pos),
+      farmPositions: w.plots.filter((p) => p.kind === 'farm').map((p) => ({
+        x: p.pos.x + p.w / 2,
+        y: p.pos.y + p.h / 2,
+      })),
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {

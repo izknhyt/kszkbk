@@ -86,6 +86,8 @@ interface WanderEnv {
   taikoPositions: Vec2[];
   // 近くの障害物リスト（開拓のため働きに行く候補）
   obstaclePositions: Vec2[];
+  // 畑プロットの中心座標リスト（空腹時の目的地候補）
+  farmPositions: Vec2[];
 }
 
 function pickLandmarkTarget(c: Chibiwafu, env: WanderEnv): Landmark | null {
@@ -158,6 +160,16 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         const np = env.noukouPositions[Math.floor(Math.random() * env.noukouPositions.length)]!;
         newTarget = { x: np.x + (Math.random() - 0.5) * 40, y: np.y + (Math.random() - 0.5) * 30 };
         announcementKey = 'noukou';
+      }
+      // 空腹時（hunger>55）は畑へ一直線（70%）。食料が出る場所に集まる
+      if (!newTarget && c.hunger > 55 && env.farmPositions.length > 0 && Math.random() < 0.7) {
+        const ranked = env.farmPositions
+          .slice()
+          .sort((a, b) => distance(c.pos, a) - distance(c.pos, b))
+          .slice(0, 2);
+        const fp = ranked[Math.floor(Math.random() * ranked.length)]!;
+        newTarget = { x: fp.x + (Math.random() - 0.5) * 20, y: fp.y + (Math.random() - 0.5) * 16 };
+        announcementKey = 'farm_eat';
       }
       // 開拓労働：35% で近くの障害物へ歩く（数で片付ける）
       if (!newTarget && env.obstaclePositions.length > 0 && Math.random() < 0.35) {
