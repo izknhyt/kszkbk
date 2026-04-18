@@ -18,7 +18,7 @@ import {
   COCOON_DEATH_LINES,
   COCOON_LINES_ABUSE,
   COCOON_LINES_DEATH,
-  COCOON_REVIVE_LINES,
+  FURANA_LINES_ANGRY,
   FURANA_LINES_DEATH,
   FURANA_LINES_HURT,
   FURANA_LINES_IDLE,
@@ -27,9 +27,12 @@ import {
   NPC_DEFS,
   SUZU_LINES_BIRTH,
   SUZU_LINES_DEATH,
+  SUZU_LINES_MAMA_DEATH,
+  SUZU_LINES_MAMA_HURT,
   SUZU_LINES_ONDO,
   createNpcs,
   pickLine,
+  reviveLinesFor,
   wanderNpc,
   type NpcState,
 } from './npcs';
@@ -421,6 +424,11 @@ export function damageNpc(w: WorldState, n: NpcState, amount: number): boolean {
   // HP 残ってるときの "いた！" 反応
   if (n.id === 'furana') {
     spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_HURT), 'speech', 1.6);
+    // スズが近くにいたらママ心配で反応（30%）
+    const suzu = w.npcs.find((x) => x.id === 'suzu');
+    if (suzu && !suzu.dead && Math.random() < 0.3) {
+      spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_MAMA_HURT), 'speech', 2);
+    }
   }
   return false;
 }
@@ -437,7 +445,7 @@ function onFuranaDeath(w: WorldState) {
     pushLife(c, Math.floor(c.ageSec), 'ママが死んだ');
   }
   const suzu = w.npcs.find((x) => x.id === 'suzu');
-  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, 'フラナ様ーー！', 'speech', 3);
+  if (suzu && !suzu.dead) spawnBubble(w.bubbles, suzu.pos, pickLine(SUZU_LINES_MAMA_DEATH), 'speech', 3);
   const cocoon = w.npcs.find((x) => x.id === 'cocoon');
   if (cocoon && !cocoon.dead) spawnBubble(w.bubbles, cocoon.pos, 'ママ…ママ…', 'speech', 3);
 }
@@ -900,7 +908,7 @@ function updateNpcs(w: WorldState, dt: number) {
           n.hp = n.maxHp;
           n.pos = { ...n.home };
           n.abuseCooldown = 4;
-          spawnBubble(w.bubbles, n.pos, pickLine(COCOON_REVIVE_LINES), 'speech', 2.5);
+          spawnBubble(w.bubbles, n.pos, pickLine(reviveLinesFor(n.id)), 'speech', 2.5);
         }
       }
       continue;
@@ -917,8 +925,9 @@ function updateNpcs(w: WorldState, dt: number) {
   if (furana && !furana.dead) w.furanaPos = { ...furana.pos };
 }
 
-// フラナの挙動：ときどき近くのちびわふを "めっ" とする（低ダメージ hurt のみ、kill しない）
+// フラナの挙動：通常は "めっ" と優しく叱る / まれにイライラして本気で殴る。
 // たまに独り言。ちびわふの多数派 mama param が高い個体はすでに自然に集まってくる。
+// 近くに密集してるほど（まとわりつき過多）イライラ率が上がる。
 function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   n.abuseCooldown -= dt;
   // 独り言（～30秒に1回くらい）
@@ -931,10 +940,13 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     n.abuseCooldown = 2 + Math.random() * 2;
     return;
   }
-  // 20% の確率で一番近くの子を "めっ"（残りはスルー、フラナは優しいので）
-  n.abuseCooldown = 5 + Math.random() * 5;
-  if (Math.random() > 0.2) return;
-  // mama 高い子ほど狙われやすい（甘えてまとわりつくので）
+  n.abuseCooldown = 4 + Math.random() * 5;
+  // 発動率：通常 30%。近くに 4匹以上いるとイライラして 60% まで上昇。
+  const crowded = candidates.length >= 4;
+  const triggerChance = crowded ? 0.6 : 0.3;
+  if (Math.random() > triggerChance) return;
+
+  // ターゲット：mama 高い子ほど狙われやすい（甘えてまとわりつくので）
   const weights = candidates.map((c) => 1 + Math.max(0, c.params.mama - 50) * 0.03);
   const total = weights.reduce((a, b) => a + b, 0);
   let roll = Math.random() * total;
@@ -944,11 +956,24 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     if (roll < 0) { target = candidates[i]!; break; }
   }
   if (!target) return;
-  spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_PAT), 'speech', 1.6);
-  setState(target, 'hurt', 0.8);
-  spawnBubble(w.bubbles, target.pos, 'きゃんわふ！', 'speech', 1.1);
-  pushLife(target, Math.floor(target.ageSec), 'フラナにめっされた');
-  // フラナは kill しない（HPダメージなし、state hurt のみ）
+
+  // イライラ率：混み具合 40% + ランダム。通常は soft "めっ"。
+  const irritated = crowded ? Math.random() < 0.55 : Math.random() < 0.25;
+  if (irritated) {
+    // 本気パンチ：ちびわふに HP 6-14 ダメージ、hurt 1.3秒。殺すこともある。
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_ANGRY), 'speech', 1.8);
+    const dmg = 6 + Math.floor(Math.random() * 9);
+    setState(target, 'hurt', 1.3);
+    spawnBubble(w.bubbles, target.pos, 'ぎゃーわふ！', 'speech', 1.2);
+    pushLife(target, Math.floor(target.ageSec), 'フラナにイライラして殴られた');
+    damageChibi(w, target, dmg, 'cocoon_abuse'); // 死因は既存の"大人に殴られた"系を流用
+  } else {
+    // soft "めっ"：state hurt のみ、HP 減らず
+    spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_PAT), 'speech', 1.6);
+    setState(target, 'hurt', 0.8);
+    spawnBubble(w.bubbles, target.pos, 'きゃんわふ！', 'speech', 1.1);
+    pushLife(target, Math.floor(target.ageSec), 'フラナにめっされた');
+  }
 }
 
 // フラナが死ぬとちびわふ界は地獄。出産停止＋パニック継続。

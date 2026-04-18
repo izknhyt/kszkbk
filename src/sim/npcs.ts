@@ -93,14 +93,23 @@ export const SUZU_LINES_DEATH = [
 ];
 
 export const SUZU_LINES_BIRTH = [
-  'また生まれた〜',
-  'いちにさんし…もういいや',
-  '今月で何匹目…',
+  'ママまた生んだ〜',
+  'ママ〜いちにさんし…もういいや',
+  'ママ今月で何匹目〜',
 ];
 
 export const SUZU_LINES_ONDO = [
   '踊るな！踊るな！',
   '音頭やめて！',
+];
+
+// フラナ（ママ）関連でスズが叫ぶ台詞。ママ呼びで統一。
+export const SUZU_LINES_MAMA_HURT = [
+  'ママ！？', 'ママに何するわふ！', 'やめて！ママ痛いって！',
+];
+export const SUZU_LINES_MAMA_DEATH = [
+  'ママーーー！', 'ママ！！しんじゃうの！？', 'ママ…ママぁ…',
+  'うそ…ママが…',
 ];
 
 export const COCOON_LINES_DEATH = [
@@ -162,10 +171,26 @@ export function pickLine(pool: string[]): string {
   return pool[Math.floor(Math.random() * pool.length)]!;
 }
 
+// 各NPC共通の復活台詞（ココン/スズ/ルー 用）。id ごとに分岐させる。
 export const COCOON_REVIVE_LINES = [
   'ただいま〜', 'あれ？ いきてる', 'なぜかいるわふ', 'ママぁ…もどってきた',
   'かえってきちゃった', '…？',
 ];
+export const SUZU_REVIVE_LINES = [
+  'あれ？生きてる', '点呼再開！', 'ママ心配かけた…', 'ふっかつ！',
+];
+export const LOU_REVIVE_LINES = [
+  '……がぅ', '………', '……もそ',
+];
+
+// NPCId から復活台詞を返す
+export function reviveLinesFor(id: NpcId): string[] {
+  if (id === 'cocoon') return COCOON_REVIVE_LINES;
+  if (id === 'suzu') return SUZU_REVIVE_LINES;
+  if (id === 'lou') return LOU_REVIVE_LINES;
+  // furana は復活しないのでここに来ないが、念のため
+  return ['……'];
+}
 
 export const COCOON_DEATH_LINES = [
   'やられたー！', 'うぎゃー', 'ママぁ…しぬ…', 'ひどいわふ！',
@@ -189,6 +214,12 @@ export const FURANA_LINES_IDLE = [
 export const FURANA_LINES_HURT = [
   'きゃっ！？', 'いた…！', 'なにするのぉ', 'やめなさい！',
   'うそでしょ…', 'あなた何者…', 'ひどっ',
+];
+
+// フラナがイライラしてちびわふを本気で殴る時
+export const FURANA_LINES_ANGRY = [
+  'うるさい！', 'しつこい！', 'いいかげんにして！', 'もう限界！',
+  'どうしてこうなの…', 'だめって言ってるでしょ！', 'ぎゃー！',
 ];
 
 // フラナの死亡台詞
