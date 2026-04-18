@@ -85,6 +85,10 @@ export interface WorldState {
   maxCorpses: number;
   buildings: PlacedBuilding[];
   points: number;
+  // 累計獲得くそざこポイント（建物に使っても減らない）。村Lv の成長源。
+  totalPointsEarned: number;
+  // 連続値の村レベル 1-99。totalPointsEarned から毎tick 再計算される。
+  villageLv: number;
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
@@ -140,6 +144,8 @@ export function createWorld(): WorldState {
     maxCorpses: CONFIG.MAX_CORPSES_VISIBLE,
     buildings: [],
     points: 0,
+    totalPointsEarned: 0,
+    villageLv: 1,
     totalDeaths: 0,
     totalBirths: 0,
     stompCount: 0,
@@ -346,7 +352,24 @@ function logDeath(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   if (w.recentDeaths.length > 24) w.recentDeaths.pop();
   const gained = Math.round(cause.points * w.pointMultiplier);
   w.points += gained;
+  w.totalPointsEarned += gained;
   w.totalDeaths += 1;
+}
+
+// 累計ポイント → 村Lv (1-99)。緩やかに伸びる平方根曲線（徐々に発展する感）。
+// 目安:
+//   0P→Lv1, 1kP→Lv3, 10kP→Lv7, 50kP→Lv15, 250kP→Lv32, 1MP→Lv64, 2.4MP→Lv99
+// 実プレイの death rate から、×1 等倍で Lv99 到達まで数十時間を想定。
+export function villageLvFromPoints(totalPointsEarned: number): number {
+  const lv = Math.floor(Math.sqrt(Math.max(0, totalPointsEarned) / 250) + 1);
+  return Math.max(1, Math.min(99, lv));
+}
+
+// 村Lv → 実効ワールド幅。Lv 1→1100, Lv 99→1694。Lv +1 ごと +6px。
+export function effectiveBoundsFor(villageLv: number): { w: number; h: number } {
+  const extraW = (villageLv - 1) * 6;
+  const extraH = Math.floor((villageLv - 1) * 1.5); // 高さは少しだけ
+  return { w: CONFIG.WORLD_W + extraW, h: CONFIG.WORLD_H + extraH };
 }
 
 export function kill(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
@@ -953,6 +976,12 @@ export function tickWorld(w: WorldState, dt: number) {
   w.dayCount = 1 + Math.floor(w.timeSec / CONFIG.SECONDS_PER_DAY);
   // 位相境界で NPC リアクション（朝礼／夜の静まり）
   if (w.dayPhase !== prevPhase) onPhaseChange(w, prevPhase, w.dayPhase);
+  // 累計ポイントから村Lv を再計算。Lv 上昇でワールドが広がる。
+  const prevLv = w.villageLv;
+  w.villageLv = villageLvFromPoints(w.totalPointsEarned);
+  if (w.villageLv !== prevLv) {
+    w.bounds = effectiveBoundsFor(w.villageLv);
+  }
   w.villageRank = computeRank(rankContext(w));
   applyBuildingMods(w);
   spawnIfRoom(w);

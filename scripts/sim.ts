@@ -118,6 +118,8 @@ console.log('===================================================================
 console.log(`  births         : ${w.totalBirths}`);
 console.log(`  deaths         : ${w.totalDeaths}   (${rate}/min)`);
 console.log(`  points (final) : ${w.points}        (+${ppm}/min gross inflow)`);
+console.log(`  points earned  : ${w.totalPointsEarned}  (cumulative, drives village Lv)`);
+console.log(`  village Lv     : ${w.villageLv} / 99      bounds = ${w.bounds.w}x${w.bounds.h}`);
 console.log(`  dex            : ${uniqueDexFound(w)} / ${totalDex}`);
 console.log(`  stomps         : ${w.stompCount}`);
 console.log(`  pop cap final  : ${w.chibis.length} alive, cap = ${w.baseCap + w.buildings.reduce((a, b) => {

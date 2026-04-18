@@ -85,7 +85,10 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const lib = await loadSpriteLibrary('/chibiwafu.png');
 
   let currentSeason: Season = 'spring';
-  drawBackground(bgLayer, CONFIG.WORLD_W, CONFIG.WORLD_H, currentSeason);
+  // ワールドの実効寸法。村Lv に応じて徐々に広がる。world.bounds が権威。
+  let currentBoundsW: number = CONFIG.WORLD_W;
+  let currentBoundsH: number = CONFIG.WORLD_H;
+  drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason);
   const furana = drawFurana();
   fxLayer.addChild(furana);
 
@@ -116,8 +119,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   function clampCamera() {
     const vw = app.renderer.width;
     const vh = app.renderer.height;
-    const ww = CONFIG.WORLD_W * cameraScale;
-    const wh = CONFIG.WORLD_H * cameraScale;
+    const ww = currentBoundsW * cameraScale;
+    const wh = currentBoundsH * cameraScale;
     // ワールドが画面より小さい時は中央寄せ、大きい時は縁を超えないようクランプ
     if (ww <= vw) cameraX = (vw - ww) / 2;
     else cameraX = clamp(cameraX, vw - ww, 0);
@@ -133,7 +136,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   function fitCameraToViewport() {
     const vw = app.renderer.width;
     const vh = app.renderer.height;
-    const fit = Math.min(vw / CONFIG.WORLD_W, vh / CONFIG.WORLD_H);
+    const fit = Math.min(vw / currentBoundsW, vh / currentBoundsH);
     cameraScale = clamp(fit, CONFIG.CAMERA_MIN_SCALE, CONFIG.CAMERA_MAX_SCALE);
     cameraX = 0;
     cameraY = 0;
@@ -277,11 +280,23 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     if (s === currentSeason) return;
     currentSeason = s;
     bgLayer.removeChildren();
-    drawBackground(bgLayer, CONFIG.WORLD_W, CONFIG.WORLD_H, currentSeason);
+    drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason);
+  }
+
+  // 村Lv 上昇でワールド寸法が広がったら背景を描き直す。頻度は稀（Lv up 時のみ）。
+  function setBounds(w: number, h: number) {
+    if (w === currentBoundsW && h === currentBoundsH) return;
+    currentBoundsW = w;
+    currentBoundsH = h;
+    bgLayer.removeChildren();
+    drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason);
+    clampCamera();
+    applyCamera();
   }
 
   function draw(world: WorldState) {
     setSeason(world.season);
+    setBounds(world.bounds.w, world.bounds.h);
     drawPhaseTint(world.dayPhase);
     furana.position.set(world.furanaPos.x, world.furanaPos.y);
 

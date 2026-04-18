@@ -73,6 +73,7 @@ async function start() {
   let lastSave = 0;
   let uiTimer = 0;
   let lastRank: VillageRank = world.villageRank;
+  let lastVillageLv = world.villageLv;
   const dtFixed = CONFIG.TICK_DT;
   let acc = 0;
   let prev = performance.now();
@@ -224,6 +225,11 @@ async function start() {
       const nextDef = RANK_DEFS[world.villageRank];
       flashToast(`村が「${nextDef.name}」になった`, 'discovery');
       lastRank = world.villageRank;
+    }
+    // detect village Lv up (ranks are coarse labels, lv is the continuous feel)
+    if (world.villageLv > lastVillageLv) {
+      flashToast(`村Lv ${lastVillageLv} → ${world.villageLv}`, 'info');
+      lastVillageLv = world.villageLv;
     }
 
     // ピンした個体が死んだら自動で epitaph モーダルに切り替え

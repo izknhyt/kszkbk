@@ -78,6 +78,7 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   // 村ランク表示と次ランクへの進捗
   const rankDef = RANK_DEFS[w.villageRank];
   byId('stat-rank').textContent = rankDef.name;
+  byId('stat-village-lv').textContent = String(w.villageLv);
   const next = nextRank(w.villageRank);
   if (next) {
     const nextDef = RANK_DEFS[next];
