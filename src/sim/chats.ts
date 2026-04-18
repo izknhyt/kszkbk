@@ -431,6 +431,33 @@ export function pickGodThrowLine(): string {
   return GOD_THROW_LINES[Math.floor(Math.random() * GOD_THROW_LINES.length)]!;
 }
 
+// 殴られた後、反抗して神様に吠える時の一言
+const GOD_DEFIANCE_LINES = [
+  'いたすぎるわふ！', 'ゆるさないわふ', 'ぷんっわふ！', 'おこったわふ！',
+  'かみさまばかわふ', 'しんじゃえわふ', 'もういやわふ', 'ぼくだってこえあるわふ',
+  'もうなぐらないでわふ！',
+];
+export function pickGodDefianceLine(): string {
+  return GOD_DEFIANCE_LINES[Math.floor(Math.random() * GOD_DEFIANCE_LINES.length)]!;
+}
+
+// --- もらし系 ----------------------------------------------------------------
+// もらした子が出した 💧 に対する周囲の反応。ふく/ドン引き の2パターン。
+const MORASHI_WIPE_LINES = [
+  'ふいてあげるわふ', 'きれいにするわふ', 'だいじょうぶわふ',
+  'こっちおいでわふ', 'きにしないわふ',
+];
+const MORASHI_DISGUST_LINES = [
+  'くさいわふ！', 'きたないわふ', 'ドンびきわふ', 'ぎゃーわふ',
+  'よるなわふ', 'またかわふ…', 'さいあくわふ', 'あっちいくわふ',
+];
+export function pickMorashiWipeLine(): string {
+  return MORASHI_WIPE_LINES[Math.floor(Math.random() * MORASHI_WIPE_LINES.length)]!;
+}
+export function pickMorashiDisgustLine(): string {
+  return MORASHI_DISGUST_LINES[Math.floor(Math.random() * MORASHI_DISGUST_LINES.length)]!;
+}
+
 // 着地した瞬間（ドロップで陸地にぶつかった時）
 const GOD_LANDED_LINES = [
   'どさっわふ', 'ぐへぇわふ', 'いたたたわふ…', 'あたまうったわふ',

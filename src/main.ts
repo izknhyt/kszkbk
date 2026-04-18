@@ -16,6 +16,7 @@ import { pushLife } from './sim/world';
 import { isAlive as isChibiAlive, setState } from './sim/chibiwafu';
 import { spawnBubble } from './sim/bubbles';
 import {
+  pickGodDefianceLine,
   pickGodLandedLine,
   pickGodPunchLine,
   pickGodShakeLine,
@@ -385,6 +386,13 @@ function punchChibi(world: WorldState, chibiId: number) {
   // 生き残ってても 10% で神の不興で追加即死（ドラマ用）
   if (!died && Math.random() < 0.1) {
     damageChibi(world, c, c.hp, 'kamisama_punch');
+    return;
+  }
+  // 殴られた後 25% で反抗（生きてる子のみ、怒り状態＋罵倒台詞）
+  if (!died && Math.random() < 0.25) {
+    setState(c, 'angry', 1.2);
+    spawnBubble(world.bubbles, c.pos, pickGodDefianceLine(), 'speech', 1.6);
+    pushLife(c, Math.floor(c.ageSec), '神様に怒った');
   }
 }
 

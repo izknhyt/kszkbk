@@ -48,6 +48,8 @@ import {
   SLEEP_REASONS,
   maybeStartChat,
   pickActionAnnounce,
+  pickMorashiDisgustLine,
+  pickMorashiWipeLine,
   pickOshaberiLine,
   pickReason,
   pickRifujinStrikerLine,
@@ -694,6 +696,23 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   // もらし常習：💧 吹き出しが周期的に出る（15-20秒毎くらい）
   if (c.traits.includes('morashi') && Math.random() < 0.003) {
     spawnBubble(w.bubbles, c.pos, '💧', 'stomp', 1.1);
+    pushLife(c, Math.floor(c.ageSec), 'もらした');
+    // 周囲 50px に生きた他の子がいれば反応（35% 優しく拭く / 65% ドン引き）
+    const witness = w.chibis.find(
+      (o) => o !== c && isAlive(o) && distance(o.pos, c.pos) < 50 && o.state === 'idle',
+    );
+    if (witness) {
+      if (Math.random() < 0.35) {
+        // 優しい子：拭いてあげる（idle に留まり台詞のみ）
+        spawnBubble(w.bubbles, witness.pos, pickMorashiWipeLine(), 'speech', 1.6);
+        pushLife(witness, Math.floor(witness.ageSec), `${c.name} のもらしを拭いた`);
+      } else {
+        // ドン引きする子：dazed 状態 + 暴言
+        setState(witness, 'dazed', 1);
+        spawnBubble(w.bubbles, witness.pos, pickMorashiDisgustLine(), 'speech', 1.6);
+        pushLife(witness, Math.floor(witness.ageSec), `${c.name} のもらしにドン引きした`);
+      }
+    }
   }
   // おしゃべり：idle 中、相手がいなくても一人で喋る
   if (c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < 0.005) {
