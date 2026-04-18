@@ -49,6 +49,8 @@ export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
     hp: maxHp,
     maxHp,
     flight: null,
+    hunger: 0,
+    fatigue: 0,
   };
 }
 

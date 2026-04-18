@@ -801,6 +801,18 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     kill(w, c, 'roushuai');
     return;
   }
+  // --- サバイバル（空腹・疲労） ---------------------------------------
+  // 空腹は時間で上昇（tough が高いと耐性↑）。疲労は活動系ステートで上昇、睡眠で回復。
+  const toughMul = 1 - Math.max(0, c.params.tough - 50) * 0.006;  // tough100=0.7倍
+  c.hunger += dt * 1.2 * toughMul;  // 100 到達まで ~83秒（tough100 なら 119秒）
+  // sleep 以外は疲労が溜まる（hurt/cry でも休息にならない）
+  if (c.state !== 'sleep') c.fatigue += dt * 0.55 * toughMul;  // ~180秒で疲労死
+  if (c.state === 'sleep') c.fatigue = Math.max(0, c.fatigue - dt * 0.70);
+  if (c.state === 'eating') c.hunger = Math.max(0, c.hunger - dt * 6);   // 食事で一気に回復
+  c.hunger = Math.max(0, Math.min(100, c.hunger));
+  c.fatigue = Math.max(0, Math.min(100, c.fatigue));
+  if (c.hunger >= 100) { kill(w, c, 'hunger_death'); return; }
+  if (c.fatigue >= 100) { kill(w, c, 'fatigue_death'); return; }
   // 飛行中は wander/state transition を止めて物理だけ動かす
   if (c.flight) {
     flightStep(w, c, true, dt);

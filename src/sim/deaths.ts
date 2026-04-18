@@ -278,6 +278,22 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 40,
     template: (n) => `${n}はフラナママがいなくなった世界に耐えきれず、泣きながら動かなくなった。`,
   },
+  hunger_death: {
+    id: 'hunger_death',
+    title: '餓死',
+    rare: false,
+    uncommon: true,
+    points: 16,
+    template: (n) => `${n}は食べ物が見つからず、お腹を鳴らしながら動かなくなった。`,
+  },
+  fatigue_death: {
+    id: 'fatigue_death',
+    title: '疲労死',
+    rare: false,
+    uncommon: true,
+    points: 18,
+    template: (n) => `${n}はくたくたに疲れ果て、そのまま目を覚まさなかった。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;

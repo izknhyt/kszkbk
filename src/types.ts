@@ -51,6 +51,11 @@ export interface Chibiwafu {
   maxHp: number;
   // 投げられて飛行中（null = 地上）
   flight: FlightState | null;
+  // --- サバイバル ---------------------------------------------------
+  // 空腹度 0-100。時間で上昇、食料を食べれば減る。100 で starvation。
+  hunger: number;
+  // 疲労度 0-100。活動で上昇、睡眠で減る。100 で exhaustion。
+  fatigue: number;
 }
 
 export interface LifeEvent {
@@ -108,7 +113,9 @@ export type DeathCauseId =
   | 'kamisama_drown'          // プレイヤーに水に投げ込まれて死亡
   | 'kamisama_shake'          // プレイヤーに掴まれて振り回され衰弱死
   | 'kamisama_throw'          // プレイヤーに投げつけられ地面に激突死
-  | 'mama_lost';              // フラナ（ママ）を失って心が折れて死亡
+  | 'mama_lost'               // フラナ（ママ）を失って心が折れて死亡
+  | 'hunger_death'            // 空腹で餓死
+  | 'fatigue_death';          // 疲労で衰弱死
 
 export interface DeathCause {
   id: DeathCauseId;

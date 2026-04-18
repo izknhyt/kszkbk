@@ -605,6 +605,23 @@ function showChibiModal(c: Chibiwafu, isEpitaph: boolean) {
   // パラメータバー
   const paramsEl = document.getElementById('modal-params')!;
   paramsEl.innerHTML = '';
+  // HP / 空腹 / 疲労 をまず表示（生死に直結するゲージ）
+  const statusRows: Array<{ label: string; value: number; max: number; color: string; warn?: boolean }> = [
+    { label: 'HP',   value: c.hp,      max: c.maxHp, color: '#d85' },
+    { label: '空腹', value: c.hunger,  max: 100, color: '#f0a030', warn: c.hunger >= 70 },
+    { label: '疲労', value: c.fatigue, max: 100, color: '#6a7c8a', warn: c.fatigue >= 70 },
+  ];
+  for (const s of statusRows) {
+    const pct = s.max > 0 ? (s.value / s.max) * 100 : 0;
+    const row = document.createElement('div');
+    row.className = 'param-row';
+    row.innerHTML = `
+      <span class="label">${s.label}</span>
+      <span class="bar"><span class="fill" style="width:${pct}%;background:${s.warn ? '#d84' : s.color}"></span></span>
+      <span class="value">${Math.round(s.value)}${s.label === 'HP' ? `/${s.max}` : ''}</span>
+    `;
+    paramsEl.appendChild(row);
+  }
   for (const key of PARAM_KEYS) {
     const val = c.params[key];
     const color = '#' + PARAM_COLOR[key].toString(16).padStart(6, '0');
