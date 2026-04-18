@@ -930,13 +930,13 @@ function drawNpc(n: NpcState, furanaLib: SpriteLibrary): NpcView {
   label.anchor.set(0.5, 1);
 
   if (n.id === 'furana' && furanaLib.hasSheet) {
-    // 画像ベースのフラナ
+    // 画像ベースのフラナ。ちびわふ 48px に対して少し大きめの 60px を目安にする。
     const spr = new Sprite(frameFor(furanaLib, n.state));
-    const targetH = 100 * def.scale;  // 130px 高さ目安
+    const targetH = 60;
     const scale = targetH / Math.max(1, spr.texture.height);
     spr.scale.set(scale);
-    spr.anchor.set(0.5, 0.85);  // 足元が y=0 に来るように
-    label.position.set(0, -targetH * 0.82);
+    spr.anchor.set(0.5, 0.85);
+    label.position.set(0, -targetH * 0.8);
     c.addChild(spr, label);
     return { container: c, sprite: spr };
   }

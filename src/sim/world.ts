@@ -925,16 +925,69 @@ function updateNpcs(w: WorldState, dt: number) {
       n.stateTimer -= dt;
       if (n.stateTimer <= 0) { n.state = 'idle'; n.stateTimer = 0; }
     }
-    wanderNpc(n, dt);
-    if (n.id === 'cocoon') updateCocoonAbuse(w, n, dt);
-    if (n.id === 'furana') updateFuranaBehavior(w, n, dt);
-    if (n.id === 'lou' && Math.random() < 0.0007) {
-      spawnBubble(w.bubbles, n.pos, pickLine(LOU_LINES), 'speech', 1.6);
+    if (n.id === 'furana') {
+      updateFuranaMovement(w, n, dt);
+      updateFuranaBehavior(w, n, dt);
+    } else {
+      wanderNpc(n, dt);
+      if (n.id === 'cocoon') updateCocoonAbuse(w, n, dt);
+      if (n.id === 'lou' && Math.random() < 0.0007) {
+        spawnBubble(w.bubbles, n.pos, pickLine(LOU_LINES), 'speech', 1.6);
+      }
     }
   }
   // world.furanaPos は後方互換のため npc フラナの pos を常にミラーする
   const furana = w.npcs.find((n) => n.id === 'furana');
   if (furana && !furana.dead) w.furanaPos = { ...furana.pos };
+}
+
+// フラナの意思的移動：ちびわふ集団を覗きに行く／スズを訪ねる／家に戻る、など。
+// wanderNpc の代わりに呼ぶ。テンポは 1.4-3秒で頻繁に動く。
+function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
+  n.wanderTimer -= dt;
+  if (n.wanderTimer > 0) return;
+  n.wanderTimer = 1.4 + Math.random() * 1.6;
+  const roll = Math.random();
+  // 40% ちびわふ集団へ（最寄りの子に近づく）
+  if (roll < 0.4) {
+    const chibis = w.chibis.filter((c) => isAlive(c));
+    if (chibis.length > 0) {
+      // 最寄りの子を探す
+      let nearest: Chibiwafu | undefined;
+      let bestD = Infinity;
+      for (const c of chibis) {
+        const d = distance(c.pos, n.pos);
+        if (d < bestD) { nearest = c; bestD = d; }
+      }
+      if (nearest) {
+        n.pos.x = nearest.pos.x + (Math.random() - 0.5) * 30;
+        n.pos.y = nearest.pos.y + (Math.random() - 0.5) * 24;
+        return;
+      }
+    }
+  }
+  // 20% スズの所へ散歩
+  if (roll < 0.6) {
+    const suzu = w.npcs.find((x) => x.id === 'suzu' && !x.dead);
+    if (suzu) {
+      n.pos.x = suzu.pos.x + (Math.random() - 0.5) * 30;
+      n.pos.y = suzu.pos.y + (Math.random() - 0.5) * 24;
+      return;
+    }
+  }
+  // 15% ココンの様子見
+  if (roll < 0.75) {
+    const cocoon = w.npcs.find((x) => x.id === 'cocoon' && !x.dead);
+    if (cocoon) {
+      n.pos.x = cocoon.pos.x + (Math.random() - 0.5) * 40;
+      n.pos.y = cocoon.pos.y + (Math.random() - 0.5) * 30;
+      return;
+    }
+  }
+  // 残り 25%：自宅付近ランダム
+  const range = 120;
+  n.pos.x = n.home.x + (Math.random() - 0.5) * range;
+  n.pos.y = n.home.y + (Math.random() - 0.5) * range;
 }
 
 // フラナの挙動：通常は "めっ" と優しく叱る / まれにイライラして本気で殴る。

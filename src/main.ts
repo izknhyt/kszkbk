@@ -405,7 +405,7 @@ function dropNpc(world: WorldState, id: NpcId, wx: number, wy: number, throwDist
 
 // NPC を掴んだ時の性格別リアクション（短く）
 function npcGrabReaction(id: NpcId): string | null {
-  if (id === 'furana') return 'きゃっ！？';
+  if (id === 'furana') return 'きゃっわふ！？';
   if (id === 'suzu')   return 'ちょっとなに！？';
   if (id === 'lou')    return '……ぐぅ？';
   if (id === 'cocoon') return 'はなせー！';
