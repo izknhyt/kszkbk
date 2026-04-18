@@ -456,6 +456,26 @@ button:active { transform: translateY(1px); }
   font-size: 10px;
 }
 
+.chibi-modal-flavors {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  font-size: 11px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.chibi-modal-flavors li {
+  background: #f4ead3;
+  border-radius: 10px;
+  padding: 2px 9px;
+  color: #4a3a22;
+}
+.chibi-modal-flavors li::before {
+  content: '・';
+  color: #b08a5b;
+}
+
 .chibi-modal-life {
   list-style: none;
   margin: 0;

@@ -31,9 +31,9 @@ const totalTicks = Math.floor((SIM_MINUTES * 60) / dt);
 const firstDex: Partial<Record<DeathCauseId, number>> = {};
 const buildingsBought: Array<{ sec: number; id: string; cost: number }> = [];
 const secondaryInteractions: Array<{ sec: number; what: string }> = [];
-const traitCounts: Record<TraitId, number> = {
-  bouken: 0, gourmand: 0, shinpai: 0, ukiyo: 0, ikusa: 0, noumin: 0,
-};
+const traitCounts: Record<TraitId, number> = Object.fromEntries(
+  Object.keys(TRAIT_DEFS).map((k) => [k, 0]),
+) as Record<TraitId, number>;
 let noTraitBirths = 0;
 const traitsPerChibi: number[] = [];
 const seenChibiIds = new Set<number>();

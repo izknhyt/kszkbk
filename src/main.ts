@@ -246,6 +246,22 @@ function showChibiModal(c: Chibiwafu, isEpitaph: boolean) {
     paramsEl.appendChild(row);
   }
 
+  // フレーバー
+  const flavEl = document.getElementById('modal-flavors')!;
+  flavEl.innerHTML = '';
+  if (c.flavors.length === 0) {
+    const li = document.createElement('li');
+    li.textContent = '特になし';
+    li.style.color = '#aaa';
+    flavEl.appendChild(li);
+  } else {
+    for (const f of c.flavors) {
+      const li = document.createElement('li');
+      li.textContent = f;
+      flavEl.appendChild(li);
+    }
+  }
+
   lifeEl.innerHTML = '';
   for (const ev of c.lifeLog) {
     const li = document.createElement('li');

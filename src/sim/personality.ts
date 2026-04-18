@@ -93,12 +93,32 @@ export function rollParams(): ChibiParams {
 // 特性によるパラメータ補正。trait が決まった後に applyTraitBias() を呼ぶ。
 // 同じ特性が複数の軸に効く（冒険家は勇気↑、ママ依存↓、元気↑）。
 const TRAIT_BIAS: Partial<Record<TraitId, Partial<ChibiParams>>> = {
-  bouken:   { courage: +30, mama: -25, energy: +15 },
-  gourmand: { appetite: +40, zako: +10 },
-  shinpai:  { courage: -35, mama: +40, social: -10, tough: -10 },
-  ukiyo:    { philo: +45, social: -20, energy: -20, focus: +15 },
-  ikusa:    { courage: +40, social: -15, tough: +10, zako: +10 },
-  noumin:   { focus: +20, appetite: +10, mama: -5 },
+  // コア6
+  bouken:       { courage: +30, mama: -25, energy: +15 },
+  gourmand:     { appetite: +40, zako: +10 },
+  shinpai:      { courage: -35, mama: +40, social: -10, tough: -10 },
+  ukiyo:        { philo: +45, social: -20, energy: -20, focus: +15 },
+  ikusa:        { courage: +40, social: -15, tough: +10, zako: +10 },
+  noumin:       { focus: +20, appetite: +10, mama: -5 },
+  // 行動系
+  tabikko:      { courage: +20, mama: -40, energy: +10 },
+  gunsuki:      { social: +40, mama: -5 },
+  hitoribochi:  { social: -50, mama: -10, focus: +10 },
+  bo_suki:      { courage: +15, zako: +20 },
+  taiko_kko:    { focus: -20, zako: +25, social: +10 },
+  // 性格系
+  nonbiri:      { focus: +10, energy: -25, tough: +10 },
+  sekkachi:     { energy: +30, focus: -20, courage: +10 },
+  oshaberi:     { social: +45 },
+  mukuchi:      { social: -45, focus: +15 },
+  nakimushi:    { tough: -15, mama: +20, social: -5 },
+  // 体質
+  tsuyoi:       { tough: +40, energy: +10 },
+  yowai:        { tough: -40, energy: -10 },
+  morashi:      { zako: +30, social: -5, tough: -5 },
+  // レア
+  bo_meijin:    { courage: +30, tough: +25, focus: +25 },
+  tetsugakusha: { philo: +60, social: -30, focus: +30, zako: +5 },
 };
 
 export function applyTraitBias(p: ChibiParams, traits: TraitId[]): ChibiParams {

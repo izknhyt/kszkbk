@@ -20,6 +20,7 @@ export interface SpawnArgs {
   maxAgeSec: number;
   traits: TraitId[];
   params: ChibiParams;
+  flavors: string[];
 }
 
 export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
@@ -39,6 +40,7 @@ export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
     faceLeft: Math.random() < 0.5,
     traits: [...args.traits],
     params: { ...args.params },
+    flavors: [...args.flavors],
     lifeLog: [],
     chatCooldown: 2,
     targetLandmarkId: null,

@@ -41,6 +41,7 @@ import {
   derivedStareChance,
   rollParams,
 } from './personality';
+import { rollFlavors, rollFlavorCount } from './flavorTraits';
 
 export interface DeathLogEntry {
   tick: number;
@@ -336,6 +337,8 @@ export function forceSpawn(w: WorldState) {
   let maxAge = CONFIG.CHIBI_MAX_AGE_MIN_SEC + Math.random() * CONFIG.CHIBI_MAX_AGE_RANGE_SEC;
   if (traits.includes('shinpai')) maxAge *= 0.5;
   maxAge *= 0.7 + params.tough * 0.006; // tough 0 → ×0.7, tough 100 → ×1.3
+  // フレーバー特性（動きに効かない小さな性格メモ）
+  const flavors = rollFlavors(rollFlavorCount());
   const child = spawnChibiwafu({
     name,
     birthTick: w.tick,
@@ -343,6 +346,7 @@ export function forceSpawn(w: WorldState) {
     maxAgeSec: maxAge,
     traits,
     params,
+    flavors,
   });
   setState(child, 'surprised', 1.5);
   const traitLabel = traits.length > 0 ? `（${traits.map((t) => TRAIT_DEFS[t].name).join('・')}）` : '';

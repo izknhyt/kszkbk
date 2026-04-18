@@ -35,6 +35,8 @@ export interface Chibiwafu {
   traits: TraitId[];
   // 10軸のパーソナリティ（連続値 0-100）。挙動は基本これで決まる。
   params: import('./sim/personality').ChibiParams;
+  // フレーバー特性（動きに効かない小さな性格ラベル、モーダル表示用）
+  flavors: string[];
   // --- P5: 生活 --------------------------------------------------------
   // 最近誰と話したか等、個体のイベントログ。死亡時に墓碑として見せる。
   lifeLog: LifeEvent[];
@@ -121,9 +123,26 @@ export type VillageRank = 'mura' | 'shuraku' | 'machi' | 'to';
 //   追加するときは types.ts → traits.ts → stage.ts のリング色、の3箇所。
 // =========================================================================
 export type TraitId =
-  | 'bouken'    // 冒険家
-  | 'gourmand'  // 食いしん坊
-  | 'shinpai'   // 心配性
-  | 'ukiyo'     // 浮世離れ
-  | 'ikusa'     // 戦闘狂
-  | 'noumin';   // 農民気質
+  // コア6種
+  | 'bouken'       // 冒険家
+  | 'gourmand'     // 食いしん坊
+  | 'shinpai'      // 心配性
+  | 'ukiyo'        // 浮世離れ
+  | 'ikusa'        // 戦闘狂
+  | 'noumin'       // 農民気質
+  // --- P6 追加14種 ---------------------------------------------------
+  | 'tabikko'      // 旅っ子
+  | 'gunsuki'      // 群好き
+  | 'hitoribochi'  // 一人ぼっち
+  | 'bo_suki'      // 棒好き
+  | 'taiko_kko'    // 太鼓っ子
+  | 'nonbiri'      // のんき
+  | 'sekkachi'     // せっかち
+  | 'oshaberi'     // おしゃべり
+  | 'mukuchi'      // 無口
+  | 'nakimushi'    // 泣き虫
+  | 'tsuyoi'       // 丈夫
+  | 'yowai'        // 虚弱
+  | 'morashi'      // もらし常習
+  | 'bo_meijin'    // 棒名人（レア）
+  | 'tetsugakusha';// 哲学者（レア）
