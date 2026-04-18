@@ -420,8 +420,13 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         npcViews.set(n.id, v);
       }
       v.container.position.set(n.pos.x, n.pos.y);
-      // フラナはステート切替でフレーム差し替え
-      if (v.sprite) v.sprite.texture = frameFor(furanaLib, n.state);
+      // フラナはステート切替でフレーム差し替え & 左右反転
+      if (v.sprite) {
+        v.sprite.texture = frameFor(furanaLib, n.state);
+        const baseScale = 60 / Math.max(1, v.sprite.texture.height);
+        v.sprite.scale.x = (n.faceLeft ? -1 : 1) * baseScale;
+        v.sprite.scale.y = baseScale;
+      }
       // 死亡中は薄くする
       v.container.alpha = n.dead ? 0.35 : 1.0;
       // フラナは絵が既に "dead" ポーズなので回転させない。他NPC（ココン等）は従来通り倒す

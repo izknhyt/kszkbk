@@ -60,6 +60,7 @@ export const NPC_DEFS: Record<NpcId, NpcDef> = {
     color: 0xffffff,
     secondaryColor: 0xffc7b3,
     scale: 1.3,
+    // reactOnDeath は使われない（reactNpcsToDeath 内でフラナ専用分岐あり）
     reactOnDeath: false,
     reactOnBirth: true,
     reactOnOndo: false,
@@ -85,6 +86,12 @@ export interface NpcState {
   // 表示用ステート（フラナのスプライト切替に使う。他NPCは現状描画に影響しない）
   state: ChibiState;
   stateTimer: number;
+  // 目的地（フラナはここへ向かって徐々に歩く。null なら停止中）
+  target: Vec2 | null;
+  // 移動速度（px/sec）。フラナのみ使用（他NPCはテレポート wanderNpc）
+  speed: number;
+  // 画像の左右反転フラグ
+  faceLeft: boolean;
 }
 
 export const SUZU_LINES_DEATH = [
@@ -143,6 +150,9 @@ function mkNpc(id: NpcId, home: Vec2, abuseCooldown = 0): NpcState {
     maxHp: def.maxHp,
     state: 'idle',
     stateTimer: 0,
+    target: null,
+    speed: id === 'furana' ? 22 : 0,
+    faceLeft: false,
   };
 }
 
@@ -304,4 +314,18 @@ export const FURANA_LINES_ANGRY = [
 export const FURANA_LINES_DEATH = [
   'みんな…ごめんわふ…', 'さよならわふ…', 'ママは…ここまでわふ…',
   'げんきでねわふ…', 'あぁ…わふ',
+];
+
+// ちびわふが死んだ時のフラナの追悼コメント
+export const FURANA_LINES_DEATH_REACTION = [
+  'あらら…かわいそうわふ', 'また一人わふ…', 'ねむれわふ', 'さみしくなるわふ',
+  'あ〜あ…わふ', 'やすらかにわふ…', 'ママの子だったのに…わふ',
+  'なんまんだぶわふ', 'いってらっしゃいわふ', 'まもりんがあるわふ…',
+];
+
+// 変な死に方に対するフラナのびっくり反応
+export const FURANA_LINES_WEIRD_DEATH = [
+  'えっ！？わふ', 'なんでそうなるわふ！？', 'しんじられないわふ',
+  'うそでしょわふ…', 'そんな死に方ある！？わふ', 'ちょっとまってわふ',
+  'どうしてこうなるわふ…', 'ママ困惑わふ',
 ];

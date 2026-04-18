@@ -20,9 +20,11 @@ import {
   COCOON_LINES_DEATH,
   FURANA_LINES_ANGRY,
   FURANA_LINES_DEATH,
+  FURANA_LINES_DEATH_REACTION,
   FURANA_LINES_HURT,
   FURANA_LINES_IDLE,
   FURANA_LINES_PAT,
+  FURANA_LINES_WEIRD_DEATH,
   LOU_LINES,
   NPC_DEFS,
   SUZU_LINES_BIRTH,
@@ -941,18 +943,37 @@ function updateNpcs(w: WorldState, dt: number) {
   if (furana && !furana.dead) w.furanaPos = { ...furana.pos };
 }
 
-// フラナの意思的移動：ちびわふ集団を覗きに行く／スズを訪ねる／家に戻る、など。
-// wanderNpc の代わりに呼ぶ。テンポは 1.4-3秒で頻繁に動く。
+// フラナの意思的移動：目的地を決め、徐々に歩く（テレポートしない）。
+// target が null / 近づいたら wanderTimer が切れ次第、次の目的地を選ぶ。
 function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
-  n.wanderTimer -= dt;
-  if (n.wanderTimer > 0) return;
-  n.wanderTimer = 1.4 + Math.random() * 1.6;
+  // 目的地に近づいてきたら到着扱い
+  if (n.target && distance(n.pos, n.target) < 6) {
+    n.target = null;
+  }
+  if (n.target == null) {
+    n.wanderTimer -= dt;
+    if (n.wanderTimer > 0) return;
+    // 一呼吸置いて次の目的地を決める（0.8-2秒の間）
+    n.wanderTimer = 0.8 + Math.random() * 1.2;
+    n.target = pickFuranaTarget(w, n);
+  }
+  // 目的地に向かってじわじわ歩く
+  if (n.target) {
+    const dx = n.target.x - n.pos.x;
+    const dy = n.target.y - n.pos.y;
+    const d = Math.max(0.001, Math.hypot(dx, dy));
+    n.pos.x += (dx / d) * n.speed * dt;
+    n.pos.y += (dy / d) * n.speed * dt;
+    n.faceLeft = dx < 0;
+  }
+}
+
+function pickFuranaTarget(w: WorldState, n: NpcState): Vec2 {
   const roll = Math.random();
-  // 40% ちびわふ集団へ（最寄りの子に近づく）
+  // 40% ちびわふ集団へ（最寄りの子の近く）
   if (roll < 0.4) {
     const chibis = w.chibis.filter((c) => isAlive(c));
     if (chibis.length > 0) {
-      // 最寄りの子を探す
       let nearest: Chibiwafu | undefined;
       let bestD = Infinity;
       for (const c of chibis) {
@@ -960,34 +981,28 @@ function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
         if (d < bestD) { nearest = c; bestD = d; }
       }
       if (nearest) {
-        n.pos.x = nearest.pos.x + (Math.random() - 0.5) * 30;
-        n.pos.y = nearest.pos.y + (Math.random() - 0.5) * 24;
-        return;
+        return {
+          x: nearest.pos.x + (Math.random() - 0.5) * 40,
+          y: nearest.pos.y + (Math.random() - 0.5) * 30,
+        };
       }
     }
   }
-  // 20% スズの所へ散歩
+  // 20% スズの所へ
   if (roll < 0.6) {
     const suzu = w.npcs.find((x) => x.id === 'suzu' && !x.dead);
-    if (suzu) {
-      n.pos.x = suzu.pos.x + (Math.random() - 0.5) * 30;
-      n.pos.y = suzu.pos.y + (Math.random() - 0.5) * 24;
-      return;
-    }
+    if (suzu) return { x: suzu.pos.x + (Math.random() - 0.5) * 40, y: suzu.pos.y + (Math.random() - 0.5) * 30 };
   }
   // 15% ココンの様子見
   if (roll < 0.75) {
     const cocoon = w.npcs.find((x) => x.id === 'cocoon' && !x.dead);
-    if (cocoon) {
-      n.pos.x = cocoon.pos.x + (Math.random() - 0.5) * 40;
-      n.pos.y = cocoon.pos.y + (Math.random() - 0.5) * 30;
-      return;
-    }
+    if (cocoon) return { x: cocoon.pos.x + (Math.random() - 0.5) * 40, y: cocoon.pos.y + (Math.random() - 0.5) * 30 };
   }
-  // 残り 25%：自宅付近ランダム
-  const range = 120;
-  n.pos.x = n.home.x + (Math.random() - 0.5) * range;
-  n.pos.y = n.home.y + (Math.random() - 0.5) * range;
+  // 残り 25%：自宅付近ランダム（range 120）
+  return {
+    x: n.home.x + (Math.random() - 0.5) * 120,
+    y: n.home.y + (Math.random() - 0.5) * 120,
+  };
 }
 
 // フラナの挙動：通常は "めっ" と優しく叱る / まれにイライラして本気で殴る。
@@ -995,8 +1010,8 @@ function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
 // 近くに密集してるほど（まとわりつき過多）イライラ率が上がる。
 function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   n.abuseCooldown -= dt;
-  // 独り言（～30秒に1回くらい）
-  if (Math.random() < 0.001) {
+  // 独り言（～10秒に 1回くらい、頻繁めに喋る）
+  if (Math.random() < 0.005) {
     spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_IDLE), 'speech', 2);
   }
   if (n.abuseCooldown > 0) return;
@@ -1142,9 +1157,31 @@ function reactNpcsToBirth(w: WorldState) {
   }
 }
 
-function reactNpcsToDeath(w: WorldState, _c: Chibiwafu) {
+// 変な死に方と判定する死因（rare 指定 or 浮世離れ/哲学系など意外な死）。
+// フラナがびっくり反応（state='surprised'）を出す対象。
+const WEIRD_DEATH_CAUSES = new Set<DeathCauseId>([
+  'philosophy', 'tetsugakusha_shoushitsu', 'ukiyo_shoushitsu',
+  'bouken_cliff', 'tabikko_boundary', 'bo_meijin_tenka',
+  'mama_lost', 'taiko_tobikomi', 'kamisama_punch', 'kamisama_drown',
+  'kamisama_shake', 'kamisama_throw',
+]);
+
+function reactNpcsToDeath(w: WorldState, c: Chibiwafu) {
+  const weird = c.deathCauseId != null && WEIRD_DEATH_CAUSES.has(c.deathCauseId as DeathCauseId);
   for (const n of w.npcs) {
+    if (n.dead) continue;
     const def = NPC_DEFS[n.id];
+    // フラナは特別扱い：ほぼ毎回追悼コメント、変な死に方なら驚く
+    if (n.id === 'furana') {
+      if (weird) {
+        n.state = 'surprised';
+        n.stateTimer = 1.2;
+        spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_WEIRD_DEATH), 'speech', 2.2);
+      } else if (Math.random() < 0.45) {
+        spawnBubble(w.bubbles, n.pos, pickLine(FURANA_LINES_DEATH_REACTION), 'speech', 2);
+      }
+      continue;
+    }
     if (!def.reactOnDeath) continue;
     if (Math.random() < 0.35) {
       const pool = n.id === 'suzu' ? SUZU_LINES_DEATH : COCOON_LINES_DEATH;
