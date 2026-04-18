@@ -1232,25 +1232,53 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   triggerChance = Math.max(0.1, Math.min(0.95, triggerChance));
   if (Math.random() > triggerChance) return;
 
-  // ターゲット：mama 高い子ほど狙われやすい
-  const weights = candidates.map((c) => 1 + Math.max(0, c.params.mama - 50) * 0.03);
-  const total = weights.reduce((a, b) => a + b, 0);
-  let roll = Math.random() * total;
-  let target: Chibiwafu | undefined;
-  for (let i = 0; i < candidates.length; i++) {
-    roll -= weights[i]!;
-    if (roll < 0) { target = candidates[i]!; break; }
-  }
-  if (!target) return;
+  // ターゲット数：機嫌悪いほど "手当たり次第" になる。
+  //   mood >= 60 → 1 人
+  //   mood 35-59 → 1-2 人
+  //   mood 15-34 → 2-3 人
+  //   mood < 15  → 3-4 人（暴走）
+  let maxTargets: number;
+  if (n.mood >= 60) maxTargets = 1;
+  else if (n.mood >= 35) maxTargets = 1 + (Math.random() < 0.5 ? 1 : 0);
+  else if (n.mood >= 15) maxTargets = 2 + (Math.random() < 0.5 ? 1 : 0);
+  else maxTargets = 3 + (Math.random() < 0.5 ? 1 : 0);
+  maxTargets = Math.min(maxTargets, candidates.length);
 
-  // 機嫌に応じて撫で／殴り／ぶん投げの比率を変える。
-  // 機嫌悪いときは絶対に撫でない（患者のリクエスト）。
-  // patR は残り（1 - punchR - throwR）で暗黙に決まる
+  // ターゲット選択：mama 高い子ほど狙われやすい（重み付き抽選で重複なし）
+  const pool = candidates.slice();
+  const weights = pool.map((c) => 1 + Math.max(0, c.params.mama - 50) * 0.03);
+  const targets: Chibiwafu[] = [];
+  for (let k = 0; k < maxTargets; k++) {
+    if (pool.length === 0) break;
+    const total = weights.reduce((a, b) => a + b, 0);
+    let roll = Math.random() * total;
+    let idx = 0;
+    for (let i = 0; i < pool.length; i++) {
+      roll -= weights[i]!;
+      if (roll < 0) { idx = i; break; }
+    }
+    targets.push(pool[idx]!);
+    pool.splice(idx, 1);
+    weights.splice(idx, 1);
+  }
+  if (targets.length === 0) return;
+
+  // 機嫌に応じて撫で／殴り／ぶん投げの比率を変える（撫では機嫌良い時のみ）
   let punchR: number, throwR: number;
-  if (n.mood >= 70)      { punchR = 0.15; throwR = 0.05; }   // pat 80%
-  else if (n.mood >= 45) { punchR = 0.40; throwR = 0.15; }   // pat 45%
-  else if (n.mood >= 25) { punchR = 0.52; throwR = 0.40; }   // pat  8%
-  else                   { punchR = 0.40; throwR = 0.60; }   // pat  0%
+  if (n.mood >= 70)      { punchR = 0.15; throwR = 0.05; }
+  else if (n.mood >= 45) { punchR = 0.40; throwR = 0.15; }
+  else if (n.mood >= 25) { punchR = 0.52; throwR = 0.40; }
+  else                   { punchR = 0.40; throwR = 0.60; }
+
+  // 各ターゲットに対して行動を決めて実行
+  for (const target of targets) {
+    if (!isAlive(target)) continue;
+    applyFuranaActionTo(w, n, target, punchR, throwR);
+  }
+}
+
+// 1人のちびわふに対するフラナの行動実行（pat/punch/throw）
+function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punchR: number, throwR: number) {
   const action = Math.random();
 
   if (action < throwR) {
