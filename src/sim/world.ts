@@ -31,7 +31,7 @@ import { spawnBubble, updateBubbles, type Bubble } from './bubbles';
 import { rollTraits } from './traits';
 import { computeRank, maxBuildingLevel, upgradeCostFor, type RankContext } from './rank';
 import { landmarkList, type Landmark } from './landmarks';
-import { maybeStartChat, pickOshaberiLine } from './chats';
+import { maybeStartChat, pickOshaberiLine, pickStrikerLine, pickVictimHurtLine } from './chats';
 import { TRAIT_DEFS } from './traits';
 import {
   applyTraitBias,
@@ -574,12 +574,12 @@ function maybePunishCheeky(w: WorldState, victim: Chibiwafu) {
   const nearby = w.chibis.filter((o) => o !== victim && isAlive(o) && distance(o.pos, victim.pos) < 60);
   if (nearby.length === 0) return;
   const striker = nearby[Math.floor(Math.random() * nearby.length)]!;
-  spawnBubble(w.bubbles, striker.pos, 'なまいきわふ！', 'speech', 1.5);
-  spawnBubble(w.bubbles, victim.pos, 'ぎゃー', 'speech', 1);
+  spawnBubble(w.bubbles, striker.pos, pickStrikerLine(), 'speech', 1.5);
+  spawnBubble(w.bubbles, victim.pos, pickVictimHurtLine(), 'speech', 1);
   setState(victim, 'hurt', 1.2);
   setState(striker, 'angry', 0.8);
-  pushLife(victim, Math.floor(victim.ageSec), `生意気を言って ${striker.name} に殴られた`);
-  pushLife(striker, Math.floor(striker.ageSec), `生意気な ${victim.name} を殴った`);
+  pushLife(victim, Math.floor(victim.ageSec), `自慢して ${striker.name} に殴られた`);
+  pushLife(striker, Math.floor(striker.ageSec), `自慢屋の ${victim.name} を殴った`);
   if (Math.random() < 0.35) {
     kill(w, victim, 'namaiki_boko');
   }
