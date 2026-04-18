@@ -1456,11 +1456,11 @@ function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punc
     // 発射点のエフェクト
     spawnBubble(w.bubbles, startPos, '💫', 'stomp', 0.6);
     spawnBubble(w.bubbles, target.pos, 'とんでるわふ〜！', 'speech', 1);
-    // 飛行起動：速度 / 時間を距離から計算
-    const flightDist = Math.hypot(landX - startPos.x, landY - startPos.y);
-    const flightSec = Math.min(1.2, Math.max(0.4, flightDist / 400));
+    // 飛行起動：飛行時間は固定 0.55 秒、距離から速度が直接決まる。
+    // これで遠くに投げるほど同じ時間内により速く飛ぶ（見た目にも迫力）
+    const flightSec = 0.55;
     const vx = (landX - startPos.x) / flightSec;
-    const vy = (landY - startPos.y) / flightSec - 90 * flightSec;
+    const vy = (landY - startPos.y) / flightSec - 90 * flightSec;  // 軽い弧
     const throwDmg = n.mood < 25 ? 10 + Math.floor(Math.random() * 10) : 4 + Math.floor(Math.random() * 6);
     setState(target, 'surprised', flightSec + 0.3);
     launchFlight(target, vx, vy, flightSec, throwDmg, 'cocoon_abuse');
