@@ -534,11 +534,11 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   }
   // おしゃべり：idle 中、相手がいなくても一人で喋る
   if (c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < 0.005) {
-    spawnBubble(w.bubbles, c.pos, pickOshaberiLine(), 'speech', 1.3);
+    spawnBubble(w.bubbles, c.pos, pickOshaberiLine(c), 'speech', 1.3);
   }
-  // 全員：社交 param に応じて独り言を漏らす（aoshaberi 無くても少しは喋る）
+  // 全員：社交 param に応じて独り言を漏らす（oshaberi 無くても少しは喋る）
   if (!c.traits.includes('oshaberi') && c.state === 'idle' && c.chatCooldown <= 0 && Math.random() < derivedSoloSpeakChance(c.params)) {
-    spawnBubble(w.bubbles, c.pos, pickOshaberiLine(), 'speech', 1.2);
+    spawnBubble(w.bubbles, c.pos, pickOshaberiLine(c), 'speech', 1.2);
     c.chatCooldown = 3 + Math.random() * 3;
   }
   // 哲学者：場所関係なく突然立ち止まって空を見る（20-30秒に1回程度）
