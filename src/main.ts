@@ -145,11 +145,14 @@ async function start() {
         lastX: c.pos.x,
         lastY: c.pos.y,
         swingDistAccum: 0,
-        bubbleCooldown: 0,
+        // 最初のリアクションバブルが振り回し悲鳴で上書きされないよう、
+        // ある程度振り回すまで shake バブルを抑制する猶予を入れる。
+        bubbleCooldown: 80,
       };
       pushLife(c, Math.floor(c.ageSec), '神様に掴まれた');
-      // 掴まれた瞬間のリアクション（性格で喜ぶ／怯える／威嚇／困惑）
-      spawnBubble(world.bubbles, c.pos, pickGrabReaction(c), 'speech', 1.4);
+      // 掴まれた瞬間のリアクション（性格で喜ぶ／怯える／威嚇／困惑）。
+      // やや上に浮かべて、直後のダメージバブルと位置を分ける。
+      spawnBubble(world.bubbles, { x: c.pos.x, y: c.pos.y - 14 }, pickGrabReaction(c), 'speech', 1.8);
     }
 
     const dx = detail.worldX - dragSession.lastX;
