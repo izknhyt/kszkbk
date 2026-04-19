@@ -1271,7 +1271,8 @@ function drawFeature(f: import('../types').Feature): Container {
   const g = new Graphics();
   const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18
     : f.kind === 'house' ? 24 : f.kind === 'well' ? 20 : f.kind === 'firewatch' ? 26
-    : f.kind === 'sawmill' ? 24 : f.kind === 'shrine' ? 26 : 16;
+    : f.kind === 'sawmill' ? 24 : f.kind === 'shrine' ? 26
+    : f.kind === 'generator' ? 22 : f.kind === 'streetlamp' ? 14 : 16;
 
   // 水路の通水状態に応じて色を変える
   // 通常青 → 飽和時オレンジ赤（氾濫警告）
@@ -1301,6 +1302,8 @@ function drawFeature(f: import('../types').Feature): Container {
     firewatch: 0xb0553a,
     sawmill: 0x8d6238,
     shrine: 0xc44a4a,
+    generator: 0x7a7088,
+    streetlamp: 0x5a5240,
   };
   // 井戸：丸い石枠 + 中央に水、上に屋根
   if (f.kind === 'well') {
@@ -1353,6 +1356,50 @@ function drawFeature(f: import('../types').Feature): Container {
     g.circle(-radius + 18, radius - 2, 4).fill({ color: 0xbe8554 }).stroke({ color: 0x3a2a10, width: 1 });
     // ノコギリ光（白い線）
     g.moveTo(-4, -2).lineTo(6, -2).stroke({ color: 0xeeeeee, width: 2 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 発電所：小屋 + ペダル車輪（flow=稼働ワーカー数で回転、ここでは光の点滅で表現）
+  if (f.kind === 'generator') {
+    // 小屋外壁
+    g.rect(-radius + 2, -radius + 6, (radius - 2) * 2, radius + 6)
+      .fill({ color: 0x8a7a5a }).stroke({ color: 0x2a1a05, width: 1.5 });
+    // 屋根（切妻）
+    g.moveTo(-radius, -radius + 6).lineTo(0, -radius - 4).lineTo(radius, -radius + 6)
+      .closePath().fill({ color: 0x3a3228 }).stroke({ color: 0x1a1005, width: 1.5 });
+    // ペダル車輪（大きな歯車）
+    const wheelY = 2;
+    g.circle(0, wheelY, 9).fill({ color: kindColor.generator }).stroke({ color: 0x1a1010, width: 1.5 });
+    // スポーク（十字）
+    g.moveTo(-9, wheelY).lineTo(9, wheelY).stroke({ color: 0xc0b8a0, width: 1.5 });
+    g.moveTo(0, wheelY - 9).lineTo(0, wheelY + 9).stroke({ color: 0xc0b8a0, width: 1.5 });
+    // 稼働中は稲妻（flow>0 で黄色マーク）
+    if ((f.flow ?? 0) > 0) {
+      g.moveTo(-3, -radius + 12).lineTo(2, -radius + 16).lineTo(-1, -radius + 16).lineTo(3, -radius + 20)
+        .stroke({ color: 0xffe070, width: 2 });
+    }
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 街灯：支柱 + 電球。saturated=true で光輪を足す。
+  if (f.kind === 'streetlamp') {
+    // 稼働中：大きな光輪（半透明黄色）
+    if (f.saturated) {
+      g.circle(0, -radius + 2, radius * 1.2).fill({ color: 0xffd870, alpha: 0.18 });
+      g.circle(0, -radius + 2, radius * 0.6).fill({ color: 0xfff0a0, alpha: 0.35 });
+    }
+    // 支柱
+    g.rect(-1.5, -radius + 6, 3, radius + 4).fill({ color: 0x3a3228 }).stroke({ color: 0x1a1005, width: 1 });
+    // 台座
+    g.rect(-5, radius - 2, 10, 4).fill({ color: 0x3a3228 }).stroke({ color: 0x1a1005, width: 1 });
+    // 笠（上の蓋）
+    g.moveTo(-6, -radius + 4).lineTo(0, -radius).lineTo(6, -radius + 4).closePath()
+      .fill({ color: 0x2a2218 }).stroke({ color: 0x1a1005, width: 1 });
+    // 電球（稼働で明るい黄、停止で暗い）
+    const bulbColor = f.saturated ? 0xffeea8 : kindColor.streetlamp;
+    g.circle(0, -radius + 6, 3.2).fill({ color: bulbColor }).stroke({ color: 0x1a1005, width: 0.8 });
     c.addChild(g);
     c.position.set(f.pos.x, f.pos.y);
     return c;

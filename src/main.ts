@@ -202,21 +202,24 @@ async function start() {
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
-  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine';
+  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp';
   let buildMode: BuildKind | null = null;
   const plotBuildCosts: Record<BuildKind, { wood: number; stone: number; plank?: number }> = {
-    farm:      { wood: 2, stone: 0 },
-    channel:   { wood: 0, stone: 1 },
-    path:      { wood: 0, stone: 1 },
-    house:     { wood: 6, stone: 3 },
-    well:      { wood: 1, stone: 8 },
-    firewatch: { wood: 10, stone: 2 },
-    sawmill:   { wood: 8, stone: 4 },
-    shrine:    { wood: 3, stone: 5, plank: 2 },
+    farm:       { wood: 2, stone: 0 },
+    channel:    { wood: 0, stone: 1 },
+    path:       { wood: 0, stone: 1 },
+    house:      { wood: 6, stone: 3 },
+    well:       { wood: 1, stone: 8 },
+    firewatch:  { wood: 10, stone: 2 },
+    sawmill:    { wood: 8, stone: 4 },
+    shrine:     { wood: 3, stone: 5, plank: 2 },
+    generator:  { wood: 6, stone: 4, plank: 3 },
+    streetlamp: { wood: 2, stone: 1, plank: 1 },
   };
   const buildModeLabel: Record<BuildKind, string> = {
     farm: '畑', channel: '水路', path: '道', house: '家',
     well: '井戸', firewatch: '火の見やぐら', sawmill: '製材所', shrine: '神社',
+    generator: 'ペダル発電所', streetlamp: '街灯',
   };
   function setBuildMode(m: typeof buildMode) {
     buildMode = m;
@@ -280,6 +283,7 @@ async function start() {
     const emojiMap: Record<BuildKind, string> = {
       farm: '🌾 畑', channel: '💧 水路', path: '🛤 道', house: '🏠 家',
       well: '⛲ 井戸', firewatch: '🔥 火の見やぐら', sawmill: '🪚 製材所', shrine: '⛩ 神社',
+      generator: '⚡ ペダル発電所', streetlamp: '💡 街灯',
     };
     flashToast(`${emojiMap[buildMode]} を建てた`, 'info');
     // 建設モードは継続
@@ -530,6 +534,8 @@ async function start() {
         : f.kind === 'firewatch' ? '#b0553a'
         : f.kind === 'sawmill' ? '#8d6238'
         : f.kind === 'shrine' ? '#c44a4a'
+        : f.kind === 'generator' ? '#9a8a5a'
+        : f.kind === 'streetlamp' ? (f.saturated ? '#ffe070' : '#6a604a')
         : '#8b7048';
       mctx.fillRect(f.pos.x * sx - 2, f.pos.y * sy - 2, 4, 4);
     }

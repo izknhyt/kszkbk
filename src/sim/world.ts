@@ -129,7 +129,7 @@ export interface WorldState {
   // 水:   水源 + 水路で補給、畑にも必要（将来）
   // 木材: 伐採で得る、建物の材料
   // 石材: 石切で得る、建物の材料
-  resources: { food: number; water: number; wood: number; stone: number; plank: number };
+  resources: { food: number; water: number; wood: number; stone: number; plank: number; power: number };
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
@@ -314,7 +314,7 @@ export interface DifficultyMods {
   fatigueMul: number;      // 疲労上昇速度乗算
   obstacleCount: number;   // 初期障害物数
   eventIntervalMul: number; // 音頭/火事のインターバル乗算（大きいほど間が空く）
-  initialResources: { food: number; water: number; wood: number; stone: number; plank: number };
+  initialResources: { food: number; water: number; wood: number; stone: number; plank: number; power: number };
 }
 export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
   beginner: {
@@ -323,7 +323,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 0.75,
     obstacleCount: 50,
     eventIntervalMul: 1.5,
-    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2 },
+    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, power: 5 },
   },
   standard: {
     hazardMul: 1.0,
@@ -331,7 +331,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.0,
     obstacleCount: 90,
     eventIntervalMul: 1.0,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0 },
   },
   hell: {
     hazardMul: 1.8,
@@ -339,7 +339,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.3,
     obstacleCount: 140,
     eventIntervalMul: 0.55,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0 },
   },
 };
 export function currentMods(w: WorldState): DifficultyMods {
@@ -380,6 +380,16 @@ export function computeWateredFeatureIds(w: WorldState): Set<string> {
 const SAWMILL_WORKER_RADIUS = 45;
 const SAWMILL_PLANK_PER_SEC_PER_WORKER = 0.06;  // 1 worker で 17 秒に 1 plank
 const SAWMILL_WOOD_COST_PER_PLANK = 2;          // 木 2 → 板 1
+
+// 発電所（generator）：近くのちびわふがペダル漕ぎして power を生成。
+// 街灯（streetlamp）：夜間に power を消費して半径を照らし、オオカミ威圧＋野宿 HP ドレイン半減。
+const GENERATOR_WORKER_RADIUS = 40;
+const GENERATOR_POWER_PER_SEC_PER_WORKER = 0.3;
+const GENERATOR_WORKER_FATIGUE_PER_SEC = 0.15;
+const GENERATOR_MAX_WORKERS = 3;
+const POWER_CAPACITY = 30;
+export const STREETLAMP_RADIUS = 140;
+const STREETLAMP_POWER_PER_SEC = 0.2;
 
 export function updateInfra(w: WorldState, dt: number) {
   if (w.features.length === 0) return;
@@ -433,6 +443,49 @@ export function updateInfra(w: WorldState, dt: number) {
     // wood 不足で止まっている場合は workSec が満タンで待機
     if (f.workSec > 1) f.workSec = 1;
   }
+  // 発電所：ワーカーがペダルを漕いで power を生成、ワーカーは追加疲労。
+  for (const f of w.features) {
+    if (f.kind !== 'generator') continue;
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      if (c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= GENERATOR_WORKER_RADIUS) {
+        if (workers < GENERATOR_MAX_WORKERS) {
+          c.fatigue = Math.min(100, c.fatigue + dt * GENERATOR_WORKER_FATIGUE_PER_SEC);
+        }
+        workers++;
+      }
+    }
+    if (workers === 0) { f.flow = 0; continue; }
+    const active = Math.min(GENERATOR_MAX_WORKERS, workers);
+    const gain = dt * GENERATOR_POWER_PER_SEC_PER_WORKER * active;
+    w.resources.power = Math.min(POWER_CAPACITY, w.resources.power + gain);
+    f.flow = active;  // 描画で歯車回転速度として利用
+  }
+  // 街灯：夜間のみ稼働、power 消費。飽和フラグで「光ってるかどうか」を保持。
+  const lampActive = w.dayPhase === 'night' || w.dayPhase === 'evening';
+  for (const f of w.features) {
+    if (f.kind !== 'streetlamp') continue;
+    if (!lampActive) { f.saturated = false; continue; }
+    const need = dt * STREETLAMP_POWER_PER_SEC;
+    if (w.resources.power >= need) {
+      w.resources.power -= need;
+      f.saturated = true;  // 光っている
+    } else {
+      f.saturated = false;  // 電力切れ
+    }
+  }
+}
+
+// ちびわふが稼働中の街灯半径内に居るか。オオカミターゲット回避・夜のHPドレイン半減に使う。
+export function chibiUnderStreetlamp(w: WorldState, x: number, y: number): boolean {
+  for (const f of w.features) {
+    if (f.kind !== 'streetlamp') continue;
+    if (!f.saturated) continue;
+    if (Math.hypot(f.pos.x - x, f.pos.y - y) <= STREETLAMP_RADIUS) return true;
+  }
+  return false;
 }
 
 // 天気による畑生産倍率：乾燥/雪 完全停止、雨 加速、熱波 半減
@@ -698,6 +751,8 @@ function pickWolfTarget(w: WorldState, wolf: Wolf): Chibiwafu | null {
     // 家で寝てる子は強く忌避（家が盾）。野宿で寝てる子は好物。
     if (c.state === 'sleep' && c.homeFid) priority -= 300;
     if (c.state === 'sleep' && !c.homeFid) priority += 80;  // 寝てる野宿は狩りやすい
+    // 稼働中の街灯の明かりの下ならオオカミは警戒して避ける
+    if (chibiUnderStreetlamp(w, c.pos.x, c.pos.y)) priority -= 220;
     const d = Math.hypot(c.pos.x - wolf.pos.x, c.pos.y - wolf.pos.y);
     priority -= d * 0.04;  // 近いほど優先
     return { c, priority };
@@ -1691,8 +1746,10 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     const recoveryMul = atHome ? 1.6 : isOpenAir ? 0.4 : 1.0;
     c.fatigue = Math.max(0, c.fatigue - dt * 0.70 * recoveryMul);
     if (isOpenAir) {
-      // 野宿の寒さ HP ドレイン
-      c.hp = Math.max(0, c.hp - dt * 0.15);
+      // 野宿の寒さ HP ドレイン。街灯の明かりの下なら半減。
+      const lit = chibiUnderStreetlamp(w, c.pos.x, c.pos.y);
+      const drain = lit ? 0.075 : 0.15;
+      c.hp = Math.max(0, c.hp - dt * drain);
       if (c.hp <= 0) { kill(w, c, 'fatigue_death'); return; }
     }
   }
