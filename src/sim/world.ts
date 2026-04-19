@@ -383,6 +383,7 @@ const SAWMILL_WOOD_COST_PER_PLANK = 2;          // 木 2 → 板 1
 
 // 発電所（generator）：近くのちびわふがペダル漕ぎして power を生成。
 // 街灯（streetlamp）：夜間に power を消費して半径を照らし、オオカミ威圧＋野宿 HP ドレイン半減。
+// 電線（powerline）：発電所から街灯まで BFS で接続されていないと街灯は光らない（P2a）。
 const GENERATOR_WORKER_RADIUS = 40;
 const GENERATOR_POWER_PER_SEC_PER_WORKER = 0.3;
 const GENERATOR_WORKER_FATIGUE_PER_SEC = 0.15;
@@ -390,6 +391,50 @@ const GENERATOR_MAX_WORKERS = 3;
 const POWER_CAPACITY = 30;
 export const STREETLAMP_RADIUS = 140;
 const STREETLAMP_POWER_PER_SEC = 0.2;
+export const POWERLINE_CONNECT_RADIUS = 90;  // generator/powerline/streetlamp 間の接続距離
+
+// 発電所から電線経由で電力到達可能な街灯 id を BFS で算出。
+// O((g+p+l)²) の辺生成は powerline が 50 以下想定で十分軽い。
+export function computePoweredLampIds(w: WorldState): Set<string> {
+  const powered = new Set<string>();
+  const sources = w.features.filter((f) => f.kind === 'generator');
+  if (sources.length === 0) return powered;
+  const nodes = w.features.filter(
+    (f) => f.kind === 'generator' || f.kind === 'powerline' || f.kind === 'streetlamp',
+  );
+  // 接続判定：頂点間距離 <= POWERLINE_CONNECT_RADIUS
+  const R2 = POWERLINE_CONNECT_RADIUS * POWERLINE_CONNECT_RADIUS;
+  const adj = new Map<string, string[]>();
+  for (const n of nodes) adj.set(n.id, []);
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i]!;
+      const b = nodes[j]!;
+      const dx = a.pos.x - b.pos.x;
+      const dy = a.pos.y - b.pos.y;
+      if (dx * dx + dy * dy <= R2) {
+        adj.get(a.id)!.push(b.id);
+        adj.get(b.id)!.push(a.id);
+      }
+    }
+  }
+  // BFS from all generators
+  const visited = new Set<string>();
+  const queue: string[] = [];
+  for (const g of sources) { visited.add(g.id); queue.push(g.id); }
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  for (let head = 0; head < queue.length; head++) {
+    const id = queue[head]!;
+    const n = byId.get(id);
+    if (n?.kind === 'streetlamp') powered.add(id);
+    for (const nb of adj.get(id) ?? []) {
+      if (visited.has(nb)) continue;
+      visited.add(nb);
+      queue.push(nb);
+    }
+  }
+  return powered;
+}
 
 export function updateInfra(w: WorldState, dt: number) {
   if (w.features.length === 0) return;
@@ -463,11 +508,12 @@ export function updateInfra(w: WorldState, dt: number) {
     w.resources.power = Math.min(POWER_CAPACITY, w.resources.power + gain);
     f.flow = active;  // 描画で歯車回転速度として利用
   }
-  // 街灯：夜間のみ稼働、power 消費。飽和フラグで「光ってるかどうか」を保持。
+  // 街灯：夜間のみ稼働、接続済み & power 消費で光る。飽和フラグで「光ってるかどうか」を保持。
   const lampActive = w.dayPhase === 'night' || w.dayPhase === 'evening';
+  const poweredLamps = lampActive ? computePoweredLampIds(w) : null;
   for (const f of w.features) {
     if (f.kind !== 'streetlamp') continue;
-    if (!lampActive) { f.saturated = false; continue; }
+    if (!lampActive || !poweredLamps || !poweredLamps.has(f.id)) { f.saturated = false; continue; }
     const need = dt * STREETLAMP_POWER_PER_SEC;
     if (w.resources.power >= need) {
       w.resources.power -= need;

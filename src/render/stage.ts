@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, TextStyle, Texture } from 'pixi.js';
 import type { WorldState } from '../sim/world';
-import { getElevation } from '../sim/world';
+import { getElevation, POWERLINE_CONNECT_RADIUS } from '../sim/world';
 import type { Chibiwafu, DayPhase, HitTarget, PlacedBuilding, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
 import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
@@ -367,6 +367,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       for (const fz of world.floodZones) {
         plotLayer.addChild(drawFloodZone(fz));
       }
+      // 電力グラフのワイヤ（feature 本体の下）
+      const wires = drawPowerWires(world);
+      if (wires) plotLayer.addChild(wires);
       for (const f of world.features) {
         plotLayer.addChild(drawFeature(f));
       }
@@ -1265,6 +1268,33 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
   layer.addChild(vignette);
 }
 
+// 電力グラフのワイヤ描画。feature 本体の下レイヤに、
+// powerline/generator/streetlamp 間で接続距離以内のペアに直線を引く。
+// 稼働中の街灯に通じている辺は明るい黄色、そうでなければ灰色。
+function drawPowerWires(world: WorldState): Container | null {
+  const nodes = world.features.filter(
+    (f) => f.kind === 'powerline' || f.kind === 'generator' || f.kind === 'streetlamp',
+  );
+  if (nodes.length < 2) return null;
+  const c = new Container();
+  const g = new Graphics();
+  const R2 = POWERLINE_CONNECT_RADIUS * POWERLINE_CONNECT_RADIUS;
+  const anyLitLamp = world.features.some((f) => f.kind === 'streetlamp' && f.saturated);
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i]!;
+      const b = nodes[j]!;
+      const dx = a.pos.x - b.pos.x;
+      const dy = a.pos.y - b.pos.y;
+      if (dx * dx + dy * dy > R2) continue;
+      g.moveTo(a.pos.x, a.pos.y - 8).lineTo(b.pos.x, b.pos.y - 8);
+    }
+  }
+  g.stroke({ color: anyLitLamp ? 0xffd870 : 0x6a5848, width: 1.4, alpha: anyLitLamp ? 0.55 : 0.45 });
+  c.addChild(g);
+  return c;
+}
+
 // 開拓 feature の仮描画。kind 別に円形アイコン＋devLevel。
 function drawFeature(f: import('../types').Feature): Container {
   const c = new Container();
@@ -1272,7 +1302,8 @@ function drawFeature(f: import('../types').Feature): Container {
   const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18
     : f.kind === 'house' ? 24 : f.kind === 'well' ? 20 : f.kind === 'firewatch' ? 26
     : f.kind === 'sawmill' ? 24 : f.kind === 'shrine' ? 26
-    : f.kind === 'generator' ? 22 : f.kind === 'streetlamp' ? 14 : 16;
+    : f.kind === 'generator' ? 22 : f.kind === 'streetlamp' ? 14
+    : f.kind === 'powerline' ? 10 : 16;
 
   // 水路の通水状態に応じて色を変える
   // 通常青 → 飽和時オレンジ赤（氾濫警告）
@@ -1304,6 +1335,7 @@ function drawFeature(f: import('../types').Feature): Container {
     shrine: 0xc44a4a,
     generator: 0x7a7088,
     streetlamp: 0x5a5240,
+    powerline: 0x6a5848,
   };
   // 井戸：丸い石枠 + 中央に水、上に屋根
   if (f.kind === 'well') {
@@ -1379,6 +1411,21 @@ function drawFeature(f: import('../types').Feature): Container {
       g.moveTo(-3, -radius + 12).lineTo(2, -radius + 16).lineTo(-1, -radius + 16).lineTo(3, -radius + 20)
         .stroke({ color: 0xffe070, width: 2 });
     }
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 電線（電柱）：縦棒 + 上部横梁 + 碍子 2 個。
+  if (f.kind === 'powerline') {
+    // 支柱
+    g.rect(-1, -radius + 2, 2, radius + 4).fill({ color: kindColor.powerline }).stroke({ color: 0x1a1005, width: 0.8 });
+    // 横梁
+    g.rect(-radius + 2, -radius + 2, (radius - 2) * 2, 2).fill({ color: kindColor.powerline }).stroke({ color: 0x1a1005, width: 0.8 });
+    // 碍子（白ドット 2 個）
+    g.circle(-radius + 3, -radius + 4, 1.6).fill({ color: 0xe0dac0 });
+    g.circle(radius - 3, -radius + 4, 1.6).fill({ color: 0xe0dac0 });
+    // 台座
+    g.rect(-3, radius - 2, 6, 3).fill({ color: 0x3a3228 }).stroke({ color: 0x1a1005, width: 0.8 });
     c.addChild(g);
     c.position.set(f.pos.x, f.pos.y);
     return c;
