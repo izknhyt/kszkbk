@@ -200,9 +200,9 @@ async function start() {
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
-  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill';
+  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine';
   let buildMode: BuildKind | null = null;
-  const plotBuildCosts: Record<BuildKind, { wood: number; stone: number }> = {
+  const plotBuildCosts: Record<BuildKind, { wood: number; stone: number; plank?: number }> = {
     farm:      { wood: 2, stone: 0 },
     channel:   { wood: 0, stone: 1 },
     path:      { wood: 0, stone: 1 },
@@ -210,10 +210,11 @@ async function start() {
     well:      { wood: 1, stone: 8 },
     firewatch: { wood: 10, stone: 2 },
     sawmill:   { wood: 8, stone: 4 },
+    shrine:    { wood: 3, stone: 5, plank: 2 },
   };
   const buildModeLabel: Record<BuildKind, string> = {
     farm: '畑', channel: '水路', path: '道', house: '家',
-    well: '井戸', firewatch: '火の見やぐら', sawmill: '製材所',
+    well: '井戸', firewatch: '火の見やぐら', sawmill: '製材所', shrine: '神社',
   };
   function setBuildMode(m: typeof buildMode) {
     buildMode = m;
@@ -259,18 +260,24 @@ async function start() {
       return;
     }
     const cost = plotBuildCosts[buildMode];
-    if (world.resources.wood < cost.wood || world.resources.stone < cost.stone) {
-      flashToast(`資源不足 (🪵${cost.wood} 🪨${cost.stone})`, 'info');
+    const plankCost = cost.plank ?? 0;
+    if (world.resources.wood < cost.wood || world.resources.stone < cost.stone || world.resources.plank < plankCost) {
+      const parts: string[] = [];
+      if (cost.wood > 0) parts.push(`🪵${cost.wood}`);
+      if (cost.stone > 0) parts.push(`🪨${cost.stone}`);
+      if (plankCost > 0) parts.push(`🪚${plankCost}`);
+      flashToast(`資源不足 (${parts.join(' ')})`, 'info');
       return;
     }
     world.resources.wood -= cost.wood;
     world.resources.stone -= cost.stone;
+    world.resources.plank -= plankCost;
     // feature 追加（id はランダム）
     const id = `feat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     world.features.push({ id, pos: { x, y }, kind: buildMode, devLevel: 2, workSec: 0 });
     const emojiMap: Record<BuildKind, string> = {
       farm: '🌾 畑', channel: '💧 水路', path: '🛤 道', house: '🏠 家',
-      well: '⛲ 井戸', firewatch: '🔥 火の見やぐら', sawmill: '🪚 製材所',
+      well: '⛲ 井戸', firewatch: '🔥 火の見やぐら', sawmill: '🪚 製材所', shrine: '⛩ 神社',
     };
     flashToast(`${emojiMap[buildMode]} を建てた`, 'info');
     // 建設モードは継続
@@ -511,12 +518,16 @@ async function start() {
     for (const o of world.obstacles) {
       mctx.fillRect(o.pos.x * sx - 1, o.pos.y * sy - 1, 2, 2);
     }
-    // feature：水源青・水路水色・畑緑・道茶・家赤茶
+    // feature：水源青・水路水色・畑緑・道茶・家赤茶・井戸水色・火の見赤・製材所茶
     for (const f of world.features) {
       mctx.fillStyle = f.kind === 'water' ? '#3a6ea0'
         : f.kind === 'channel' ? '#6ba2d2'
         : f.kind === 'farm' ? '#6ea241'
         : f.kind === 'house' ? '#b85a3a'
+        : f.kind === 'well' ? '#4a7898'
+        : f.kind === 'firewatch' ? '#b0553a'
+        : f.kind === 'sawmill' ? '#8d6238'
+        : f.kind === 'shrine' ? '#c44a4a'
         : '#8b7048';
       mctx.fillRect(f.pos.x * sx - 2, f.pos.y * sy - 2, 4, 4);
     }
@@ -524,6 +535,12 @@ async function start() {
     mctx.fillStyle = '#f8f0d0';
     for (const c of world.chibis) {
       mctx.fillRect(c.pos.x * sx - 1, c.pos.y * sy - 1, 2, 2);
+    }
+    // オオカミ（赤点、夜間危険度マーカー）
+    mctx.fillStyle = '#ff3322';
+    for (const wolf of world.wolves) {
+      if (wolf.state === 'dead') continue;
+      mctx.fillRect(wolf.pos.x * sx - 2, wolf.pos.y * sy - 2, 4, 4);
     }
     // NPC：フラナ白大・ココン橙・スズ桃・ルー灰
     for (const n of world.npcs) {

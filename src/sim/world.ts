@@ -1635,9 +1635,18 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   const toughMul = 1 - Math.max(0, c.params.tough - 50) * 0.006;  // tough100=0.7倍
   const mods = DIFFICULTY_MODS[w.difficulty];
   const wmods = weatherChibiMods(w.weather.kind);
-  c.hunger += dt * 1.2 * toughMul * mods.hungerMul * wmods.hungerMul;
+  // 神社（shrine）半径 200px 以内は士気ボーナスで空腹・疲労が -30%
+  let shrineMul = 1.0;
+  for (const f of w.features) {
+    if (f.kind !== 'shrine') continue;
+    if (Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= 200) {
+      shrineMul = 0.7;
+      break;
+    }
+  }
+  c.hunger += dt * 1.2 * toughMul * mods.hungerMul * wmods.hungerMul * shrineMul;
   // sleep 以外は疲労が溜まる（hurt/cry でも休息にならない）
-  if (c.state !== 'sleep') c.fatigue += dt * 0.55 * toughMul * mods.fatigueMul * wmods.fatigueMul;
+  if (c.state !== 'sleep') c.fatigue += dt * 0.55 * toughMul * mods.fatigueMul * wmods.fatigueMul * shrineMul;
   // 寒冷天候では HP が軽くドレイン（凍傷）
   if (wmods.coldHpDrain > 0 && c.state !== 'sleep') {
     c.hp = Math.max(0, c.hp - dt * wmods.coldHpDrain);

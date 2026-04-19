@@ -158,7 +158,7 @@ export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
 // フリー配置の開拓要素（水源・水路・畑・道）。
 // タイル/グリッド無しで任意の座標に置ける。水の伝播は距離ベースで判定。
-export type FeatureKind = 'water' | 'channel' | 'path' | 'farm' | 'house' | 'well' | 'firewatch' | 'sawmill';
+export type FeatureKind = 'water' | 'channel' | 'path' | 'farm' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine';
 
 export interface Feature {
   id: string;

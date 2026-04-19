@@ -1271,7 +1271,7 @@ function drawFeature(f: import('../types').Feature): Container {
   const g = new Graphics();
   const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18
     : f.kind === 'house' ? 24 : f.kind === 'well' ? 20 : f.kind === 'firewatch' ? 26
-    : f.kind === 'sawmill' ? 24 : 16;
+    : f.kind === 'sawmill' ? 24 : f.kind === 'shrine' ? 26 : 16;
 
   // 水路の通水状態に応じて色を変える
   // 通常青 → 飽和時オレンジ赤（氾濫警告）
@@ -1300,6 +1300,7 @@ function drawFeature(f: import('../types').Feature): Container {
     well:    0x4a7898,
     firewatch: 0xb0553a,
     sawmill: 0x8d6238,
+    shrine: 0xc44a4a,
   };
   // 井戸：丸い石枠 + 中央に水、上に屋根
   if (f.kind === 'well') {
@@ -1316,6 +1317,24 @@ function drawFeature(f: import('../types').Feature): Container {
     // 波紋マーク
     g.moveTo(-radius * 0.5, -2).lineTo(-radius * 0.15, -5).lineTo(radius * 0.15, -2).lineTo(radius * 0.5, -5)
       .stroke({ color: 0xffffff, width: 1.5, alpha: 0.7 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 神社：赤い鳥居 + 石階段
+  if (f.kind === 'shrine') {
+    // 石階段（下段）
+    g.rect(-radius + 2, radius - 4, (radius - 2) * 2, 6).fill({ color: 0xbbb0a0 }).stroke({ color: 0x3a2a10, width: 1 });
+    g.rect(-radius + 6, radius - 10, (radius - 6) * 2, 6).fill({ color: 0xd0c4b0 }).stroke({ color: 0x3a2a10, width: 1 });
+    // 鳥居の柱（2本）
+    g.rect(-radius + 8, -radius + 4, 4, radius + 2).fill({ color: kindColor.shrine }).stroke({ color: 0x5a1005, width: 1.5 });
+    g.rect(radius - 12, -radius + 4, 4, radius + 2).fill({ color: kindColor.shrine }).stroke({ color: 0x5a1005, width: 1.5 });
+    // 上部の横木（笠木）
+    g.rect(-radius - 2, -radius + 4, (radius + 2) * 2, 5).fill({ color: kindColor.shrine }).stroke({ color: 0x5a1005, width: 1.5 });
+    // その下の横木（貫）
+    g.rect(-radius + 4, -radius + 10, (radius - 4) * 2, 3).fill({ color: kindColor.shrine }).stroke({ color: 0x5a1005, width: 1 });
+    // 中央の短冊（紙垂）
+    g.rect(-1.5, -radius + 12, 3, 8).fill({ color: 0xffffff }).stroke({ color: 0x3a2a10, width: 0.8 });
     c.addChild(g);
     c.position.set(f.pos.x, f.pos.y);
     return c;
