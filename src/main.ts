@@ -40,15 +40,116 @@ import {
   type NpcState,
 } from './sim/npcs';
 import type { Chibiwafu, HitTarget, VillageRank } from './types';
-import { clearSave, load, save } from './meta/save';
+import { clearSave, listSlots, load, save, type SlotId } from './meta/save';
 import { CONFIG, type TimeScale } from './config';
 import { DEATH_CAUSES } from './sim/deaths';
+import type { Difficulty } from './types';
+
+const DIFFICULTY_LABEL: Record<Difficulty, string> = {
+  beginner: '初心者',
+  standard: '標準',
+  hell: '地獄',
+};
+
+// スタート画面：3 スロット表示、既存セーブは RESUME 可、空は NEW で難度選択
+function showStartScreen(): Promise<{ slot: SlotId; difficulty: Difficulty; resume: boolean }> {
+  return new Promise((resolve) => {
+    const screen = document.getElementById('start-screen')!;
+    const slotsEl = document.getElementById('slot-cards')!;
+    const diffChooser = document.getElementById('difficulty-chooser')!;
+    const diffCancel = document.getElementById('diff-cancel')!;
+    screen.classList.remove('hidden');
+    diffChooser.classList.add('hidden');
+    let pendingSlot: SlotId | null = null;
+
+    function renderSlots() {
+      const slots = listSlots();
+      slotsEl.innerHTML = '';
+      for (const s of slots) {
+        const card = document.createElement('div');
+        card.className = 'slot-card';
+        const h = document.createElement('h3');
+        h.textContent = `スロット ${s.slot}`;
+        card.appendChild(h);
+        const info = document.createElement('div');
+        info.className = 'slot-info';
+        if (s.exists) {
+          const mins = Math.floor((s.timeSec || 0) / 60);
+          info.textContent =
+            `難度：${s.difficulty ? DIFFICULTY_LABEL[s.difficulty] : '—'}\n` +
+            `時間：${mins}分\n` +
+            `死者：${s.totalDeaths || 0}\n` +
+            `誕生：${s.totalBirths || 0}`;
+        } else {
+          info.textContent = '空きスロット';
+          info.style.color = '#a89060';
+        }
+        card.appendChild(info);
+        const actions = document.createElement('div');
+        actions.className = 'slot-actions';
+        if (s.exists) {
+          const btnResume = document.createElement('button');
+          btnResume.textContent = '再開';
+          btnResume.addEventListener('click', () => {
+            screen.classList.add('hidden');
+            resolve({ slot: s.slot, difficulty: s.difficulty ?? 'standard', resume: true });
+          });
+          actions.appendChild(btnResume);
+          const btnDelete = document.createElement('button');
+          btnDelete.textContent = '削除';
+          btnDelete.className = 'danger';
+          btnDelete.addEventListener('click', () => {
+            if (confirm(`スロット ${s.slot} を削除？`)) {
+              clearSave(s.slot);
+              renderSlots();
+            }
+          });
+          actions.appendChild(btnDelete);
+        } else {
+          const btnNew = document.createElement('button');
+          btnNew.textContent = '新規ラン';
+          btnNew.addEventListener('click', () => {
+            pendingSlot = s.slot;
+            diffChooser.classList.remove('hidden');
+          });
+          actions.appendChild(btnNew);
+        }
+        card.appendChild(actions);
+        slotsEl.appendChild(card);
+      }
+    }
+
+    renderSlots();
+
+    diffChooser.querySelectorAll<HTMLButtonElement>('.diff-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (pendingSlot == null) return;
+        const d = btn.dataset.difficulty as Difficulty;
+        screen.classList.add('hidden');
+        resolve({ slot: pendingSlot, difficulty: d, resume: false });
+      });
+    });
+    diffCancel.addEventListener('click', () => {
+      diffChooser.classList.add('hidden');
+      pendingSlot = null;
+    });
+  });
+}
 
 async function start() {
+  // スタート画面でスロット + 難度を決めてから world を作る
+  const startResult = await showStartScreen();
+  const currentSlot: SlotId = startResult.slot;
   const host = document.getElementById('stage') as HTMLElement;
-  const world = createWorld();
-  load(world);
+  const world = createWorld(startResult.difficulty);
+  if (startResult.resume) load(world, currentSlot);
   ensurePlots(world);
+  // HUD 難度バッジ
+  const diffBadge = document.getElementById('stat-difficulty');
+  if (diffBadge) {
+    diffBadge.textContent = DIFFICULTY_LABEL[world.difficulty];
+    diffBadge.className = 'stat-difficulty ' + world.difficulty;
+  }
 
   const stage = await createStage(host);
   stage.app.renderer.on('resize', (w: number, h: number) => {
@@ -69,12 +170,12 @@ async function start() {
     onFire: () => triggerFire(world),
     onSpawn: () => forceSpawn(world),
     onSave: () => {
-      save(world);
-      flashToast('セーブしました', 'info');
+      save(world, currentSlot);
+      flashToast(`スロット${currentSlot}にセーブ`, 'info');
     },
     onReset: () => {
       skipUnloadSave = true;
-      clearSave();
+      clearSave(currentSlot);
       location.reload();
     },
     onSpeed: (n) => {
@@ -423,7 +524,7 @@ async function start() {
     }
     lastSave += dtReal;
     if (lastSave >= CONFIG.AUTOSAVE_SEC) {
-      save(world);
+      save(world, currentSlot);
       lastSave = 0;
     }
     requestAnimationFrame(loop);
@@ -435,7 +536,7 @@ async function start() {
   let skipUnloadSave = false;
   const saveOnUnload = () => {
     if (skipUnloadSave) return;
-    save(world);
+    save(world, currentSlot);
   };
   window.addEventListener('beforeunload', saveOnUnload);
 }

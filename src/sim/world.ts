@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Feature, FlightState, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -97,6 +97,10 @@ export interface DeathLogEntry {
 }
 
 export interface WorldState {
+  // ラン識別子・難度・開始時刻（ローグライクで run ごとに分ける）
+  runId: string;
+  runStartedAtMs: number;
+  difficulty: Difficulty;
   tick: number;
   timeSec: number;
   secondsPerSeason: number;
@@ -272,9 +276,12 @@ function createDex(): Record<DeathCauseId, DexEntry> {
   return out;
 }
 
-export function createWorld(): WorldState {
+export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
   const bounds = { w: CONFIG.WORLD_W, h: CONFIG.WORLD_H };
   return {
+    runId: `run-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000).toString(36)}`,
+    runStartedAtMs: Date.now(),
+    difficulty,
     tick: 0,
     timeSec: 0,
     secondsPerSeason: CONFIG.SECONDS_PER_SEASON,

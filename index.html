@@ -8,13 +8,35 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <!-- Start screen: slot selector + difficulty chooser -->
+    <div id="start-screen" class="start-screen">
+      <div class="start-card">
+        <h1 class="start-title">くそざこ村</h1>
+        <div class="start-sub">セーブスロットを選んでラン開始</div>
+        <div id="slot-cards" class="slot-cards"></div>
+        <div id="difficulty-chooser" class="difficulty-chooser hidden">
+          <div class="start-sub">難度を選べ</div>
+          <button class="diff-btn" data-difficulty="beginner">
+            <b>初心者</b><small>普通の村シム級、建て直し余裕あり</small>
+          </button>
+          <button class="diff-btn" data-difficulty="standard">
+            <b>標準（激ムズ）</b><small>設計基準、常に対応追われる</small>
+          </button>
+          <button class="diff-btn" data-difficulty="hell">
+            <b>くそざこ地獄</b><small>無理ゲー、連鎖災害で秒全滅</small>
+          </button>
+          <button id="diff-cancel" class="diff-cancel">キャンセル</button>
+        </div>
+      </div>
+    </div>
+
     <div id="app">
       <div id="stage"></div>
       <aside id="hud">
         <header id="hud-header">
           <div class="hud-title-row">
             <div class="hud-title">くそざこ村</div>
-            <div class="rank-badge"><span>ランク</span><b id="stat-rank">村</b><span class="rank-lv">Lv<b id="stat-village-lv">1</b></span></div>
+            <div class="rank-badge"><span>ランク</span><b id="stat-rank">村</b><span class="rank-lv">Lv<b id="stat-village-lv">1</b></span><span id="stat-difficulty" class="stat-difficulty">標準</span></div>
           </div>
           <div class="rank-progress-row">
             <div id="rank-progress">初期状態</div>

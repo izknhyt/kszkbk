@@ -157,6 +157,135 @@ html, body {
   margin-top: 4px;
 }
 
+/* === Start screen (slot & difficulty) === */
+.start-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #2a1d12, #4a2f1b);
+  color: #f6e4c4;
+  font-family: sans-serif;
+}
+.start-screen.hidden { display: none; }
+.start-card {
+  background: rgba(38, 24, 14, 0.94);
+  border: 2px solid #7a5a30;
+  border-radius: 18px;
+  padding: 28px 36px;
+  max-width: 640px;
+  width: 92%;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+}
+.start-title {
+  margin: 0 0 6px 0;
+  font-size: 28px;
+  letter-spacing: 0.1em;
+  color: #ffd580;
+}
+.start-sub {
+  font-size: 13px;
+  color: #d8c8a0;
+  margin-bottom: 14px;
+}
+.slot-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.slot-card {
+  background: rgba(248, 238, 210, 0.08);
+  border: 1px solid #a98a60;
+  border-radius: 10px;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 148px;
+}
+.slot-card h3 {
+  margin: 0 0 2px 0;
+  font-size: 14px;
+  color: #ffd580;
+}
+.slot-info {
+  font-size: 11px;
+  color: #c0b090;
+  min-height: 44px;
+  white-space: pre-wrap;
+}
+.slot-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: auto;
+}
+.slot-actions button {
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid #a98a60;
+  background: #f8eecb;
+  color: #3a2a1a;
+  font-weight: bold;
+}
+.slot-actions button.danger {
+  background: #8a3a2a;
+  color: #ffe;
+  border-color: #7a2a1a;
+}
+.difficulty-chooser {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.difficulty-chooser.hidden { display: none; }
+.diff-btn {
+  padding: 10px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid #a98a60;
+  background: #f8eecb;
+  color: #3a2a1a;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+}
+.diff-btn b { font-size: 14px; }
+.diff-btn small { font-size: 11px; color: #6a5020; }
+.diff-btn[data-difficulty="hell"] { background: #8a3a2a; color: #ffe; border-color: #7a2a1a; }
+.diff-btn[data-difficulty="hell"] small { color: #ffb090; }
+.diff-cancel {
+  padding: 6px 12px;
+  font-size: 11px;
+  background: transparent;
+  color: #d8c8a0;
+  border: 1px solid #a98a60;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* 難度バッジ（HUD） */
+.stat-difficulty {
+  margin-left: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  border-radius: 3px;
+  background: #f0c060;
+  color: #3a2a1a;
+  font-weight: bold;
+}
+.stat-difficulty.beginner { background: #7ac87a; }
+.stat-difficulty.standard { background: #f0c060; }
+.stat-difficulty.hell { background: #c84040; color: #fff; }
+
 .build-section {
   padding: 6px;
   margin: 4px 0;
