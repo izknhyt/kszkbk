@@ -503,13 +503,16 @@ export function updateFloodZones(w: WorldState, dt: number): void {
   // 溢れている水路から新規氾濫セル生成
   for (const f of w.features) {
     if (!f.saturated) continue;
-    // 同一水路の近くにすでにセルがあれば生成頻度を下げる
+    // 同一水路の最新セルが FLOOD_SPAWN_INTERVAL 未満なら新規スポーン抑止
+    // （Math.min で古い方を見ていたため毎tick spawn → 配列膨張で性能死のバグ修正）
     const nearby = w.floodZones.filter((fz) => fz.sourceFid === f.id);
     if (nearby.length > 0) {
-      // 最古のセルが FLOOD_SPAWN_INTERVAL 以上経過していれば追加
-      const oldest = Math.min(...nearby.map((fz) => fz.remainingSec));
-      if (oldest > FLOOD_LIFE_SEC - FLOOD_SPAWN_INTERVAL) continue;
+      const youngest = Math.max(...nearby.map((fz) => fz.remainingSec));
+      // 最新セルが「まだ 4s 経っていない」= remainingSec > 25-4=21 ならスキップ
+      if (youngest > FLOOD_LIFE_SEC - FLOOD_SPAWN_INTERVAL) continue;
     }
+    // 同一水路で同時に持てるセル上限（暴走防止のハードリミット）
+    if (nearby.length >= 6) continue;
     // 水路の少し周囲にランダムオフセット
     const angle = Math.random() * Math.PI * 2;
     const off = 8 + Math.random() * 14;
@@ -1229,9 +1232,49 @@ const HOUSE_MAX_WALK_DIST = 1400;
 // 各家の現在使用人数を数える（O(chibis)）。夜開始時 or 10秒おきに呼ぶ前提。
 function isAtHome(w: WorldState, c: Chibiwafu): boolean {
   if (!c.homeFid) return false;
-  const h = w.features.find((f) => f.id === c.homeFid);
+  const h = featureById(w, c.homeFid);
   if (!h) return false;
   return Math.hypot(h.pos.x - c.pos.x, h.pos.y - c.pos.y) <= HOUSE_ARRIVAL_RADIUS;
+}
+
+// feature id → Feature のキャッシュ。ホットパス（updateChibi 内で
+// 200+ chibi × 2 呼び出し）で w.features.find の O(n) を避ける。
+// 配列参照 + length で差分検知、要素追加/削除があれば自動再構築。
+let _featureIdCache: { features: Feature[]; len: number; map: Map<string, Feature> } | null = null;
+function featureById(w: WorldState, id: string): Feature | undefined {
+  if (!_featureIdCache
+      || _featureIdCache.features !== w.features
+      || _featureIdCache.len !== w.features.length) {
+    const map = new Map<string, Feature>();
+    for (const f of w.features) map.set(f.id, f);
+    _featureIdCache = { features: w.features, len: w.features.length, map };
+  }
+  return _featureIdCache.map.get(id);
+}
+
+// 毎 tick 同じ値になるワーカー入力（畑/農耕舎/太鼓/障害物の位置リスト）を
+// chibi ごとに filter/map し直すと O(chibis × features) で高くつく。tick 単位にキャッシュ。
+interface WanderEnvCache {
+  tick: number;
+  farmPositions: Vec2[];
+  noukouPositions: Vec2[];
+  taikoPositions: Vec2[];
+  obstaclePositions: Vec2[];
+}
+let _wanderEnvCache: WanderEnvCache | null = null;
+function getWanderEnv(w: WorldState): WanderEnvCache {
+  if (_wanderEnvCache && _wanderEnvCache.tick === w.tick) return _wanderEnvCache;
+  const farmPositions: Vec2[] = [];
+  for (const f of w.features) if (f.kind === 'farm') farmPositions.push(f.pos);
+  const noukouPositions: Vec2[] = [];
+  const taikoPositions: Vec2[] = [];
+  for (const b of w.buildings) {
+    if (b.defId === 'noukou') noukouPositions.push(b.pos);
+    else if (b.defId === 'taiko') taikoPositions.push(b.pos);
+  }
+  const obstaclePositions: Vec2[] = w.obstacles.map((o) => o.pos);
+  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions };
+  return _wanderEnvCache;
 }
 
 function countHomeOccupants(w: WorldState): Map<string, number> {
@@ -1325,7 +1368,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   }
   // 夕夜の帰宅 AI：家があれば target を家にセット、到着で sleep に入る
   if ((w.dayPhase === 'evening' || w.dayPhase === 'night') && c.state === 'idle' && c.homeFid) {
-    const home = w.features.find((f) => f.id === c.homeFid);
+    const home = featureById(w, c.homeFid);
     if (home) {
       const d = Math.hypot(home.pos.x - c.pos.x, home.pos.y - c.pos.y);
       if (d <= HOUSE_ARRIVAL_RADIUS) {
@@ -1528,15 +1571,16 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   // 移動（止まってるステート中は動かない）
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
     const cocoon = w.npcs.find((n) => n.id === 'cocoon');
+    const env = getWanderEnv(w);
     const announcementKey = wanderStep(c, dt, w.bounds, {
       landmarks: w.landmarks,
       season: w.season,
       furana: w.furanaPos,
       cocoonPos: cocoon ? cocoon.pos : null,
-      noukouPositions: w.buildings.filter((b) => b.defId === 'noukou').map((b) => b.pos),
-      taikoPositions: w.buildings.filter((b) => b.defId === 'taiko').map((b) => b.pos),
-      obstaclePositions: w.obstacles.map((o) => o.pos),
-      farmPositions: w.features.filter((f) => f.kind === 'farm').map((f) => ({ x: f.pos.x, y: f.pos.y })),
+      noukouPositions: env.noukouPositions,
+      taikoPositions: env.taikoPositions,
+      obstaclePositions: env.obstaclePositions,
+      farmPositions: env.farmPositions,
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {
@@ -2324,9 +2368,11 @@ export function tickWorld(w: WorldState, dt: number) {
   scheduleEvents(w, dt);
   resolveEvent(w, dt);
   const hazards = getActiveHazards(w);
-  // 住居割当：家が足りないちびわふに最寄りの空き家を紐付ける（tick 毎）
-  const homeOccupants = countHomeOccupants(w);
-  for (const c of w.chibis) if (isAlive(c)) assignHomeIfNeeded(w, c, homeOccupants);
+  // 住居割当：2 秒毎（20Hz * 2 = 40 ticks）に 1 回だけスキャン。毎 tick は過剰。
+  if (w.tick % 40 === 0) {
+    const homeOccupants = countHomeOccupants(w);
+    for (const c of w.chibis) if (isAlive(c)) assignHomeIfNeeded(w, c, homeOccupants);
+  }
   for (const c of w.chibis) updateChibi(w, c, dt, hazards);
   // ちびわふ移動後に空間分割ハッシュを再構築（以降の近傍検索はこれを使う）
   w.chibiHash.rebuild(w.chibis.filter(isAlive));
