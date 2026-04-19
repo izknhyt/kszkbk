@@ -2,6 +2,7 @@
 name: balance-tester
 description: くそざこ村の headless シミュレーションを回してバランス所見を返す。死因分布、食料収支、ちびわふ頭数推移、難度別の生存率などをまとめる。数値調整前後の比較にも使える。
 tools: Bash, Read, Grep
+model: haiku
 ---
 
 # くそざこ村 balance-tester
