@@ -7,7 +7,6 @@ import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
 import type { Bubble } from '../sim/bubbles';
 import { TRAIT_DEFS } from '../sim/traits';
 import { CONFIG } from '../config';
-import { landmarkActive, type Landmark, type LandmarkKind } from '../sim/landmarks';
 import { frameFor, loadSpriteLibrary, type SpriteLibrary } from './sprites';
 
 const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number; accents: number }> = {
@@ -68,18 +67,9 @@ interface BubbleView {
 interface EnvironmentArt {
   background: Texture | null;
   buildingFrames: Partial<Record<PlacedBuilding['defId'], Texture>>;
-  landmarkFrames: Partial<Record<LandmarkKind, Texture>>;
 }
 
 const BUILDING_FRAME_ORDER: PlacedBuilding['defId'][] = ['noukou', 'kouba', 'hakaba', 'taiko', 'ubuya'];
-const LANDMARK_FRAME_ORDER: LandmarkKind[] = [
-  'stonebread_rock',
-  'philosophy_stone',
-  'mudwater_pool',
-  'beer_barrel',
-  'flower_patch',
-  'kusozako_totem',
-];
 
 export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const app = new Application();
@@ -110,8 +100,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   app.stage.addChild(cameraLayer);
 
   const bgLayer = new Container();
-  const plotLayer = new Container();  // 開拓プロット（地面レイヤの上、ランドマーク下）
-  const landmarkLayer = new Container();
+  const plotLayer = new Container();  // 開拓プロット（地面レイヤの上）
   const buildingLayer = new Container();
   const eventUnderLayer = new Container(); // 下レイヤ（ring／disk）
   const corpseLayer = new Container();
@@ -121,7 +110,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const fxLayer = new Container();
   const eventOverLayer = new Container(); // 上レイヤ（火炎／粉塵）
   cameraLayer.addChild(
-    bgLayer, plotLayer, landmarkLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, wolfLayer, fxLayer, eventOverLayer,
+    bgLayer, plotLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, wolfLayer, fxLayer, eventOverLayer,
   );
 
   const lib = await loadSpriteLibrary('/chibiwafu.png', '/chibiwafu');
@@ -372,15 +361,6 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
       for (const obs of world.obstacles) {
         plotLayer.addChild(drawObstacle(obs));
-      }
-    }
-
-    // landmarks：季節変化時のみ再構築（静的 POI は毎フレーム再生成不要）
-    if (drawFrameCount % 3 === 0) {
-      destroyAllChildren(landmarkLayer);
-      for (const lm of world.landmarks) {
-        if (!landmarkActive(lm, world.season)) continue;
-        landmarkLayer.addChild(drawLandmark(lm, envArt));
       }
     }
 
@@ -675,7 +655,6 @@ async function loadEnvironmentArt(): Promise<EnvironmentArt> {
   const art: EnvironmentArt = {
     background: null,
     buildingFrames: {},
-    landmarkFrames: {},
   };
 
   // Ω-2 時点：3200×1800 の広大マップにラスタ画像は合わないため procedural 固定。
@@ -694,25 +673,6 @@ async function loadEnvironmentArt(): Promise<EnvironmentArt> {
     });
   } catch (err) {
     console.warn('[stage] building art load failed, keeping procedural buildings', err);
-  }
-
-  try {
-    const propsSheet = await loadImage('/mockup/props.png');
-    const base = textureFromProcessedCanvas(propsSheet);
-    const cols = 3;
-    const rows = 3;
-    const cellW = Math.floor(propsSheet.width / cols);
-    const cellH = Math.floor(propsSheet.height / rows);
-    LANDMARK_FRAME_ORDER.forEach((kind, index) => {
-      const row = Math.floor(index / cols);
-      const col = index % cols;
-      art.landmarkFrames[kind] = new Texture({
-        source: base.source,
-        frame: new Rectangle(col * cellW, row * cellH, cellW, cellH),
-      });
-    });
-  } catch (err) {
-    console.warn('[stage] landmark art load failed, keeping procedural landmarks', err);
   }
 
   return art;
@@ -1439,77 +1399,6 @@ function drawObstacle(o: import('../types').Obstacle): Container {
   bar.rect(-bw / 2, -size - 5, bw * pct, 2).fill({ color: 0xff7a3a });
   c.addChild(bar);
   c.position.set(o.pos.x, o.pos.y);
-  return c;
-}
-
-function drawLandmark(lm: Landmark, envArt: EnvironmentArt): Container {
-  const c = new Container();
-  c.position.set(lm.pos.x, lm.pos.y);
-  c.addChild(drawGroundShadow(18, 6, 9, 0.14));
-  const artTexture = envArt.landmarkFrames[lm.kind];
-  if (artTexture) {
-    const sprite = new Sprite(artTexture);
-    sprite.anchor.set(0.5, 0.7);
-    sprite.scale.set(52 / Math.max(artTexture.width, 1));
-    c.addChild(sprite);
-  } else {
-    const g = new Graphics();
-    switch (lm.kind) {
-      case 'stonebread_rock': {
-        g.ellipse(0, 0, 24, 14).fill({ color: 0x8c8378 }).stroke({ color: 0x3a2a1a, width: 2 });
-        g.ellipse(-8, -8, 11, 7).fill({ color: 0x6d6050 }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.roundRect(-10, -18, 20, 7, 3).fill({ color: 0xd0a36a }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.rect(-8, -18, 16, 2).fill({ color: 0x8f5a2e, alpha: 0.7 });
-        break;
-      }
-      case 'philosophy_stone': {
-        g.roundRect(-9, -26, 18, 30, 5).fill({ color: 0x6e6b79 }).stroke({ color: 0x3a2a1a, width: 2 });
-        g.rect(-5, -18, 10, 3).fill({ color: 0x353744 });
-        g.circle(0, -7, 2).fill({ color: 0xf0e8d2 });
-        break;
-      }
-      case 'mudwater_pool': {
-        g.ellipse(0, 0, 30, 12).fill({ color: 0x5c4422, alpha: 0.9 }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.ellipse(-7, -3, 9, 3).fill({ color: 0x8a6a42, alpha: 0.5 });
-        g.circle(9, -2, 2).fill({ color: 0xdcbf87, alpha: 0.55 });
-        break;
-      }
-      case 'beer_barrel': {
-        g.rect(-10, -14, 20, 22).fill({ color: 0x8a5a2b }).stroke({ color: 0x3a2a1a, width: 2 });
-        g.rect(-10, -10, 20, 2).fill({ color: 0x3a2a1a });
-        g.rect(-10, 2, 20, 2).fill({ color: 0x3a2a1a });
-        g.ellipse(0, -14, 10, 3).fill({ color: 0x4a3422 });
-        g.circle(12, -4, 3).fill({ color: 0xf2e2ad });
-        break;
-      }
-      case 'flower_patch': {
-        for (let i = 0; i < 5; i++) {
-          const a = (i / 5) * Math.PI * 2;
-          const x = Math.cos(a) * 8;
-          const y = Math.sin(a) * 6;
-          g.circle(x, y, 3).fill({ color: 0xf5b6c0 });
-          g.circle(x, y, 1).fill({ color: 0xffd35a });
-        }
-        g.circle(0, 0, 2).fill({ color: 0x9abf61 });
-        break;
-      }
-      case 'kusozako_totem': {
-        g.rect(-2, -30, 4, 34).fill({ color: 0x6b4a2b }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.rect(-8, -30, 16, 6).fill({ color: 0xe8735a }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.rect(-6, -18, 12, 4).fill({ color: 0xffd35a }).stroke({ color: 0x3a2a1a, width: 1 });
-        break;
-      }
-    }
-    c.addChild(g);
-  }
-  const label = new Text({
-    text: lm.label,
-    style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 9, fill: 0x3a2a1a, fontStyle: 'italic' }),
-  });
-  label.anchor.set(0.5, 0);
-  label.position.set(0, 12);
-  label.alpha = 0.6;
-  c.addChild(label);
   return c;
 }
 

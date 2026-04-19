@@ -83,7 +83,7 @@ export const HAZARDS: HazardZone[] = [
     ratePerSec: 0.006,
     bypassSafeZone: true,
     traitMultipliers: { gourmand: 2.0, shinpai: 0.5 },
-    note: '拾った石パンで歯折れ（食いしん坊2倍／心配性は避ける）',
+    note: '拾った木の実で歯折れ（食いしん坊2倍／心配性は避ける）',
   },
   {
     id: 'philosophy',
