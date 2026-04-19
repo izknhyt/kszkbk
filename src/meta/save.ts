@@ -7,10 +7,11 @@ export type SlotId = 1 | 2 | 3;
 
 const OLD_SINGLE_KEY = 'kszkbk:save:v1';
 const slotKey = (slot: SlotId) => `kszkbk:save:slot${slot}`;
-const CURRENT_VERSION = 9;
+const CURRENT_VERSION = 10;
 
 // v1-v8 の履歴は README 省略。v9：スロット制、runId/difficulty 追加
-type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+// v10：weather / weatherForecast 追加
+type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 interface SaveData {
   version: SaveVersion;
@@ -36,6 +37,10 @@ interface SaveData {
   resources?: WorldState['resources'];
   obstacles?: WorldState['obstacles'];
   features?: WorldState['features'];
+  // v10+: 気象
+  weather?: WorldState['weather'];
+  weatherForecast?: WorldState['weatherForecast'];
+  lastWeatherDayCount?: number;
 }
 
 // スロット概要（スタート画面で 3 枚のカードに表示）
@@ -111,6 +116,9 @@ export function save(w: WorldState, slot: SlotId) {
     resources: w.resources,
     obstacles: w.obstacles,
     features: w.features,
+    weather: w.weather,
+    weatherForecast: w.weatherForecast,
+    lastWeatherDayCount: w.lastWeatherDayCount,
   };
   try {
     localStorage.setItem(slotKey(slot), JSON.stringify(data));
@@ -125,7 +133,7 @@ export function load(w: WorldState, slot: SlotId): boolean {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw) as SaveData;
-    if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(data.version)) return false;
+    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(data.version)) return false;
     if (data.runId) w.runId = data.runId;
     if (typeof data.runStartedAtMs === 'number') w.runStartedAtMs = data.runStartedAtMs;
     if (data.difficulty) w.difficulty = data.difficulty;
@@ -151,6 +159,9 @@ export function load(w: WorldState, slot: SlotId): boolean {
     if (data.resources) w.resources = { ...w.resources, ...data.resources };
     if (Array.isArray(data.features) && data.features.length > 0) w.features = data.features;
     if (Array.isArray(data.obstacles)) w.obstacles = data.obstacles;
+    if (data.weather) w.weather = data.weather;
+    if (Array.isArray(data.weatherForecast) && data.weatherForecast.length > 0) w.weatherForecast = data.weatherForecast;
+    if (typeof data.lastWeatherDayCount === 'number') w.lastWeatherDayCount = data.lastWeatherDayCount;
     return true;
   } catch {
     return false;

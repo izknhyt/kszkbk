@@ -188,6 +188,29 @@ export type DayPhase = 'morning' | 'noon' | 'evening' | 'night';
 // 初心者：普通の村シム級 / 標準：激ムズ（設計基準） / 地獄：無理ゲー
 export type Difficulty = 'beginner' | 'standard' | 'hell';
 
+// 気象（季節とは別レイヤー）。1 日単位で変化、季節で確率が変わる。
+export type WeatherKind =
+  | 'clear'        // 快晴
+  | 'cloudy'       // 曇
+  | 'light_rain'   // 小雨
+  | 'heavy_rain'   // 大雨
+  | 'storm'        // 嵐
+  | 'fog'          // 霧
+  | 'drought'      // 乾燥
+  | 'snow'         // 雪
+  | 'heatwave';    // 熱波
+
+export interface Weather {
+  kind: WeatherKind;
+  remainingSec: number;  // この天気があと何秒続くか
+}
+
+// 今日＋明日＋明後日の 3 日先予報。精度は先になるほど下がるが、表示用。
+export interface WeatherForecastEntry {
+  dayOffset: number;  // 0=今日 / 1=明日 / 2=明後日
+  kind: WeatherKind;
+}
+
 // =========================================================================
 // 村ランク。累計進行で 4 段階を上がる。建物Lv上限とフレーバーに影響する。
 // =========================================================================

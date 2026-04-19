@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -173,6 +173,11 @@ export interface WorldState {
   // 空間分割ハッシュ。tick 毎にちびわふ位置を再配置、近傍検索に使う。
   // 保存対象外（transient）。
   chibiHash: SpatialHash;
+  // --- 気象（季節とは別レイヤー）---------------------------------------
+  weather: Weather;
+  weatherForecast: WeatherForecastEntry[];  // 3 日先までの予報
+  // 前 tick の dayCount。境目で天気を更新するために比較する。
+  lastWeatherDayCount: number;
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -221,6 +226,74 @@ function createInitialFeatures(bounds: { w: number; h: number }): Feature[] {
   features.push({ id: mkId(), pos: { x: waterPos.x + 110, y: waterPos.y }, kind: 'channel', devLevel: 2, workSec: 0 });
   features.push({ id: mkId(), pos: { x: waterPos.x + 165, y: waterPos.y }, kind: 'farm', devLevel: 2, workSec: 0 });
   return features;
+}
+
+// === 気象 ===============================================================
+// 季節ごとの天気重みテーブル（確率分布）。合計は内部で正規化。
+const WEATHER_WEIGHTS: Record<Season, Partial<Record<WeatherKind, number>>> = {
+  spring: { clear: 40, cloudy: 25, light_rain: 20, heavy_rain: 7,  fog: 5,  storm: 2,  drought: 1 },
+  summer: { clear: 35, cloudy: 15, light_rain: 10, heavy_rain: 10, storm: 10, drought: 10, heatwave: 10 },
+  autumn: { clear: 25, cloudy: 30, light_rain: 20, heavy_rain: 10, fog: 10, storm: 5 },
+  winter: { clear: 20, cloudy: 25, snow: 35, fog: 10, heavy_rain: 5, drought: 5 },
+};
+const WEATHER_LABEL: Record<WeatherKind, string> = {
+  clear: '快晴',
+  cloudy: '曇',
+  light_rain: '小雨',
+  heavy_rain: '大雨',
+  storm: '嵐',
+  fog: '霧',
+  drought: '乾燥',
+  snow: '雪',
+  heatwave: '熱波',
+};
+const WEATHER_ICON: Record<WeatherKind, string> = {
+  clear: '☀', cloudy: '☁', light_rain: '🌦', heavy_rain: '🌧',
+  storm: '⛈', fog: '🌫', drought: '💨', snow: '❄', heatwave: '🥵',
+};
+export { WEATHER_LABEL, WEATHER_ICON };
+
+// 季節の重みから天気を 1 つ抽選
+function pickWeatherForSeason(season: Season): WeatherKind {
+  const w = WEATHER_WEIGHTS[season];
+  const entries = Object.entries(w) as Array<[WeatherKind, number]>;
+  const total = entries.reduce((a, [, v]) => a + v, 0);
+  let r = Math.random() * total;
+  for (const [k, v] of entries) {
+    r -= v;
+    if (r <= 0) return k;
+  }
+  return 'clear';
+}
+
+// 次の 3 日分の予報を生成。日単位で pickWeatherForSeason。
+function generateForecast(w: WorldState): WeatherForecastEntry[] {
+  const out: WeatherForecastEntry[] = [];
+  for (let i = 0; i < 3; i++) {
+    // 未来の日時から季節を推定（簡略：現在の季節をそのまま使う）
+    const future = w.timeSec + i * CONFIG.SECONDS_PER_DAY;
+    const season = seasonFromTime(future, w.secondsPerSeason);
+    out.push({ dayOffset: i, kind: pickWeatherForSeason(season) });
+  }
+  return out;
+}
+
+// 日付が変わったら天気更新：予報を 1 日シフト、今日分を採用、新しい明後日を追加
+function advanceWeather(w: WorldState) {
+  // 予報を 1 日進める。今日分 (dayOffset 0) が新しい天気に採用される。
+  w.weatherForecast = w.weatherForecast
+    .filter((e) => e.dayOffset > 0)
+    .map((e) => ({ ...e, dayOffset: e.dayOffset - 1 }));
+  while (w.weatherForecast.length < 3) {
+    const lastOffset = w.weatherForecast.length === 0 ? 0 : w.weatherForecast[w.weatherForecast.length - 1]!.dayOffset + 1;
+    const future = w.timeSec + lastOffset * CONFIG.SECONDS_PER_DAY;
+    const season = seasonFromTime(future, w.secondsPerSeason);
+    w.weatherForecast.push({ dayOffset: lastOffset, kind: pickWeatherForSeason(season) });
+  }
+  const today = w.weatherForecast.find((e) => e.dayOffset === 0);
+  if (today) {
+    w.weather = { kind: today.kind, remainingSec: CONFIG.SECONDS_PER_DAY };
+  }
 }
 
 // 難度に応じた補正テーブル。createWorld / ensurePlots / updateChibi /
@@ -296,17 +369,45 @@ export function updateInfra(w: WorldState, dt: number) {
   if (w.features.length === 0) return;
   const watered = computeWateredFeatureIds(w);
   const wateredFeatures = w.features.filter((f) => watered.has(f.id));
+  // 気象による生産倍率：乾燥/雪 → 停止、雨 → 加速
+  const weatherMul = weatherFarmMul(w.weather.kind);
   for (const f of w.features) {
     if (f.kind !== 'farm') continue;
     const irrigated = wateredFeatures.some(
       (wf) => Math.hypot(wf.pos.x - f.pos.x, wf.pos.y - f.pos.y) <= FARM_IRRIGATION_RADIUS,
     );
     if (!irrigated) continue;
-    w.resources.food += dt * 0.08;
+    w.resources.food += dt * 0.08 * weatherMul;
     f.workSec += dt;
     if (f.devLevel < 3 && f.workSec >= 30) f.devLevel = 3;
   }
 }
+
+// 天気による畑生産倍率：乾燥/雪 完全停止、雨 加速、熱波 半減
+function weatherFarmMul(k: WeatherKind): number {
+  switch (k) {
+    case 'drought': return 0;
+    case 'snow':    return 0;
+    case 'heavy_rain':
+    case 'storm':   return 1.4;
+    case 'light_rain': return 1.2;
+    case 'heatwave': return 0.5;
+    default: return 1.0;
+  }
+}
+
+// 天気による体力効果の倍率・ドレインを返す。updateChibi で使う。
+function weatherChibiMods(k: WeatherKind): { hungerMul: number; fatigueMul: number; coldHpDrain: number } {
+  switch (k) {
+    case 'heatwave': return { hungerMul: 1.5, fatigueMul: 1.5, coldHpDrain: 0 };
+    case 'snow':     return { hungerMul: 1.2, fatigueMul: 1.2, coldHpDrain: 0.2 };
+    case 'storm':    return { hungerMul: 1.1, fatigueMul: 1.3, coldHpDrain: 0.1 };
+    case 'heavy_rain':return { hungerMul: 1.0, fatigueMul: 1.2, coldHpDrain: 0.05 };
+    case 'drought':  return { hungerMul: 1.3, fatigueMul: 1.1, coldHpDrain: 0 };
+    default: return { hungerMul: 1.0, fatigueMul: 1.0, coldHpDrain: 0 };
+  }
+}
+export { weatherChibiMods };
 
 // feature 近傍判定ヘルパ（他モジュール用）
 export function isFarmFeature(f: Feature): boolean {
@@ -377,6 +478,13 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     features: [] as Feature[],
     obstacles: [] as Obstacle[],
     chibiHash: new SpatialHash(100),
+    weather: { kind: 'clear', remainingSec: CONFIG.SECONDS_PER_DAY },
+    weatherForecast: [
+      { dayOffset: 0, kind: 'clear' },
+      { dayOffset: 1, kind: 'cloudy' },
+      { dayOffset: 2, kind: 'light_rain' },
+    ],
+    lastWeatherDayCount: 1,
   };
 }
 
@@ -388,6 +496,10 @@ export function ensurePlots(w: WorldState) {
   if (!w.obstacles || w.obstacles.length === 0) {
     w.obstacles = createInitialObstacles(w.bounds, DIFFICULTY_MODS[w.difficulty].obstacleCount);
   }
+  // 天気予報を実際の季節に合わせて再生成（ロード直後の不整合対策）
+  w.weatherForecast = generateForecast(w);
+  const today = w.weatherForecast.find((e) => e.dayOffset === 0);
+  if (today) w.weather = { kind: today.kind, remainingSec: CONFIG.SECONDS_PER_DAY };
 }
 
 export function populationCap(w: WorldState): number {
@@ -980,9 +1092,15 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   // 空腹は時間で上昇（tough が高いと耐性↑）。疲労は活動系ステートで上昇、睡眠で回復。
   const toughMul = 1 - Math.max(0, c.params.tough - 50) * 0.006;  // tough100=0.7倍
   const mods = DIFFICULTY_MODS[w.difficulty];
-  c.hunger += dt * 1.2 * toughMul * mods.hungerMul;  // 100 到達まで 標準で ~83秒
+  const wmods = weatherChibiMods(w.weather.kind);
+  c.hunger += dt * 1.2 * toughMul * mods.hungerMul * wmods.hungerMul;
   // sleep 以外は疲労が溜まる（hurt/cry でも休息にならない）
-  if (c.state !== 'sleep') c.fatigue += dt * 0.55 * toughMul * mods.fatigueMul;
+  if (c.state !== 'sleep') c.fatigue += dt * 0.55 * toughMul * mods.fatigueMul * wmods.fatigueMul;
+  // 寒冷天候では HP が軽くドレイン（凍傷）
+  if (wmods.coldHpDrain > 0 && c.state !== 'sleep') {
+    c.hp = Math.max(0, c.hp - dt * wmods.coldHpDrain);
+    if (c.hp <= 0) { kill(w, c, 'fatigue_death'); return; }  // TODO: 凍傷専用死因は後ほど
+  }
   if (c.state === 'sleep') c.fatigue = Math.max(0, c.fatigue - dt * 0.70);
   if (c.state === 'eating') c.hunger = Math.max(0, c.hunger - dt * 6);   // 食事で一気に回復
   c.hunger = Math.max(0, Math.min(100, c.hunger));
@@ -1970,6 +2088,12 @@ export function tickWorld(w: WorldState, dt: number) {
   w.dayProgress = dayProgress(w.timeSec, CONFIG.SECONDS_PER_DAY);
   w.dayPhase = phaseFromProgress(w.dayProgress);
   w.dayCount = 1 + Math.floor(w.timeSec / CONFIG.SECONDS_PER_DAY);
+  // 日付境目で天気を進める
+  if (w.dayCount !== w.lastWeatherDayCount) {
+    advanceWeather(w);
+    w.lastWeatherDayCount = w.dayCount;
+  }
+  w.weather.remainingSec = Math.max(0, w.weather.remainingSec - dt);
   // 位相境界で NPC リアクション（朝礼／夜の静まり）
   if (w.dayPhase !== prevPhase) onPhaseChange(w, prevPhase, w.dayPhase);
   // 累計ポイントから村Lv を再計算。Lv 上昇でワールドが広がる。

@@ -1,7 +1,7 @@
 import { BUILDINGS } from '../city/buildings';
 import { DEATH_CAUSES } from '../sim/deaths';
 import type { WorldState } from '../sim/world';
-import { averageLifespan, buildingCost, getUpgradeInfo, populationCap, totalDexCount, uniqueDexFound } from '../sim/world';
+import { averageLifespan, buildingCost, getUpgradeInfo, populationCap, totalDexCount, uniqueDexFound, WEATHER_ICON, WEATHER_LABEL } from '../sim/world';
 import { DAY_PHASE_LABEL, SEASON_LABEL } from '../sim/events';
 import { RANK_DEFS, nextRank } from '../sim/rank';
 import type { DeathCauseId } from '../types';
@@ -74,6 +74,14 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   byId('stat-water').textContent = String(Math.floor(w.resources.water));
   byId('stat-wood').textContent = String(Math.floor(w.resources.wood));
   byId('stat-stone').textContent = String(Math.floor(w.resources.stone));
+  // 天気 + 予報
+  const weatherNow = document.getElementById('weather-now');
+  if (weatherNow) weatherNow.textContent = `${WEATHER_ICON[w.weather.kind]} ${WEATHER_LABEL[w.weather.kind]}`;
+  const weatherFc = document.getElementById('weather-fc');
+  if (weatherFc) {
+    const future = w.weatherForecast.filter((e) => e.dayOffset > 0).slice(0, 2);
+    weatherFc.textContent = future.map((e) => `→${WEATHER_ICON[e.kind]}`).join('');
+  }
   byId('stat-gen').textContent = String(w.totalBirths);
   byId('stat-stomp').textContent = String(w.stompCount);
   // 統計：平均寿命 / 最長寿 / 最短寿
