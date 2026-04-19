@@ -115,7 +115,8 @@ export type DeathCauseId =
   | 'kamisama_throw'          // プレイヤーに投げつけられ地面に激突死
   | 'mama_lost'               // フラナ（ママ）を失って心が折れて死亡
   | 'hunger_death'            // 空腹で餓死
-  | 'fatigue_death';          // 疲労で衰弱死
+  | 'fatigue_death'           // 疲労で衰弱死
+  | 'flood_drown';            // 洪水に流されて溺死
 
 export interface DeathCause {
   id: DeathCauseId;
@@ -162,6 +163,18 @@ export interface Feature {
   kind: FeatureKind;
   devLevel: number;   // 0-3（畑の成長段階・道の使用摩耗など）
   workSec: number;    // 作業累積秒
+  // 水理計算（transient: tick毎に再計算、保存不要）
+  flow?: number;       // 現在の通水量 units/sec
+  saturated?: boolean; // 許容量超過 → 氾濫中
+}
+
+// 氾濫セル（水路が溢れた場所から広がる洪水範囲）
+export interface FloodZone {
+  x: number;
+  y: number;
+  radius: number;     // 現在の氾濫半径 px
+  remainingSec: number;
+  sourceFid: string;  // どの水路/水源が溢れたか
 }
 
 // 障害物（荒地に散在。ちびわふが叩いて減らす、破壊で木材/石材を生産）

@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -178,6 +178,9 @@ export interface WorldState {
   weatherForecast: WeatherForecastEntry[];  // 3 日先までの予報
   // 前 tick の dayCount。境目で天気を更新するために比較する。
   lastWeatherDayCount: number;
+  // --- 水理（Ω-2）------------------------------------------------------
+  // 溢れた水路から広がる洪水セル（transient：保存不要）
+  floodZones: FloodZone[];
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -409,6 +412,135 @@ function weatherChibiMods(k: WeatherKind): { hungerMul: number; fatigueMul: numb
 }
 export { weatherChibiMods };
 
+// ============================================================
+// Ω-2 水理システム
+// ============================================================
+
+// 天気による水源湧出量倍率
+function weatherWaterSourceMul(k: WeatherKind): number {
+  switch (k) {
+    case 'storm':      return 5.0;
+    case 'heavy_rain': return 3.0;
+    case 'light_rain': return 1.5;
+    case 'drought':    return 0.15;
+    case 'snow':       return 0.5;
+    default:           return 1.0;
+  }
+}
+
+// 水路チャンネル容量 = devLevel × 1.5 units/sec
+const CHANNEL_CAPACITY_PER_LV = 1.5;
+
+// 各水路/水源の flow・saturated を毎 tick 再計算する。
+// 水源（kind='water'）が weatherMul × 1.0 の流量を生成し、
+// BFS で接続先の水路に流量を伝播。容量超過 → saturated=true。
+export function computeWaterFlow(w: WorldState): void {
+  // リセット
+  for (const f of w.features) {
+    f.flow = 0;
+    f.saturated = false;
+  }
+  if (w.features.length === 0) return;
+
+  const weatherMul = weatherWaterSourceMul(w.weather.kind);
+  // id → feature の高速参照
+  const byId = new Map<string, Feature>(w.features.map((f) => [f.id, f]));
+
+  // BFS：水源から接続水路へ流量を伝播
+  const visited = new Set<string>();
+  const queue: Array<{ f: Feature; incoming: number }> = [];
+  for (const f of w.features) {
+    if (f.kind === 'water') {
+      f.flow = weatherMul * 1.0;
+      visited.add(f.id);
+      queue.push({ f, incoming: f.flow });
+    }
+  }
+
+  while (queue.length > 0) {
+    const { f: cur } = queue.shift()!;
+    // 接続先（WATER_LINK_RADIUS 以内の未訪問 channel/water）
+    for (const nf of w.features) {
+      if (visited.has(nf.id)) continue;
+      if (nf.kind !== 'channel' && nf.kind !== 'water') continue;
+      const dist = Math.hypot(nf.pos.x - cur.pos.x, nf.pos.y - cur.pos.y);
+      if (dist > WATER_LINK_RADIUS) continue;
+      visited.add(nf.id);
+      // 流量 = 上流から引き継ぎ（分岐は簡略化：全量伝播）
+      nf.flow = (nf.flow ?? 0) + (cur.flow ?? 0);
+      const capacity = (nf.devLevel || 1) * CHANNEL_CAPACITY_PER_LV;
+      nf.saturated = (nf.flow ?? 0) > capacity;
+      queue.push({ f: nf, incoming: nf.flow ?? 0 });
+    }
+  }
+  void byId;
+}
+
+// 氾濫の最大半径 px
+const FLOOD_MAX_RADIUS = 55;
+// 氾濫が完全に消えるまでの秒数
+const FLOOD_LIFE_SEC = 25;
+// 同一水路から新規氾濫セルを追加するインターバル（秒）
+const FLOOD_SPAWN_INTERVAL = 4;
+// 氾濫に巻き込まれたちびわふを流す確率 / 秒
+const FLOOD_SWEEP_CHANCE_PER_SEC = 0.28;
+
+// 氾濫セルの生成・拡大・消滅と、ちびわふへの影響を処理する。
+export function updateFloodZones(w: WorldState, dt: number): void {
+  // 既存セルを更新
+  for (const fz of w.floodZones) {
+    fz.remainingSec -= dt;
+    // 序盤は急拡大、後半は収束
+    const lifeRatio = 1 - fz.remainingSec / FLOOD_LIFE_SEC;
+    const targetRadius = FLOOD_MAX_RADIUS * Math.min(1, lifeRatio * 2.2);
+    if (fz.radius < targetRadius) fz.radius = Math.min(targetRadius, fz.radius + 18 * dt);
+  }
+  // 期限切れ除去
+  for (let i = w.floodZones.length - 1; i >= 0; i--) {
+    if (w.floodZones[i]!.remainingSec <= 0) w.floodZones.splice(i, 1);
+  }
+
+  // 溢れている水路から新規氾濫セル生成
+  for (const f of w.features) {
+    if (!f.saturated) continue;
+    // 同一水路の近くにすでにセルがあれば生成頻度を下げる
+    const nearby = w.floodZones.filter((fz) => fz.sourceFid === f.id);
+    if (nearby.length > 0) {
+      // 最古のセルが FLOOD_SPAWN_INTERVAL 以上経過していれば追加
+      const oldest = Math.min(...nearby.map((fz) => fz.remainingSec));
+      if (oldest > FLOOD_LIFE_SEC - FLOOD_SPAWN_INTERVAL) continue;
+    }
+    // 水路の少し周囲にランダムオフセット
+    const angle = Math.random() * Math.PI * 2;
+    const off = 8 + Math.random() * 14;
+    w.floodZones.push({
+      x: f.pos.x + Math.cos(angle) * off,
+      y: f.pos.y + Math.sin(angle) * off,
+      radius: 6,
+      remainingSec: FLOOD_LIFE_SEC,
+      sourceFid: f.id,
+    });
+  }
+
+  // ちびわふを洪水に巻き込む
+  for (const c of w.chibis) {
+    if (!isAlive(c) || c.flight) continue;
+    for (const fz of w.floodZones) {
+      const d = Math.hypot(c.pos.x - fz.x, c.pos.y - fz.y);
+      if (d > fz.radius) continue;
+      // 確率的に流す
+      if (Math.random() > FLOOD_SWEEP_CHANCE_PER_SEC * dt) continue;
+      // 中心から外側方向へ流す + 横流れ成分
+      const angle = Math.atan2(c.pos.y - fz.y, c.pos.x - fz.x) + (Math.random() - 0.5) * 1.2;
+      const speed = 180 + Math.random() * 120;
+      launchFlight(c, Math.cos(angle) * speed, -80 + Math.random() * 40, 0.8, 20, 'flood_drown');
+      spawnBubble(w.bubbles, c.pos, Math.random() < 0.5 ? 'たすけてー！' : 'ながされるー！', 'speech', 1.5);
+      pushLife(c, Math.floor(c.ageSec), '洪水に流された');
+      break;
+    }
+  }
+}
+
 // feature 近傍判定ヘルパ（他モジュール用）
 export function isFarmFeature(f: Feature): boolean {
   return f.kind === 'farm';
@@ -485,6 +617,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
       { dayOffset: 2, kind: 'light_rain' },
     ],
     lastWeatherDayCount: 1,
+    floodZones: [],
   };
 }
 
@@ -500,6 +633,8 @@ export function ensurePlots(w: WorldState) {
   w.weatherForecast = generateForecast(w);
   const today = w.weatherForecast.find((e) => e.dayOffset === 0);
   if (today) w.weather = { kind: today.kind, remainingSec: CONFIG.SECONDS_PER_DAY };
+  // transient フィールドのロード後初期化
+  if (!w.floodZones) w.floodZones = [];
 }
 
 export function populationCap(w: WorldState): number {
@@ -2122,7 +2257,9 @@ export function tickWorld(w: WorldState, dt: number) {
   updateNpcs(w, dt);
   applyFuranaLossPanic(w, dt);
   updateLabor(w, dt);
+  computeWaterFlow(w);
   updateInfra(w, dt);
+  updateFloodZones(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
   if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);

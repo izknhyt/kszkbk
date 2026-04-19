@@ -336,8 +336,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     setBounds(world.bounds.w, world.bounds.h);
     drawPhaseTint(world.dayPhase);
 
-    // 開拓要素（feature: 水源・水路・畑・道）+ 障害物。全てフリー座標。
+    // 開拓要素（feature: 水源・水路・畑・道）+ 障害物 + 氾濫セル
     plotLayer.removeChildren();
+    for (const fz of world.floodZones) {
+      plotLayer.addChild(drawFloodZone(fz));
+    }
     for (const f of world.features) {
       plotLayer.addChild(drawFeature(f));
     }
@@ -1145,13 +1148,36 @@ function drawFeature(f: import('../types').Feature): Container {
   const c = new Container();
   const g = new Graphics();
   const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18 : 16;
+
+  // 水路の通水状態に応じて色を変える
+  // 通常青 → 飽和時オレンジ赤（氾濫警告）
+  let channelColor = 0x6ba2d2;
+  if (f.kind === 'channel' || f.kind === 'water') {
+    const capacity = (f.devLevel || 1) * 1.5;
+    const ratio = Math.min(1, (f.flow ?? 0) / capacity);
+    if (ratio > 0.8) {
+      // 80%超 → 赤みがかる
+      const t = (ratio - 0.8) / 0.2;
+      const r = Math.round(0x6b + t * (0xff - 0x6b));
+      const gb = Math.round(0xa2 - t * (0xa2 - 0x44));
+      channelColor = (r << 16) | (gb << 8) | gb;
+    } else if (ratio > 0) {
+      // 水が流れている → やや明るい青
+      channelColor = 0x5cc4f0;
+    }
+  }
+
   const kindColor: Record<import('../types').FeatureKind, number> = {
-    water:   0x3a6ea0,
-    channel: 0x6ba2d2,
+    water:   f.saturated ? 0xff4400 : (f.flow ?? 0) > 0 ? 0x2a90d0 : 0x3a6ea0,
+    channel: channelColor,
     farm:    0x6ea241,
     path:    0x8b7048,
   };
   g.circle(0, 0, radius).fill({ color: kindColor[f.kind], alpha: 0.78 }).stroke({ color: 0x2a1a10, width: 1.5 });
+  // 溢れている水路は外周リング（オレンジ）
+  if (f.saturated) {
+    g.circle(0, 0, radius + 4).stroke({ color: 0xff6600, width: 2.5, alpha: 0.9 });
+  }
   // 畑は devLevel に応じて緑が濃くなる
   if (f.kind === 'farm' && f.devLevel >= 3) {
     g.circle(0, 0, radius - 6).fill({ color: 0x9ad066, alpha: 0.5 });
@@ -1163,6 +1189,17 @@ function drawFeature(f: import('../types').Feature): Container {
   }
   c.addChild(g);
   c.position.set(f.pos.x, f.pos.y);
+  return c;
+}
+
+function drawFloodZone(fz: import('../types').FloodZone): Container {
+  const c = new Container();
+  const g = new Graphics();
+  const alpha = Math.min(0.38, fz.remainingSec / 25 * 0.4);
+  g.circle(0, 0, fz.radius).fill({ color: 0x2255cc, alpha });
+  g.circle(0, 0, fz.radius).stroke({ color: 0x44aaff, width: 1.5, alpha: alpha * 1.6 });
+  c.addChild(g);
+  c.position.set(fz.x, fz.y);
   return c;
 }
 
