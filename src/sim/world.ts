@@ -1977,6 +1977,50 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       }
     }
   }
+  // Σ-1-c 激流もがき：flow > 1.5 の water/channel 上にいると流される
+  // 川に流されながら courage+tough で必死に岸へ向かうが、失敗すると HP ドレイン →溺死
+  if (!c.flight && isAlive(c) && c.state !== 'sleep' && c.state !== 'eating') {
+    for (const feat of w.features) {
+      if (feat.kind !== 'water' && feat.kind !== 'channel') continue;
+      const fflow = feat.flow ?? 0;
+      if (fflow <= 1.5) continue;
+      if (Math.hypot(c.pos.x - feat.pos.x, c.pos.y - feat.pos.y) > 28) continue;
+
+      // 流れ方向：水路 feature 地点の標高勾配の下り方向
+      const gx = getElevation(feat.pos.x + 5, feat.pos.y) - getElevation(feat.pos.x - 5, feat.pos.y);
+      const gy = getElevation(feat.pos.x, feat.pos.y + 5) - getElevation(feat.pos.x, feat.pos.y - 5);
+      const gLen = Math.max(0.001, Math.hypot(gx, gy));
+      const strength = Math.min(1.5, (fflow - 1.5) / 2.0); // 流量超過分を 0〜1.5 にスケール
+
+      // 下流方向へ押し流す
+      c.pos.x += (-gx / gLen) * 20 * strength * dt;
+      c.pos.y += (-gy / gLen) * 20 * strength * dt;
+
+      // もがき抵抗：courage + tough の合計が高いほど耐える
+      const resistChance = (c.params.courage + c.params.tough) / 200;
+      if (Math.random() > resistChance) {
+        c.hp = Math.max(0, c.hp - 0.35 * (1 + strength) * dt);
+        if (c.hp <= 0) {
+          spawnBubble(w.bubbles, c.pos, 'たすけ…わふ……', 'speech', 2.0);
+          pushLife(c, Math.floor(c.ageSec), `増水した水路の激流に飲まれた（flow:${fflow.toFixed(1)}）`);
+          kill(w, c, 'river_swept');
+          return;
+        }
+      }
+
+      // 崖端判定：流れ方向 15px 先が 20+ 急落なら滝落下（cliff_fall）
+      const downX = -gx / gLen;
+      const downY = -gy / gLen;
+      const curElev = getElevation(c.pos.x, c.pos.y);
+      const aheadElev = getElevation(c.pos.x + downX * 15, c.pos.y + downY * 15);
+      if (curElev - aheadElev >= 20) {
+        spawnBubble(w.bubbles, c.pos, 'たきわふっ！！', 'speech', 1.5);
+        pushLife(c, Math.floor(c.ageSec), '激流に押されて崖から落下した');
+        launchFlight(c, downX * 80, downY * 80, 0.8, 0, 'cliff_fall');
+      }
+      break; // 1 feature で処理完了
+    }
+  }
   runHazards(w, c, dt, hazards);
 }
 
