@@ -86,6 +86,10 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   }
   byId('stat-gen').textContent = String(w.totalBirths);
   byId('stat-stomp').textContent = String(w.stompCount);
+  const wolvesKilledEl = document.getElementById('stat-wolves-killed');
+  if (wolvesKilledEl) wolvesKilledEl.textContent = String(w.wolvesKilled ?? 0);
+  const wolfBitesEl = document.getElementById('stat-wolf-bites');
+  if (wolfBitesEl) wolfBitesEl.textContent = String(w.dex?.wolf_bite?.count ?? 0);
   // 統計：平均寿命 / 最長寿 / 最短寿
   const avgEl = document.getElementById('stat-avg-life');
   const longEl = document.getElementById('stat-longest-life');
