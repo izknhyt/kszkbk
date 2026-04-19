@@ -116,10 +116,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const corpseLayer = new Container();
   const chibiLayer = new Container();
   const npcLayer = new Container();
+  const wolfLayer = new Container();  // ちびわふ/NPC の上に描画（夜の敵）
   const fxLayer = new Container();
   const eventOverLayer = new Container(); // 上レイヤ（火炎／粉塵）
   cameraLayer.addChild(
-    bgLayer, plotLayer, landmarkLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, fxLayer, eventOverLayer,
+    bgLayer, plotLayer, landmarkLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, wolfLayer, fxLayer, eventOverLayer,
   );
 
   const lib = await loadSpriteLibrary('/chibiwafu.png', '/chibiwafu');
@@ -316,6 +317,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const buildingViews: Array<{ container: Container; key: string }> = [];
   const npcViews = new Map<NpcId, NpcView>();
   const bubbleViews = new Map<number, BubbleView>();
+  // wolves は出現数が少ない（最大 8）ので createOnce + position update。
+  const wolfViews = new Map<number, { container: Container; lastState: string }>();
   // plotLayer は 3 フレームに 1 回だけ再構築（obstacles 140個×2Graphics を毎60fps は重すぎ）
   let drawFrameCount = 0;
   // chibi/corpse depth sort は PIXI の zIndex 機能を使う（直接 sort() は内部配列を壊す可能性）
@@ -492,6 +495,28 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       v.container.alpha = n.dead ? 0.35 : 1.0;
       // フラナは絵が既に "dead" ポーズなので回転させない。他NPC（ココン等）は従来通り倒す
       v.container.rotation = n.dead && n.id !== 'furana' ? Math.PI * 0.5 : 0;
+    }
+
+    // wolves
+    const wolfIds = new Set(world.wolves.map((w) => w.id));
+    for (const [id, v] of wolfViews) {
+      if (!wolfIds.has(id)) {
+        v.container.destroy({ children: true });
+        wolfViews.delete(id);
+      }
+    }
+    for (const wolf of world.wolves) {
+      let v = wolfViews.get(wolf.id);
+      if (!v) {
+        const c = drawWolf();
+        wolfLayer.addChild(c);
+        v = { container: c, lastState: wolf.state };
+        wolfViews.set(wolf.id, v);
+      }
+      v.container.position.set(wolf.pos.x, wolf.pos.y);
+      v.container.scale.x = wolf.faceLeft ? -1 : 1;
+      v.container.alpha = wolf.state === 'dead' ? 0.4 : 1.0;
+      v.container.rotation = wolf.state === 'dead' ? Math.PI * 0.5 : 0;
     }
 
     // bubbles
@@ -921,6 +946,33 @@ function drawGroundShadow(rx: number, ry: number, y: number, alpha: number): Gra
   const shadow = new Graphics();
   shadow.ellipse(0, y, rx, ry).fill({ color: 0x1d140d, alpha });
   return shadow;
+}
+
+// オオカミ：横長の暗い灰色シルエット + 赤い目。プロシージャル描画。
+function drawWolf(): Container {
+  const c = new Container();
+  c.addChild(drawGroundShadow(22, 7, 10, 0.35));
+  const body = new Graphics();
+  // 胴体（横長）
+  body.ellipse(0, 0, 20, 9).fill({ color: 0x4a3a30 }).stroke({ color: 0x1a0a00, width: 1.5 });
+  // 頭
+  body.circle(15, -2, 7).fill({ color: 0x4a3a30 }).stroke({ color: 0x1a0a00, width: 1.5 });
+  // 耳（尖った三角）
+  body.poly([12, -7, 14, -14, 17, -7]).fill({ color: 0x3a2a20 });
+  body.poly([17, -9, 20, -14, 22, -7]).fill({ color: 0x3a2a20 });
+  // 口（牙）
+  body.poly([20, 0, 24, -1, 22, 2]).fill({ color: 0xffffff });
+  // 目（赤い光）
+  body.circle(16, -3, 1.6).fill({ color: 0xff3322 });
+  // 尻尾
+  body.poly([-18, -2, -24, -6, -20, 1]).fill({ color: 0x3a2a20 });
+  // 脚
+  body.rect(-12, 6, 3, 7).fill({ color: 0x2a1a10 });
+  body.rect(-4, 6, 3, 7).fill({ color: 0x2a1a10 });
+  body.rect(6, 6, 3, 7).fill({ color: 0x2a1a10 });
+  body.rect(12, 6, 3, 7).fill({ color: 0x2a1a10 });
+  c.addChild(body);
+  return c;
 }
 
 function buildingAuraColor(id: string): number {

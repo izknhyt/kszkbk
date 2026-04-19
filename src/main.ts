@@ -5,6 +5,7 @@ import {
   createWorld,
   damageChibi,
   damageNpc,
+  damageWolf,
   ensurePlots,
   forceSpawn,
   launchFlight,
@@ -289,6 +290,15 @@ async function start() {
       if (d < radius && d < bestNpcDist) { bestNpc = n; bestNpcDist = d; }
     }
     if (bestNpc) return { kind: 'npc', id: bestNpc.id };
+    // 3. オオカミ（生きてるもののみ）
+    let bestWolf: number | null = null;
+    let bestWolfDist = 28;
+    for (const wolf of world.wolves) {
+      if (wolf.state === 'dead') continue;
+      const d = Math.hypot(wolf.pos.x - wx, wolf.pos.y - wy);
+      if (d < bestWolfDist) { bestWolf = wolf.id; bestWolfDist = d; }
+    }
+    if (bestWolf != null) return { kind: 'wolf', id: bestWolf };
     return null;
   });
 
@@ -317,7 +327,8 @@ async function start() {
   stage.app.canvas.addEventListener('kszk-entity-punch', (e) => {
     const detail = (e as CustomEvent).detail as { target: HitTarget };
     if (detail.target.kind === 'chibi') punchChibi(world, detail.target.id);
-    else punchNpc(world, detail.target.id as NpcId);
+    else if (detail.target.kind === 'npc') punchNpc(world, detail.target.id as NpcId);
+    else if (detail.target.kind === 'wolf') punchWolf(world, detail.target.id);
   });
 
   // ドラッグセッション：最初に掴んだ位置と振り回し総距離を追跡。
@@ -356,7 +367,8 @@ async function start() {
   stage.app.canvas.addEventListener('kszk-entity-drag', (e) => {
     const detail = (e as CustomEvent).detail as { target: HitTarget; worldX: number; worldY: number };
     if (detail.target.kind === 'chibi') handleDragChibi(detail.target.id, detail.worldX, detail.worldY);
-    else handleDragNpc(detail.target.id as NpcId, detail.worldX, detail.worldY);
+    else if (detail.target.kind === 'npc') handleDragNpc(detail.target.id as NpcId, detail.worldX, detail.worldY);
+    // オオカミはドラッグ不可（噛まれる可能性がある。打撃のみ対応）
   });
 
   function handleDragChibi(id: number, wx: number, wy: number) {
@@ -444,7 +456,8 @@ async function start() {
     const { vx, vy } = dragSession && dragTargetsSame(dragSession.target, detail.target)
       ? computeThrowVelocity() : { vx: 0, vy: 0 };
     if (detail.target.kind === 'chibi') dropChibi(world, detail.target.id, detail.worldX, detail.worldY, vx, vy);
-    else dropNpc(world, detail.target.id as NpcId, detail.worldX, detail.worldY, vx, vy);
+    else if (detail.target.kind === 'npc') dropNpc(world, detail.target.id as NpcId, detail.worldX, detail.worldY, vx, vy);
+    // wolf はドロップ対象外
     dragSession = null;
   });
 
@@ -745,6 +758,15 @@ function dropNpc(world: WorldState, id: NpcId, releasedX: number, releasedY: num
   }
   launchFlight(n, vx, vy, flightSec, dmg, 'kamisama_throw');
   spawnWitnessReactions(world, { x: releasedX, y: releasedY });
+}
+
+// オオカミ殴打：神様のパンチで 12-20 ダメージ。HP 30 なので 2-3 発で倒せる。
+function punchWolf(world: WorldState, wolfId: number) {
+  const wolf = world.wolves.find((x) => x.id === wolfId);
+  if (!wolf || wolf.state === 'dead') return;
+  spawnBubble(world.bubbles, { x: wolf.pos.x, y: wolf.pos.y - 30 }, '💥', 'stomp', 0.6);
+  const dmg = 12 + Math.floor(Math.random() * 9);
+  damageWolf(world, wolf, dmg);
 }
 
 // NPC を掴んだ時の性格別リアクション（短く）

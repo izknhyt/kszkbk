@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -181,6 +181,13 @@ export interface WorldState {
   // --- 水理（Ω-2）------------------------------------------------------
   // 溢れた水路から広がる洪水セル（transient：保存不要）
   floodZones: FloodZone[];
+  // --- オオカミ（Ω-5）---------------------------------------------------
+  // 夜間のみ出現。野宿ちびわふを優先して狙う。transient（保存不要）。
+  wolves: Wolf[];
+  // 次のオオカミ群スポーンまで（秒）。夜開始で再設定、朝でクリア。
+  wolfSpawnCooldown: number;
+  // 撃破したオオカミ数（統計）
+  wolvesKilled: number;
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -549,6 +556,207 @@ export function isFarmFeature(f: Feature): boolean {
   return f.kind === 'farm';
 }
 
+// =========================================================================
+// オオカミ襲撃（Ω-5）
+// 夜間のみ出現。map 端から湧き、野宿ちびわふを優先的に狩る。
+// 朝になると撤退。プレイヤーは左クリックで殴って追い払える。
+// =========================================================================
+
+const WOLF_MAX_HP = 30;
+const WOLF_SPEED = 55;
+const WOLF_BITE_RANGE = 22;
+const WOLF_BITE_DAMAGE = 28;  // HP 20 の弱い子は一撃、HP 40+ の丈夫は2発必要
+const WOLF_SPAWN_INTERVAL_NIGHT_BASE = 75;  // 夜の平均スポーン間隔（秒）
+const WOLF_GROUP_SIZE_MIN = 1;
+const WOLF_GROUP_SIZE_MAX = 2;
+const WOLF_MAX_ALIVE = 6;  // 同時存在数のハードリミット（性能安全網）
+
+let _wolfIdSeq = 1;
+export function resetWolfIdSeq(n: number) { _wolfIdSeq = n; }
+
+function spawnWolfGroup(w: WorldState) {
+  if (w.wolves.length >= WOLF_MAX_ALIVE) return;
+  const mods = currentMods(w);
+  // 地獄 ×1.8 で群が大きくなる
+  const bias = mods.hazardMul;
+  const countBase = WOLF_GROUP_SIZE_MIN + Math.floor(Math.random() * (WOLF_GROUP_SIZE_MAX - WOLF_GROUP_SIZE_MIN + 1));
+  const count = Math.min(WOLF_MAX_ALIVE - w.wolves.length, Math.max(1, Math.round(countBase * Math.min(1.6, bias))));
+  // map 端からまとまって入ってくる。edge は 4 方向からランダム
+  const edge = Math.floor(Math.random() * 4);
+  const baseX = edge === 0 ? 20 : edge === 1 ? w.bounds.w - 20 : Math.random() * w.bounds.w;
+  const baseY = edge === 2 ? 40 : edge === 3 ? CONFIG.DRY_Y_LIMIT - 40 : 60 + Math.random() * (CONFIG.DRY_Y_LIMIT - 120);
+  for (let i = 0; i < count; i++) {
+    w.wolves.push({
+      id: _wolfIdSeq++,
+      pos: { x: baseX + (Math.random() - 0.5) * 40, y: baseY + (Math.random() - 0.5) * 40 },
+      targetChibiId: null,
+      state: 'stalk',
+      stateTimer: 0,
+      hp: WOLF_MAX_HP,
+      maxHp: WOLF_MAX_HP,
+      speed: WOLF_SPEED * (0.9 + Math.random() * 0.2),
+      biteCooldown: 0,
+      faceLeft: false,
+      spawnTick: w.tick,
+    });
+  }
+  // 群で現れた瞬間、近くのちびわふが悲鳴
+  const nearbyChibi = w.chibis.find((c) => isAlive(c) && Math.hypot(c.pos.x - baseX, c.pos.y - baseY) < 260);
+  if (nearbyChibi) {
+    spawnBubble(w.bubbles, nearbyChibi.pos, 'オオカミがきたわふ！！', 'speech', 2.5);
+  }
+}
+
+// オオカミのターゲット選定。野宿ちびわふ（homeFid=null）を最優先、
+// 次に夜なのに家に入ってない奴、最後に誰でも。
+function pickWolfTarget(w: WorldState, wolf: Wolf): Chibiwafu | null {
+  const candidates = w.chibis.filter((c) => isAlive(c) && !c.flight);
+  if (candidates.length === 0) return null;
+  // 優先度付きでソート
+  const scored = candidates.map((c) => {
+    let priority = 0;
+    if (!c.homeFid) priority += 200;  // 野宿は絶好の獲物
+    // 家で寝てる子は強く忌避（家が盾）。野宿で寝てる子は好物。
+    if (c.state === 'sleep' && c.homeFid) priority -= 300;
+    if (c.state === 'sleep' && !c.homeFid) priority += 80;  // 寝てる野宿は狩りやすい
+    const d = Math.hypot(c.pos.x - wolf.pos.x, c.pos.y - wolf.pos.y);
+    priority -= d * 0.04;  // 近いほど優先
+    return { c, priority };
+  });
+  scored.sort((a, b) => b.priority - a.priority);
+  // priority がマイナスのみの場合はノーターゲット（家で寝てる子しかいない → 徘徊するだけ）
+  if (scored[0]!.priority < 0) return null;
+  return scored[0]!.c;
+}
+
+export function updateWolves(w: WorldState, dt: number) {
+  // 夜のみスポーンタイマー進行
+  if (w.dayPhase === 'night') {
+    w.wolfSpawnCooldown -= dt;
+    if (w.wolfSpawnCooldown <= 0 && w.chibis.length > 0) {
+      spawnWolfGroup(w);
+      const mods = currentMods(w);
+      const interval = WOLF_SPAWN_INTERVAL_NIGHT_BASE * mods.eventIntervalMul;
+      w.wolfSpawnCooldown = interval * (0.7 + Math.random() * 0.6);
+    }
+  } else if (w.dayPhase === 'morning') {
+    // 朝になったら全オオカミ撤退モードへ
+    for (const wolf of w.wolves) {
+      if (wolf.state !== 'dead' && wolf.state !== 'flee') {
+        wolf.state = 'flee';
+        wolf.stateTimer = 6;
+      }
+    }
+  }
+
+  // 個別更新
+  for (let i = w.wolves.length - 1; i >= 0; i--) {
+    const wolf = w.wolves[i]!;
+    wolf.biteCooldown = Math.max(0, wolf.biteCooldown - dt);
+    wolf.stateTimer -= dt;
+
+    if (wolf.state === 'dead') {
+      // 死体は 3 秒残して消す
+      if (wolf.stateTimer <= 0) w.wolves.splice(i, 1);
+      continue;
+    }
+
+    if (wolf.state === 'flee') {
+      // 最寄り map 端へ逃げる
+      const leftDist = wolf.pos.x;
+      const rightDist = w.bounds.w - wolf.pos.x;
+      const topDist = wolf.pos.y;
+      const edgeTarget = leftDist < rightDist
+        ? (leftDist < topDist ? { x: -20, y: wolf.pos.y } : { x: wolf.pos.x, y: -20 })
+        : (rightDist < topDist ? { x: w.bounds.w + 20, y: wolf.pos.y } : { x: wolf.pos.x, y: -20 });
+      const dx = edgeTarget.x - wolf.pos.x;
+      const dy = edgeTarget.y - wolf.pos.y;
+      const d = Math.max(0.001, Math.hypot(dx, dy));
+      wolf.pos.x += (dx / d) * wolf.speed * 1.4 * dt;
+      wolf.pos.y += (dy / d) * wolf.speed * 1.4 * dt;
+      wolf.faceLeft = dx < 0;
+      // 端に着いたら消える
+      if (wolf.pos.x < -10 || wolf.pos.x > w.bounds.w + 10 || wolf.pos.y < -10) {
+        w.wolves.splice(i, 1);
+      }
+      continue;
+    }
+
+    if (wolf.state === 'bite') {
+      // 硬直中は動かない
+      if (wolf.stateTimer <= 0) wolf.state = 'stalk';
+      continue;
+    }
+
+    // stalk：ターゲット再評価（1秒おき or 未設定）
+    let target = wolf.targetChibiId !== null
+      ? w.chibis.find((c) => c.id === wolf.targetChibiId && isAlive(c) && !c.flight) ?? null
+      : null;
+    if (!target || Math.random() < dt * 0.5) {
+      target = pickWolfTarget(w, wolf);
+      wolf.targetChibiId = target ? target.id : null;
+    }
+    if (!target) {
+      // 獲物なし：適当に徘徊
+      wolf.pos.x += (Math.random() - 0.5) * wolf.speed * 0.3 * dt;
+      wolf.pos.y += (Math.random() - 0.5) * wolf.speed * 0.3 * dt;
+      continue;
+    }
+
+    const dx = target.pos.x - wolf.pos.x;
+    const dy = target.pos.y - wolf.pos.y;
+    const d = Math.max(0.001, Math.hypot(dx, dy));
+    wolf.faceLeft = dx < 0;
+
+    if (d <= WOLF_BITE_RANGE && wolf.biteCooldown <= 0) {
+      // 噛む
+      wolf.state = 'bite';
+      wolf.stateTimer = 1.2;  // 噛んだあと 1.2 秒硬直（ストレス緩和）
+      wolf.biteCooldown = 2.5;  // 再噛み抑止（連続即死防止）
+      wolf.targetChibiId = null;  // 次のターゲットを再選定
+      spawnBubble(w.bubbles, target.pos, 'ぎゃわふー！！', 'speech', 2.0);
+      pushLife(target, Math.floor(target.ageSec), 'オオカミに噛まれた');
+      damageChibi(w, target, WOLF_BITE_DAMAGE, 'wolf_bite');
+      // 近くのちびわふが叫ぶ
+      for (const c of w.chibis) {
+        if (c === target || !isAlive(c)) continue;
+        if (Math.hypot(c.pos.x - target.pos.x, c.pos.y - target.pos.y) > 120) continue;
+        if (Math.random() < 0.3) {
+          spawnBubble(w.bubbles, c.pos, Math.random() < 0.5 ? 'オオカミわふー！' : 'にげろわふ！', 'speech', 1.8);
+        }
+      }
+      continue;
+    }
+
+    // 接近
+    wolf.pos.x += (dx / d) * wolf.speed * dt;
+    wolf.pos.y += (dy / d) * wolf.speed * dt;
+    // 川には行かない
+    if (wolf.pos.y > CONFIG.DRY_Y_LIMIT - 20) wolf.pos.y = CONFIG.DRY_Y_LIMIT - 20;
+  }
+}
+
+// プレイヤーがオオカミをクリックした時のダメージ処理。
+// HP 0 で撃破 → 3秒後に消滅、ポイント加算。
+export function damageWolf(w: WorldState, wolf: Wolf, amount: number): boolean {
+  if (wolf.state === 'dead') return false;
+  wolf.hp = Math.max(0, wolf.hp - amount);
+  if (wolf.hp <= 0) {
+    wolf.state = 'dead';
+    wolf.stateTimer = 3;
+    w.wolvesKilled += 1;
+    const gained = 35;
+    w.points += gained;
+    w.totalPointsEarned += gained;
+    spawnBubble(w.bubbles, wolf.pos, 'ぎゃん…', 'speech', 1.8);
+    return true;
+  }
+  // 怯ませる：一時的に flee
+  wolf.state = 'flee';
+  wolf.stateTimer = 2;
+  return false;
+}
+
 function createDex(): Record<DeathCauseId, DexEntry> {
   const out = {} as Record<DeathCauseId, DexEntry>;
   for (const id of Object.keys(DEATH_CAUSES) as DeathCauseId[]) {
@@ -621,6 +829,9 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     ],
     lastWeatherDayCount: 1,
     floodZones: [],
+    wolves: [],
+    wolfSpawnCooldown: 0,
+    wolvesKilled: 0,
   };
 }
 
@@ -638,6 +849,9 @@ export function ensurePlots(w: WorldState) {
   if (today) w.weather = { kind: today.kind, remainingSec: CONFIG.SECONDS_PER_DAY };
   // transient フィールドのロード後初期化
   if (!w.floodZones) w.floodZones = [];
+  if (!w.wolves) w.wolves = [];
+  if (w.wolfSpawnCooldown === undefined) w.wolfSpawnCooldown = 0;
+  if (w.wolvesKilled === undefined) w.wolvesKilled = 0;
 }
 
 export function populationCap(w: WorldState): number {
@@ -1222,6 +1436,16 @@ function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone
 // Ω-3 住居・夜（家 feature + 帰宅 AI）
 // ============================================================
 
+// 夜型の特性ラベル（夜間に起きて徘徊する）
+const NIGHT_OWL_FLAVORS = new Set([
+  '深夜徘徊癖', '昼夜逆転', '夜ふかし常習', '夜だけ元気',
+]);
+function isNightOwl(c: Chibiwafu): boolean {
+  if (c.flavors.some((f) => NIGHT_OWL_FLAVORS.has(f))) return true;
+  // energy 高 + mama 低 の稀ケース（フラナ離れ＋元気過剰）
+  return c.params.energy > 80 && c.params.mama < 25;
+}
+
 // 家1棟の収容人数
 const HOUSE_CAPACITY = 4;
 // 家に「到着」とみなす距離
@@ -1366,29 +1590,40 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     flightStep(w, c, true, dt);
     return;
   }
-  // 夕夜の帰宅 AI：家があれば target を家にセット、到着で sleep に入る
-  if ((w.dayPhase === 'evening' || w.dayPhase === 'night') && c.state === 'idle' && c.homeFid) {
-    const home = featureById(w, c.homeFid);
-    if (home) {
-      const d = Math.hypot(home.pos.x - c.pos.x, home.pos.y - c.pos.y);
-      if (d <= HOUSE_ARRIVAL_RADIUS) {
-        // 到着：夜なら寝る、夕なら家でゴロゴロ
-        if (w.dayPhase === 'night') setState(c, 'sleep', 5);
-      } else if (d <= HOUSE_MAX_WALK_DIST) {
-        // 家へ向かって target を書き換え（wanderStep が次 tick で使う）
-        c.target = { x: home.pos.x, y: home.pos.y };
-        c.targetLandmarkId = null;
+  // 夕夜の帰宅 AI：家があれば target を家にセット、到着で sleep に入る。
+  // 夜は「基本全員寝る、深夜徘徊の子だけ起きる」運用。
+  const nightOwl = isNightOwl(c);
+  if ((w.dayPhase === 'evening' || w.dayPhase === 'night') && c.state === 'idle') {
+    if (c.homeFid) {
+      const home = featureById(w, c.homeFid);
+      if (home) {
+        const d = Math.hypot(home.pos.x - c.pos.x, home.pos.y - c.pos.y);
+        if (d <= HOUSE_ARRIVAL_RADIUS) {
+          // 到着：夜なら長めに寝る（夜型は浅い睡眠）
+          if (w.dayPhase === 'night' && !nightOwl) setState(c, 'sleep', 18);
+          else if (w.dayPhase === 'night' && nightOwl && Math.random() < 0.45) {
+            setState(c, 'sleep', 4);  // 夜型もたまに軽く寝る
+          }
+        } else if (d <= HOUSE_MAX_WALK_DIST && !nightOwl) {
+          // 家へ向かって target を書き換え（wanderStep が次 tick で使う）
+          c.target = { x: home.pos.x, y: home.pos.y };
+          c.targetLandmarkId = null;
+        }
       }
+    } else if (w.dayPhase === 'night' && !nightOwl) {
+      // 野宿の子：その場で丸まって寝る（狼に狙われやすい）
+      setState(c, 'sleep', 15);
     }
   }
   c.stateTimer -= dt;
   if (c.stateTimer <= 0 && c.state !== 'dead') {
     const roll = Math.random();
-    // 夜は寝る確率が大きく上がる（夜= sleep ×4, 夕= ×1.5, 朝昼= ×1）
-    const sleepMul = w.dayPhase === 'night' ? 4 : w.dayPhase === 'evening' ? 1.5 : 1;
-    const sleepThreshold = 0.08 + 0.02 * sleepMul;    // night=0.16, evening=0.11, noon=0.10
-    const dazedThreshold = 0.08;                        // 変えない
-    const cryThreshold = 0.05;                          // 変えない
+    // 夜は寝る確率が大きく上がる。夜型フレーバーの子だけは例外で昼と同じ挙動。
+    let sleepThreshold = 0.10;
+    if (w.dayPhase === 'evening') sleepThreshold = 0.15;
+    else if (w.dayPhase === 'night') sleepThreshold = nightOwl ? 0.10 : 0.80;  // 夜は 80% で寝直す
+    const dazedThreshold = 0.08;
+    const cryThreshold = 0.05;
     if (roll < cryThreshold) {
       setState(c, 'cry', 0.8);
       if (Math.random() < 0.95) spawnBubble(w.bubbles, c.pos, pickReason(CRY_REASONS), 'speech', 1.4);
@@ -1398,7 +1633,9 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       if (Math.random() < 0.85) spawnBubble(w.bubbles, c.pos, pickReason(DAZED_REASONS), 'speech', 1.2);
     }
     else if (roll < sleepThreshold) {
-      setState(c, 'sleep', w.dayPhase === 'night' ? 3 : 1.5);
+      // 夜の睡眠は長め（中断されにくい）、それ以外は従来通り
+      const sleepSec = w.dayPhase === 'night' && !nightOwl ? 8 + Math.random() * 6 : 1.5;
+      setState(c, 'sleep', sleepSec);
       if (Math.random() < 0.9) spawnBubble(w.bubbles, c.pos, pickReason(SLEEP_REASONS), 'speech', 1.3);
     }
     // 哲学石に着いたら空を見る（philo パラメータで確率決定）
@@ -1811,6 +2048,18 @@ function updateNpcs(w: WorldState, dt: number) {
       n.stateTimer -= dt;
       if (n.stateTimer <= 0) { n.state = 'idle'; n.stateTimer = 0; }
     }
+    // 夜は NPC 全員基本寝る（深夜徘徊はフラナの機嫌悪時のみ例外）
+    if (w.dayPhase === 'night' && n.state === 'idle') {
+      const furanaAngry = n.id === 'furana' && n.mood < 25;
+      if (!furanaAngry) {
+        n.state = 'sleep';
+        n.stateTimer = 10 + Math.random() * 8;
+        n.target = null;
+        continue;
+      }
+    }
+    // 寝てる間は移動処理をスキップ
+    if (n.state === 'sleep') continue;
     if (n.id === 'furana') {
       updateFuranaMovement(w, n, dt);
       updateFuranaBehavior(w, n, dt);
@@ -2388,6 +2637,7 @@ export function tickWorld(w: WorldState, dt: number) {
   computeWaterFlow(w);
   updateInfra(w, dt);
   updateFloodZones(w, dt);
+  updateWolves(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
   if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);

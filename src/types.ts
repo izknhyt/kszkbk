@@ -118,7 +118,8 @@ export type DeathCauseId =
   | 'mama_lost'               // フラナ（ママ）を失って心が折れて死亡
   | 'hunger_death'            // 空腹で餓死
   | 'fatigue_death'           // 疲労で衰弱死
-  | 'flood_drown';            // 洪水に流されて溺死
+  | 'flood_drown'            // 洪水に流されて溺死
+  | 'wolf_bite';             // オオカミに噛み殺された
 
 export interface DeathCause {
   id: DeathCauseId;
@@ -194,7 +195,8 @@ export interface Obstacle {
 // stage.ts の hitTest と main.ts の punch/drag/drop イベントで共有。
 export type HitTarget =
   | { kind: 'chibi'; id: number }
-  | { kind: 'npc'; id: string };
+  | { kind: 'npc'; id: string }
+  | { kind: 'wolf'; id: number };
 // 1日の位相。time-of-day で挙動・見た目を変える。
 // morning(0-25%) / noon(25-55%) / evening(55-80%) / night(80-100%)
 export type DayPhase = 'morning' | 'noon' | 'evening' | 'night';
@@ -224,6 +226,28 @@ export interface Weather {
 export interface WeatherForecastEntry {
   dayOffset: number;  // 0=今日 / 1=明日 / 2=明後日
   kind: WeatherKind;
+}
+
+// オオカミ（夜間のみ出現、野宿ちびわふを優先的に狙う）
+// 朝になると map 端へ撤退する。プレイヤーの左クリックでダメージ。
+export type WolfState =
+  | 'stalk'      // ターゲットへ接近中
+  | 'bite'       // 攻撃直後の硬直
+  | 'flee'       // 朝の撤退 or ダメージ後
+  | 'dead';
+
+export interface Wolf {
+  id: number;
+  pos: Vec2;
+  targetChibiId: number | null;
+  state: WolfState;
+  stateTimer: number;
+  hp: number;
+  maxHp: number;
+  speed: number;             // px/sec 基礎速度
+  biteCooldown: number;      // 噛みついた直後の再噛み抑止（秒）
+  faceLeft: boolean;
+  spawnTick: number;
 }
 
 // =========================================================================
