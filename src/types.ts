@@ -11,7 +11,7 @@ export type ChibiState =
   // --- P5: 生活ステート ---------------------------------------------------
   | 'chatting'   // すれ違い立ち話（移動停止）
   | 'staring'    // 浮世離れが空を見上げる
-  | 'eating';    // 石パン岩／泥水池で飲食
+  | 'eating';    // 飲食ステート
 
 export interface Vec2 {
   x: number;
@@ -42,8 +42,6 @@ export interface Chibiwafu {
   lifeLog: LifeEvent[];
   // 立ち話再発生までのクールダウン秒
   chatCooldown: number;
-  // 目的地の種類（ランドマーク由来の場合、ランドマークID）
-  targetLandmarkId: string | null;
   // --- HP（神様に殴られる／振り回される／投げられる時だけ減る）-------
   // 0 になったら死亡（kamisama_punch か kamisama_shake か kamisama_throw）。
   // 通常の事故死（ハザード・音頭・棒会議など）は HP を経由しない即死。

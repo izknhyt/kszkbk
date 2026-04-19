@@ -7,11 +7,11 @@ import type { TraitId } from '../types';
 //
 //   値の意味：
 //     courage  : 危険な場所（川・橋）へ行く傾向
-//     appetite : 食事ポイント（石パン岩・泥水池）を目指す傾向
+//     appetite : 食事（空腹時に畑・食料スポットへ向かう傾向）
 //     social   : すれ違い立ち話の発生頻度
 //     focus    : wander target を長く持続、状態遷移の遅さ
 //     energy   : 移動速度、idle の短さ
-//     philo    : 哲学石で止まる頻度、哲学死率
+//     philo    : 空を見上げて止まる頻度、哲学死率
 //     luck     : ハザード判定の運（低=ハザードに引っかかりやすい）
 //     tough    : 全死亡率の基礎低減
 //     mama     : フラナからの距離制限（高いほど張り付く）
@@ -168,16 +168,6 @@ export function derivedChatCooldown(p: ChibiParams): number {
 // 独り言（ambient speech）の 1tick あたり発生確率
 export function derivedSoloSpeakChance(p: ChibiParams): number {
   return 0.0015 + p.social * 0.00008; // social 0→0.0015, social 100→0.0095
-}
-
-// 哲学石で止まる確率
-export function derivedStareChance(p: ChibiParams): number {
-  return Math.max(0.05, Math.min(0.85, 0.15 + p.philo * 0.006));
-}
-
-// 食事スポットで食事状態に入る確率
-export function derivedEatChance(p: ChibiParams): number {
-  return Math.max(0.1, Math.min(0.9, 0.2 + p.appetite * 0.005));
 }
 
 // 食事系・哲学死など個別ハザードを受ける時の倍率（luck / tough / zako から合成）

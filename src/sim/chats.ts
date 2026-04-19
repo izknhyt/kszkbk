@@ -335,12 +335,6 @@ export function pickReason(pool: string[]): string {
 // =========================================================================
 export const ACTION_ANNOUNCE: Record<string, string[]> = {
   // 目的地別
-  landmark_stonebread : ['いしぱんわふ！', 'たべるわふ！', 'かじるわふ'],
-  landmark_philosophy : ['そらみるわふ', 'かんがえるわふ', 'ぼーっとするわふ'],
-  landmark_mudpool    : ['のむわふ', 'おみずわふ'],
-  landmark_beer       : ['いっぱいいくわふ！', 'のむぞわふ'],
-  landmark_flowers    : ['おはなわふ！', 'きれいなのわふ'],
-  landmark_totem      : ['ぼうのとこわふ', 'むらのちゅうしんわふ'],
   river_bouken        : ['はしわたるわふ！', 'かわみるわふ', 'ぼうけんわふ！'],
   cocoon_ikusa        : ['やっつけるわふ！', 'ぶつぞわふ', 'せんとうわふ！'],
   mama                : ['ママのとこわふ', 'ママみるわふ', 'ママー！'],

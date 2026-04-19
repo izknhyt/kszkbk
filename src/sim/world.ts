@@ -53,7 +53,6 @@ import {
 import { spawnBubble, updateBubbles, type Bubble } from './bubbles';
 import { rollTraits } from './traits';
 import { computeRank, maxBuildingLevel, upgradeCostFor, type RankContext } from './rank';
-import { landmarkList, type Landmark } from './landmarks';
 import {
   CRY_REASONS,
   DAZED_REASONS,
@@ -82,10 +81,8 @@ import { TRAIT_DEFS } from './traits';
 import {
   applyTraitBias,
   derivedChatCooldown,
-  derivedEatChance,
   derivedHazardSusceptibility,
   derivedSoloSpeakChance,
-  derivedStareChance,
   rollParams,
 } from './personality';
 import { rollFlavors, rollFlavorCount } from './flavorTraits';
@@ -165,7 +162,6 @@ export interface WorldState {
   lastSeason: Season;
   npcs: NpcState[];
   bubbles: Bubble[];
-  landmarks: Landmark[];
   // 開拓要素（水源・水路・畑・道）。自由配置、距離ベースで接続判定。
   features: Feature[];
   // 障害物（マップに散在。ちびわふが叩いて消す）
@@ -897,7 +893,6 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     lastSeason: 'spring',
     npcs: createNpcs(bounds),
     bubbles: [],
-    landmarks: landmarkList(bounds),
     features: [] as Feature[],
     obstacles: [] as Obstacle[],
     chibiHash: new SpatialHash(100),
@@ -1735,7 +1730,6 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
         } else if (d <= HOUSE_MAX_WALK_DIST && !nightOwl) {
           // 家へ向かって target を書き換え（wanderStep が次 tick で使う）
           c.target = { x: home.pos.x, y: home.pos.y };
-          c.targetLandmarkId = null;
         }
       }
     } else if (w.dayPhase === 'night' && !nightOwl) {
@@ -1765,35 +1759,6 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       const sleepSec = w.dayPhase === 'night' && !nightOwl ? 8 + Math.random() * 6 : 1.5;
       setState(c, 'sleep', sleepSec);
       if (Math.random() < 0.9) spawnBubble(w.bubbles, c.pos, pickReason(SLEEP_REASONS), 'speech', 1.3);
-    }
-    // 哲学石に着いたら空を見る（philo パラメータで確率決定）
-    else if (
-      c.targetLandmarkId === 'philosophy' &&
-      c.target &&
-      distance(c.pos, c.target) < 10 &&
-      Math.random() < derivedStareChance(c.params)
-    ) {
-      setState(c, 'staring', 2.5);
-      pushLife(c, Math.floor(c.ageSec), '哲学石で空を見た');
-      if (Math.random() < 0.6) {
-        const line = pickActionAnnounce('state_staring');
-        if (line) spawnBubble(w.bubbles, c.pos, line, 'speech', 1.4);
-      }
-    }
-    // 食事スポットに着いたら食事（appetite パラメータで確率決定）
-    else if (
-      (c.targetLandmarkId === 'stonebread' || c.targetLandmarkId === 'mudpool' || c.targetLandmarkId === 'beer') &&
-      c.target &&
-      distance(c.pos, c.target) < 10 &&
-      Math.random() < derivedEatChance(c.params)
-    ) {
-      setState(c, 'eating', 1.8);
-      const where = c.targetLandmarkId === 'stonebread' ? '石パン岩' : c.targetLandmarkId === 'mudpool' ? '泥水池' : '泥水ビール樽';
-      pushLife(c, Math.floor(c.ageSec), `${where}で食べた`);
-      if (Math.random() < 0.6) {
-        const line = pickActionAnnounce('state_eating');
-        if (line) spawnBubble(w.bubbles, c.pos, line, 'speech', 1.3);
-      }
     }
     else setState(c, 'idle', 0.4 + Math.random());
   }
@@ -1938,7 +1903,6 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     const cocoon = w.npcs.find((n) => n.id === 'cocoon');
     const env = getWanderEnv(w);
     const announcementKey = wanderStep(c, dt, w.bounds, {
-      landmarks: w.landmarks,
       season: w.season,
       furana: w.furanaPos,
       cocoonPos: cocoon ? cocoon.pos : null,

@@ -1,6 +1,5 @@
 import type { ChibiState, Chibiwafu, TraitId, Vec2 } from '../types';
 import { CONFIG } from '../config';
-import { landmarkActive, landmarkList, type Landmark, type LandmarkKind } from './landmarks';
 import {
   derivedMamaRadius,
   derivedRiverTrespass,
@@ -46,7 +45,6 @@ export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
     flavors: [...args.flavors],
     lifeLog: [],
     chatCooldown: 2,
-    targetLandmarkId: null,
     hp: maxHp,
     maxHp,
     flight: null,
@@ -69,18 +67,7 @@ export function isAlive(c: Chibiwafu): boolean {
 // 川に落ちる奴はたまにはいる（冒険家など）ので target 抽選で 6% だけ越境を許す。
 const DRY_Y_LIMIT = CONFIG.DRY_Y_LIMIT;
 
-// 特性に応じた目的地バイアス。対象ランドマークの種類ごとに確率を持つ。
-const TRAIT_LANDMARK_PREF: Partial<Record<TraitId, { kind: LandmarkKind; chance: number }[]>> = {
-  bouken:   [{ kind: 'kusozako_totem', chance: 0.2 }], // 中央にもたまに寄る（川は別処理）
-  gourmand: [{ kind: 'stonebread_rock', chance: 0.6 }, { kind: 'mudwater_pool', chance: 0.2 }, { kind: 'beer_barrel', chance: 0.3 }],
-  shinpai:  [], // 別処理でフラナ近傍に張り付く
-  ukiyo:    [{ kind: 'philosophy_stone', chance: 0.5 }],
-  ikusa:    [],
-  noumin:   [], // 農業区周辺は world 側で処理（建物位置を使う）
-};
-
 interface WanderEnv {
-  landmarks: Landmark[];
   season: Season;
   furana: Vec2;
   cocoonPos: Vec2 | null;
@@ -92,33 +79,11 @@ interface WanderEnv {
   farmPositions: Vec2[];
 }
 
-function pickLandmarkTarget(c: Chibiwafu, env: WanderEnv): Landmark | null {
-  for (const t of c.traits) {
-    const prefs = TRAIT_LANDMARK_PREF[t];
-    if (!prefs) continue;
-    for (const pref of prefs) {
-      if (Math.random() > pref.chance) continue;
-      const candidates = env.landmarks.filter(
-        (l) => l.kind === pref.kind && landmarkActive(l, env.season),
-      );
-      if (candidates.length === 0) continue;
-      return candidates[Math.floor(Math.random() * candidates.length)]!;
-    }
-  }
-  // 特性に引っかからなくても、全員が 8% でランドマークへ
-  if (Math.random() < 0.08) {
-    const active = env.landmarks.filter((l) => landmarkActive(l, env.season));
-    if (active.length > 0) return active[Math.floor(Math.random() * active.length)]!;
-  }
-  return null;
-}
-
 export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: number }, env?: WanderEnv): string | null {
   let announcementKey: string | null = null;
   if (!c.target || distance(c.pos, c.target) < 4) {
     const margin = 30;
     let newTarget: Vec2 | null = null;
-    let newLandmarkId: string | null = null;
 
     if (env) {
       // --- パラメータ駆動：ママ依存が高いほどフラナ近くに留まる ---
@@ -184,15 +149,6 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         newTarget = { x: op.x + (Math.random() - 0.5) * 10, y: op.y + (Math.random() - 0.5) * 10 };
         announcementKey = 'work';
       }
-      // ランドマーク指向（パラメータ＋特性）
-      if (!newTarget) {
-        const lm = pickLandmarkTarget(c, env);
-        if (lm) {
-          newTarget = { x: lm.pos.x + (Math.random() - 0.5) * 16, y: lm.pos.y + (Math.random() - 0.5) * 16 };
-          newLandmarkId = lm.id;
-          announcementKey = `landmark_${lm.id}`;
-        }
-      }
     }
 
     // fallback: 自由徘徊（ママ依存でフラナ近くに寄せつつ、勇気で川を許容）
@@ -222,7 +178,6 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
     }
 
     c.target = newTarget;
-    c.targetLandmarkId = newLandmarkId;
     // 方向音痴：目標座標に大きめの乱数をかける
     if (c.flavors.includes('方向音痴')) {
       c.target.x += (Math.random() - 0.5) * 120;
@@ -245,7 +200,7 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
   return announcementKey;
 }
 
-export { type WanderEnv, landmarkList };
+export type { WanderEnv };
 
 export function distance(a: Vec2, b: Vec2): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
