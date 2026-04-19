@@ -36,7 +36,7 @@ src/
   types.ts               全型定義（Chibiwafu / Feature / Obstacle / Weather 等）
   main.ts                エントリ。ゲームループ、UI イベント、スタート画面
   sim/
-    world.ts             【中心】WorldState, tickWorld, 各 update* 関数群（2,200 行）
+    world.ts             【中心】WorldState, tickWorld, 各 update* 関数群（2,885 行）
     chibiwafu.ts         spawnChibiwafu, wanderStep, DRY_Y_LIMIT
     npcs.ts              NpcState, NPC_DEFS, セリフプール、createNpcs
     chats.ts             会話セリフ（GENERIC/TRAIT/CHEEKY/反応系多数）
@@ -47,13 +47,13 @@ src/
     flavorBehaviors.ts   フレーバーに紐づく挙動 & EMBARRASSING_FLAVORS
     personality.ts       10 軸パラメータ生成＆派生関数
     events.ts            季節 / DayPhase / GlobalEvent 型
-    landmarks.ts         石パン岩 / 哲学石 等の固定 POI
+    landmarks.ts         石パン岩 / 哲学石 等の固定 POI【Σ-0 で廃止予定】
     bubbles.ts           吹き出しキュー
     rank.ts              4 段階ランク (村/集落/町/都)
     naming.ts            ちびわふ名前プール
     spatialHash.ts       空間分割ハッシュ（O(n²)→O(n)）
   render/
-    stage.ts             PixiJS 描画、カメラ制御、気象ティント、日時計（1,300 行）
+    stage.ts             PixiJS 描画、カメラ制御、気象ティント、日時計（1,535 行）
     sprites.ts           スプライトシート読込 & 白背景 flood-fill 透過
     ui.ts                HUD 更新、ビルドパネル、統計表示
   meta/
@@ -189,7 +189,7 @@ https://claude.ai/code/session_XXXXXX
 
 ## 進行状況
 
-### 完了フェーズ
+### 完了フェーズ（Ω 系：土台）
 
 | Phase | 内容 | Commit |
 |---|---|---|
@@ -199,27 +199,105 @@ https://claude.ai/code/session_XXXXXX
 | Ω-0-d1 | カメラ UX（WASD/F/R/ミニマップ） | f7bb5c9 |
 | Ω-0-d2 | 空間分割ハッシュ | 236cc49 |
 | Ω-1 | 気象 9 種 + 3 日予報 + 効果 | 4b8d120 |
+| Ω-2 | 水理システム（水流計算・洪水・流し） | 425ff93 |
+| Ω-2-b | 背景 procedural 固定（3200×1800） | 71f4855 |
+| Ω-3 | 住居・夜間睡眠・野宿ペナルティ | c61cd19 |
+| Ω-3-b | 高低差地形（水は下流へ、高台は洪水安全） | 846178c |
+| Ω-4 | 災害対策 feature（井戸・火の見やぐら） | dfe30bc |
+| Ω-5 | オオカミ襲撃 + 夜間戦闘 | a69a1bc |
+| Ω-7 | 生産チェイン P1（wood → plank 製材所） | cac8519 |
+| Ω-9 P1 | 神社 feature + plank 消費建築 + ミニマップ拡張 | 49fdb70 |
 
-### 予定フェーズ
+### ロードマップ v2（地形・3D 化）【現在のメイン路線】
 
-- **Ω-2** 水力（流量グラフ、容量超過で氾濫、洪水で chibi launchFlight）
-- **Ω-3** 住居・夜間睡眠（家、帰宅 AI、野宿→狼ターゲット）
-- **Ω-4** 災害 P1（洪水/干魃/火災/熱波、消防署）
-- **Ω-5** 災害 P2（狼/クマ/疫病/地震/野盗、防衛系）
+**ビジョン**：巨人のドシン × ピクミン × くそざこマインクラフト。
+神様が盛り土切り土を指示、ちびわふが労働、**改変がズボラで土砂崩れ事故で全滅**。
+
+| Phase | 内容 | 期間 | 状態 |
+|---|---|---|---|
+| **Σ-0** | **掃除パス**：landmarks 系一式廃止 + `public/mockup/background.png` 削除 + 石パン系の flavor 保持 rename | 1 日 | 未着手 |
+| **Σ-1** | **2.5D z 物理**：`flight` に `vz/posZ` 追加、崖落下ダメージ、坂勾配で移動ペナルティ＋滑落死、激流もがき（水路 flow で vx/vy 継続加算） | 1 週 | 未着手 |
+| **Σ-2** | **タイル式ハイトマップ化**：`getElevation(x,y)` 関数 → 32px セルの 2D 配列データに移行、`{elev, material, stability, water}`、地形編集 API、`raiseTile/loweTile`、stability 計算、土砂崩れ災害、`landslide_crush/buried_alive` 死因追加 | 1 週 | 未着手 |
+| **Σ-3** | **3 地形 procedural 生成**：beginner=平野、standard=半島、hell=くそざこ島。ハイトマップ＋海マスクをシードで生成。既存 `DRY_Y_LIMIT` 一律泥川の前提を破棄 | 3 日 | 未着手 |
+| **Σ-4-proto** | **Three.js 検証プロト**（捨てプロト、1 週）。5 項目通れば本実装着手：① PlaneGeometry displace 60fps、② InstancedMesh 200 sprite 1 draw call、③ GPU picking、④ camera.project DOM 同期、⑤ 既存 PNG billboard の見え方 | 1 週 | 未着手 |
+| **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag で `stage.ts` と並行、parity 達成後に Pixi 削除。ビルボード＋ Toon 地形＋ splatmap＋ blob shadow | 2 週 | 未着手 |
+
+### ロードマップ v2 後の予定（Ω 系、優先度再調整）
+
+- **Ω-4 継続** 災害 P1 拡張（火災、熱波、消防署）
+- **Ω-5 拡張** クマ/疫病/地震/野盗
 - **Ω-6** 電力（ペダル発電所、電線、街灯、感電死）
-- **Ω-7** 生産チェイン（伐採→製材、採石→精錬、牧場→織物）
+- **Ω-7 継続** 生産チェイン P2-（採石→精錬、牧場→織物）
 - **Ω-8** 指示系統（ゾーン矩形 / 投げ縄 / 直接命令）
-- **Ω-9** 社会・士気（学校、酒場、神社、風呂）
+- **Ω-9 継続** 社会・士気（学校、酒場、風呂）
 - **Ω-10** 監督委任（フラナ/スズに job 委託）
 - **Ω-11** メタ進行（ラン終了、累計アンロック、図鑑拡張）
 
+### 採用済み新アイデア（Σ-1 以降に組み込み）
+
+- **② 病気＆集団感染**：咳→伝染→パンデミック、温泉/薬草で治療、放置で集団死
+- **⑥ カルト宗教化**：player-built 神社、教祖くそざこ、儀式死、フラナ機嫌暴落
+- **⑦ 潮汐システム**：海面周期 ±、干潮中のくそざこ→満潮で取り残され溺死（Σ-3 以降、島/半島のみ）
+- **⑧ 神罰（隕石/雷撃）**：プレイヤー究極のストレス発散、クールダウン、巻き込み多数
+
+### 棄却アイデア（採用しない、議論再開不要）
+
+- 世代交代＆性格遺伝（長ラン複雑化）
+- 恋愛・三角関係（スコープ過大）
+- 遺言＆英雄伝承（実装コスト vs 体験価値）
+- 祟り／悪霊（プレイヤー罰則がチーム性と合わない）
+
+## 3D 化の核指針（Σ-4 の憲法）
+
+Plan agent 分析による Top 5 決定事項。迷ったらここに戻る。
+
+1. **既存 9 ポーズ PNG を Y 軸ビルボード＋左右反転で流用＋ blob shadow**
+   アート再発注ゼロで 3D 化できる最大の武器。カメラ回転は封印する前提で成立。ドット絵/水彩への差し替えは texture atlas 差し替えだけで済む
+2. **Perspective fov 18-22° ＋固定 45° 俯瞰 ＋ 3 段階 discrete ズーム、回転なし**
+   巨人のドシンの「盆栽棚を覗き込む神」感。画面酔い回避、学習コスト最小
+3. **PlaneGeometry displace ＋ Splatmap（草/土/砂/岩 を高度・傾斜で自動配分）＋ Toon シェーダ**
+   Σ-2 のハイトマップ配列と 1:1 対応。崖落下の恐怖が視覚化、盛り土が直感的に盛り上がる
+4. **sim は `{x, y}` のまま、z は `getHeight(x, y)` で render 側が派生**
+   **アーキテクチャ鉄則**。撤退コスト最小、`scripts/sim.ts` も既存 save もそのまま通る。sim に 3D 固有ロジックを絶対埋めない
+5. **HUD は DOM のまま、bubble は world → screen 変換でハイブリッド配置**
+   テキスト可読性と世界没入の両取り。`camera.project()` で位置を毎フレ translate3d
+
+### 段階移行の作法
+
+- `src/render/stage.ts` と並行して `src/render/stage3d.ts` を新設、同じ `StageHandle` インターフェース実装
+- 環境変数 `RENDER=3d` or 設定フラグでスイッチ可能に
+- feature parity 達成したら旧 `stage.ts` 削除 → Pixi を devDep から外す
+- 撤退判定ポイント：Σ-4-proto の 5 検証項目 / Σ-1 と Σ-4 の同一 seed 録画比較
+
+## 削除予定（Σ-0 掃除パスで実行）
+
+| 対象 | 理由 |
+|---|---|
+| `src/sim/landmarks.ts` 全体 | procedural 地形に移行すると固定座標は破綻、player-built building で代替可 |
+| `WorldState.landmarks` フィールド + セーブ項目 | 上に同じ、save version +1 |
+| `Chibiwafu.targetLandmarkId` + `pickLandmarkTarget` in chibiwafu.ts | wander ロジックから POI 参照を除去 |
+| `drawLandmark` + `landmarkLayer` in stage.ts | 描画系 |
+| 哲学石特殊挙動 (world.ts 1769-1785) | カルト儀式（採用済み⑥）に機能移転 |
+| `chats.ts` の `landmark_*` 6 エントリ | - |
+| `public/mockup/background.png` (3.5MB) | 未参照、Ω-2-b で廃止済みの残骸 |
+
+**ニュアンス保持で rename 残し**：
+- 死因 `石パンで歯折れ` / 窒息死 → 「硬い木の実で歯折れ」「どんぐり窒息」にフレーバー変更
+- flavor trait `"石パンに目がない"` → ラベルのみ残す
+- hazards.ts:86 の石パン hazard → 同上
+
+**保留（split 運用が安定なら削除可）**：
+- `public/chibiwafu.png` / `public/furana.png` (計 2MB) — split 9 ポーズのフォールバック
+
 ## 既知の注意点・quirks
 
-- **world.ts が 2,200 行超**：分割候補だが未実施。近々 `disasters.ts` 等に外出し検討
+- **world.ts が 2,885 行超**：分割候補だが未実施。近々 `disasters.ts` 等に外出し検討
 - **sim.ts balance assertion は pre-existing failing**（top share > 22% 等）、ブロッカーではない
-- **save v1-v8 履歴**：plots は v8 で廃止（Feature に置換）、旧 save は空扱い
+- **save v1-v9 履歴**：plots は v8 で廃止（Feature に置換）、landmarks は Σ-0 で廃止予定
 - **chibi death cause "fatigue_death"** は P1-C1 時点で ほぼ発火せず（hunger 死が先）、P2 で食料ある状態で初めて顕在化
 - **PixiJS の `const CONFIG = { ... } as const`**：リテラル型になるので `currentBoundsW: number = CONFIG.WORLD_W` のように明示型が必要
+- **`getElevation(x,y)` は関数ベース**：Σ-2 でタイル配列に置換予定。固定勾配なので現状「一定の坂」にしか見えない
+- **`DRY_Y_LIMIT = 1150` 南側一律泥川**：Σ-3 で 3 地形化すると前提崩壊、`hazards.ts` の mudriver/bridge/季節ゾーンも再設計対象
 
 ## よくある作業パターン
 
