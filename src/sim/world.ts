@@ -77,6 +77,7 @@ import {
   pickVictimHurtLine,
 } from './chats';
 import { EMBARRASSING_FLAVORS, FLAVOR_AMBIENT, FLAVOR_DURING, FLAVOR_SEASONAL, applyFlavorSpeedMod } from './flavorBehaviors';
+import { SpatialHash } from './spatialHash';
 import { TRAIT_DEFS } from './traits';
 import {
   applyTraitBias,
@@ -169,6 +170,9 @@ export interface WorldState {
   features: Feature[];
   // 障害物（マップに散在。ちびわふが叩いて消す）
   obstacles: Obstacle[];
+  // 空間分割ハッシュ。tick 毎にちびわふ位置を再配置、近傍検索に使う。
+  // 保存対象外（transient）。
+  chibiHash: SpatialHash;
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -372,6 +376,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     landmarks: landmarkList(bounds),
     features: [] as Feature[],
     obstacles: [] as Obstacle[],
+    chibiHash: new SpatialHash(100),
   };
 }
 
@@ -1064,8 +1069,8 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     spawnBubble(w.bubbles, c.pos, '💧', 'stomp', 1.1);
     pushLife(c, Math.floor(c.ageSec), 'もらした');
     // 周囲 50px に生きた他の子がいれば反応（35% 優しく拭く / 65% ドン引き）
-    const witness = w.chibis.find(
-      (o) => o !== c && isAlive(o) && distance(o.pos, c.pos) < 50 && o.state === 'idle',
+    const witness = w.chibiHash.nearby(c.pos, 50, c).find(
+      (o) => distance(o.pos, c.pos) < 50 && o.state === 'idle',
     );
     if (witness) {
       if (Math.random() < 0.35) {
@@ -1238,8 +1243,8 @@ function emergentPeerReactions(w: WorldState, c: Chibiwafu) {
   if (c.chatCooldown > 0) return;          // おしゃべり CD を共有
   if (Math.random() > 0.004) return;        // 50秒に 1回程度（per chibi）
   // 45px 以内で "反応したくなる" ステートの子を探す
-  const targets = w.chibis.filter(
-    (o) => o !== c && isAlive(o) && distance(o.pos, c.pos) < 45
+  const targets = w.chibiHash.nearby(c.pos, 45, c).filter(
+    (o) => distance(o.pos, c.pos) < 45
       && (o.state === 'cry' || o.state === 'eating' || o.state === 'sleep' || o.state === 'angry'),
   );
   if (targets.length === 0) return;
@@ -1282,8 +1287,9 @@ const SCHADENFREUDE_CAUSES = new Set<DeathCauseId>([
 // 悪い死に方をした子の近くにいるちびわふが、まれに野次を飛ばす
 function chibiSchadenfreude(w: WorldState, victim: Chibiwafu) {
   if (victim.deathCauseId == null || !SCHADENFREUDE_CAUSES.has(victim.deathCauseId as DeathCauseId)) return;
-  const witnesses = w.chibis.filter(
-    (o) => o !== victim && isAlive(o) && distance(o.pos, victim.pos) < 70 && o.state === 'idle',
+  // hash からの近傍候補で idle な子を拾う（死の瞬間はまだ hash に victim が居る可能性あり）
+  const witnesses = w.chibiHash.nearby(victim.pos, 70, victim).filter(
+    (o) => isAlive(o) && distance(o.pos, victim.pos) < 70 && o.state === 'idle',
   );
   if (witnesses.length === 0) return;
   // 1人だけランダムに選び 12% の確率で野次
@@ -1315,13 +1321,17 @@ function maybePunishCheeky(w: WorldState, victim: Chibiwafu) {
 
 // 立ち話：近接2体をO(n²)で検査（人口数十までは無視できるコスト）
 function processChats(w: WorldState, dt: number) {
+  // 空間分割ハッシュで各 a に対し近傍 b のみ試す（O(n²) → O(n*k)）
+  const seenPair = new Set<number>();  // chibi id を 1 度 chat したら除外
   for (let i = 0; i < w.chibis.length; i++) {
     const a = w.chibis[i]!;
     if (!isAlive(a) || a.state === 'chatting' || a.chatCooldown > 0) continue;
-    for (let j = i + 1; j < w.chibis.length; j++) {
-      const b = w.chibis[j]!;
+    if (seenPair.has(a.id)) continue;
+    const candidates = w.chibiHash.nearby(a.pos, 70, a);
+    for (const b of candidates) {
       if (!isAlive(b) || b.state === 'chatting' || b.chatCooldown > 0) continue;
-      // 近接距離：広めに取って常時どこかで立ち話が起きてる状態にする
+      if (b.id <= a.id) continue;  // 二重処理防止（元の j>i と同等）
+      if (seenPair.has(b.id)) continue;
       if (distance(a.pos, b.pos) > 70) continue;
       const chat = maybeStartChat(a, b);
       if (!chat) continue;
@@ -1342,6 +1352,7 @@ function processChats(w: WorldState, dt: number) {
       // 生意気セリフは報復対象
       if (chat.lineA.cheeky) maybePunishCheeky(w, a);
       if (chat.lineB.cheeky) maybePunishCheeky(w, b);
+      seenPair.add(a.id); seenPair.add(b.id);
       break; // a は1人と話せば十分
     }
   }
@@ -1350,7 +1361,8 @@ function processChats(w: WorldState, dt: number) {
     if (n.dead) continue;
     if (n.id === 'lou') continue; // ルーは無口
     if (Math.random() > 0.004) continue; // per-tick 発火率
-    const partner = w.chibis.find(
+    const nearChibis = w.chibiHash.nearby(n.pos, 50);
+    const partner = nearChibis.find(
       (c) => isAlive(c) && c.state === 'idle' && c.chatCooldown <= 0 && distance(c.pos, n.pos) < 50,
     );
     if (!partner) continue;
@@ -1549,7 +1561,9 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
     spawnBubble(w.bubbles, n.pos, pickLine(pool), 'npc-speech', 2);
   }
   if (n.abuseCooldown > 0) return;
-  const candidates = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 70);
+  // 攻撃候補（70px 以内）は空間分割で絞る。フラナの "最寄りを追う" 移動は
+  // pickFuranaTarget が全走査で行うので、遠くの子へも向かって行ける。
+  const candidates = w.chibiHash.nearby(n.pos, 70).filter((c) => distance(c.pos, n.pos) < 70);
   if (candidates.length === 0) {
     n.abuseCooldown = 2 + Math.random() * 2;
     return;
@@ -1771,7 +1785,7 @@ function applyFuranaLossPanic(w: WorldState, dt: number) {
 function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
   n.abuseCooldown -= dt;
   if (n.abuseCooldown > 0) return;
-  const candidates = w.chibis.filter((c) => isAlive(c) && distance(c.pos, n.pos) < 90);
+  const candidates = w.chibiHash.nearby(n.pos, 90).filter((c) => distance(c.pos, n.pos) < 90);
   if (candidates.length === 0) {
     n.abuseCooldown = 0.6;
     return;
@@ -1899,8 +1913,8 @@ function updateLabor(w: WorldState, dt: number) {
   for (const obs of w.obstacles) {
     // 28px 以内のちびわふ（活動可能な状態のみ）をカウント
     let workers = 0;
-    for (const c of w.chibis) {
-      if (!isAlive(c)) continue;
+    const near = w.chibiHash.nearby(obs.pos, 28);
+    for (const c of near) {
       if (c.state === 'sleep' || c.state === 'dead' || c.state === 'hurt') continue;
       if (distance(c.pos, obs.pos) > 28) continue;
       workers++;
@@ -1913,7 +1927,7 @@ function updateLabor(w: WorldState, dt: number) {
     obs.hp -= dt * 0.5 * workers;
     // バブル：作業中の気配（5% * workers / 秒）
     if (Math.random() < dt * 0.5 * workers) {
-      const near = w.chibis.find((c) => isAlive(c) && distance(c.pos, obs.pos) < 28);
+      const near = w.chibiHash.nearby(obs.pos, 28).find((c) => distance(c.pos, obs.pos) < 28);
       if (near) {
         const line = obs.kind === 'rock' ? 'えいっわふ' : obs.kind === 'stump' ? 'ぬくわふ！' : 'むしるわふ';
         spawnBubble(w.bubbles, near.pos, line, 'speech', 0.8);
@@ -1973,6 +1987,8 @@ export function tickWorld(w: WorldState, dt: number) {
   resolveEvent(w, dt);
   const hazards = getActiveHazards(w);
   for (const c of w.chibis) updateChibi(w, c, dt, hazards);
+  // ちびわふ移動後に空間分割ハッシュを再構築（以降の近傍検索はこれを使う）
+  w.chibiHash.rebuild(w.chibis.filter(isAlive));
   if (w.furanaGrabbedTimer > 0) {
     w.furanaGrabbedTimer = Math.max(0, w.furanaGrabbedTimer - dt);
     applyFuranaChaseBehavior(w);
