@@ -1943,6 +1943,39 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       const line = pickActionAnnounce(announcementKey);
       if (line) spawnBubble(w.bubbles, c.pos, line, 'speech', 1.3);
     }
+
+    // Σ-1-b 坂勾配ペナルティ：進行方向 20px 先との標高差でチェック
+    // 勾配 > 0.3 → 速度半減 + fatigue、> 0.6 → courage 判定で滑落
+    if (c.target && !c.flight) {
+      const tdx = c.target.x - c.pos.x;
+      const tdy = c.target.y - c.pos.y;
+      const tLen = Math.max(1, Math.hypot(tdx, tdy));
+      const nx = tdx / tLen;
+      const ny = tdy / tLen;
+      const curElev = getElevation(c.pos.x, c.pos.y);
+      const fwdElev = getElevation(c.pos.x + nx * 20, c.pos.y + ny * 20);
+      const slope = Math.abs((fwdElev - curElev) / 20);
+
+      if (slope > 0.3) {
+        // 急坂：このティックの移動量の半分を戻す（実質 0.5× 速度）
+        c.pos.x -= nx * c.speed * dt * 0.5;
+        c.pos.y -= ny * c.speed * dt * 0.5;
+        c.fatigue = Math.min(100, c.fatigue + dt * 1.5);
+      }
+      if (slope > 0.6 && !c.flight && Math.random() < dt * 0.008) {
+        // 急坂から滑落：courage チェック、失敗したら下方向に launchFlight
+        if (Math.random() > c.params.courage / 100) {
+          const gx = getElevation(c.pos.x + 5, c.pos.y) - getElevation(c.pos.x - 5, c.pos.y);
+          const gy = getElevation(c.pos.x, c.pos.y + 5) - getElevation(c.pos.x, c.pos.y - 5);
+          const gLen = Math.max(0.001, Math.hypot(gx, gy));
+          const slideSpeed = 70 + Math.random() * 50;
+          spawnBubble(w.bubbles, c.pos, 'すべるわふーっ！', 'speech', 1.5);
+          pushLife(c, Math.floor(c.ageSec), '急坂で足を滑らせて滑落した');
+          setState(c, 'surprised', 0.9);
+          launchFlight(c, -gx / gLen * slideSpeed, -gy / gLen * slideSpeed, 0.7, 5, 'slope_fall');
+        }
+      }
+    }
   }
   runHazards(w, c, dt, hazards);
 }
