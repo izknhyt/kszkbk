@@ -91,6 +91,17 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   });
   host.appendChild(app.canvas);
 
+  // 毎フレーム作り直される子 (plot/landmark/fx 等) を安全に破棄するヘルパ。
+  // PIXI v8 の removeChildren は中身を destroy しないため、Graphics の GPU
+  // バッファがリークし続けて FPS が落ちる。ここで明示的に destroy する。
+  function destroyAllChildren(layer: Container) {
+    for (let i = layer.children.length - 1; i >= 0; i--) {
+      const child = layer.children[i]!;
+      child.destroy({ children: true });
+    }
+    // destroy すると自動で親から外れる
+  }
+
   // --- カメラ ----------------------------------------------------------------
   // 全ゲームレイヤは cameraLayer の中に入れ、transform でスクロール＆ズームする。
   // HUD はHTML側にあるので、ここでは canvas 内部だけ考えればよい。
@@ -337,7 +348,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     drawPhaseTint(world.dayPhase);
 
     // 開拓要素（feature: 水源・水路・畑・道）+ 障害物 + 氾濫セル
-    plotLayer.removeChildren();
+    // 毎フレーム Graphics を作り直すので、前フレームぶんは destroy して
+    // GPU バッファを確実に解放する（removeChildren だけだとリーク）
+    destroyAllChildren(plotLayer);
     for (const fz of world.floodZones) {
       plotLayer.addChild(drawFloodZone(fz));
     }
@@ -349,7 +362,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     }
 
     // landmarks (描き直しは季節が変わった時のみ。ここでは常時再描画して単純化)
-    landmarkLayer.removeChildren();
+    destroyAllChildren(landmarkLayer);
     for (const lm of world.landmarks) {
       if (!landmarkActive(lm, world.season)) continue;
       landmarkLayer.addChild(drawLandmark(lm, envArt));
@@ -369,7 +382,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const b = world.buildings[i]!;
       const def = BUILDINGS[b.defId];
       const v = buildingViews[i]!;
-      v.removeChildren();
+      destroyAllChildren(v);
       const structure = drawBuildingStructure(b, def?.name.split('（')[0] ?? b.defId, envArt);
       v.addChild(structure);
       v.position.set(b.pos.x, b.pos.y);
@@ -529,8 +542,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 }
 
 function renderEventOverlay(under: Container, over: Container, world: WorldState) {
-  under.removeChildren();
-  over.removeChildren();
+  // destroy してバッファ解放（v8 の removeChildren は destroy しないためリーク源）
+  for (let i = under.children.length - 1; i >= 0; i--) under.children[i]!.destroy({ children: true });
+  for (let i = over.children.length - 1; i >= 0; i--) over.children[i]!.destroy({ children: true });
 
   // 棒会議マーカー（2.5秒）
   if (world.bokaigiMarkerTimer > 0) {
@@ -1032,7 +1046,8 @@ function seededRand(seed: number): () => number {
 }
 
 function drawBackground(layer: Container, w: number, h: number, season: Season, envArt: EnvironmentArt) {
-  layer.removeChildren();
+  // 背景は季節変わり時のみ再描画されるため頻度低いが、念のため destroy
+  for (let i = layer.children.length - 1; i >= 0; i--) layer.children[i]!.destroy({ children: true });
   if (envArt.background) {
     const bgSprite = new Sprite(envArt.background);
     bgSprite.width = w;

@@ -544,13 +544,16 @@ async function start() {
     prev = now;
     acc += dtReal * timeScale;
     let steps = 0;
-    const maxSteps = 256;
+    // 1 フレーム内での最大 sim ステップ。高時間倍率 (×64) × 200 chibi だと
+    // 256 はブラウザをフリーズさせるので 32 に絞り、超過分は捨てる（catch-up 諦め）。
+    const maxSteps = 32;
     while (acc >= dtFixed && steps < maxSteps) {
       tickWorld(world, dtFixed);
       acc -= dtFixed;
       steps += 1;
     }
-    if (acc > dtFixed * maxSteps) acc = 0;
+    // catch-up を打ち切り、溜まった時間は破棄（背景タブ復帰やスタッターを吸収）
+    if (steps >= maxSteps) acc = 0;
 
     // キーボードパン：保持中のキーで dtReal 秒ぶんカメラ移動
     const panSpeed = 800;  // world px / sec
