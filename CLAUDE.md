@@ -201,15 +201,31 @@ https://claude.ai/code/session_XXXXXX
 | Ω-1 | 気象 9 種 + 3 日予報 + 効果 | 4b8d120 |
 | Ω-2 | 水理システム（水流計算・洪水・流し） | 425ff93 |
 | Ω-2-b | 背景 procedural 固定（3200×1800） | 71f4855 |
-| Ω-3 | 住居・夜間睡眠・野宿ペナルティ | c61cd19 |
-| Ω-3-b | 高低差地形（水は下流へ、高台は洪水安全） | 846178c |
+| Ω-3 | 住居・夜間睡眠・野宿ペナルティ | c61cd19 (+fix a82ea68 / 6fca1fa / dc49362) |
+| Ω-3-b | 高低差地形（水は下流へ、高台は洪水安全） | 846118d |
 | Ω-4 | 災害対策 feature（井戸・火の見やぐら） | dfe30bc |
 | Ω-5 | オオカミ襲撃 + 夜間戦闘 | a69a1bc |
-| Ω-7 | 生産チェイン P1（wood → plank 製材所） | cac8519 |
-| Ω-9 P1 | 神社 feature + plank 消費建築 + ミニマップ拡張 | 49fdb70 |
+| Ω-7 P1 | 生産チェイン（製材所 wood→plank） | cac8519 |
+| Ω-9 P1 | 神社 feature（plank 消費建築） | 49fdb70 |
+| polish | 警告 toast / 神社 ✨ / ログタブ戦績 | 4fd4609 / a42ecb5 |
+| refactor | バグ 6 件修正 + パフォーマンス最適化 | 67b75c2 |
 
-### ロードマップ v2（地形・3D 化）【現在のメイン路線】
+#### 🚧 並行作業中のインフラ系（`claude/review-progress-XaRZT` ブランチ、本流に未 merge）
 
+| Phase | 内容 | Commit |
+|---|---|---|
+| Ω-6 P1 | 電力システム（発電所 + 街灯） | 28421bb |
+| Ω-6 P2a | 電線 feature + 接続グラフ（BFS） | e725958 |
+| Ω-6 P2b | 感電死 + 落雷で発電所爆発（storm イベント） | be7a4a5 |
+| Ω-7 P2 | 精錬所（kiln）+ brick リソース（stone→brick） | ade91ac |
+| Ω-7 P3 | 牧場（pasture）+ 織機（loom）（wool/cloth） | 6459eb0 |
+
+**追加された FeatureKind**：`generator / streetlamp / powerline / kiln / pasture / loom`
+**追加された死因**：`electrocution / thunder_blast`
+
+### ロードマップ v2（地形・3D 化）【現在のメイン路線 / 最優先】
+
+**方針**：3D 路線（Σ-0〜Σ-4）を先に完走、その後にインフラ路線（Ω-6/7 の正式統合 + 残タスク）再開。
 **ビジョン**：巨人のドシン × ピクミン × くそざこマインクラフト。
 神様が盛り土切り土を指示、ちびわふが労働、**改変がズボラで土砂崩れ事故で全滅**。
 
@@ -222,16 +238,20 @@ https://claude.ai/code/session_XXXXXX
 | **Σ-4-proto** | **Three.js 検証プロト**（捨てプロト、1 週）。5 項目通れば本実装着手：① PlaneGeometry displace 60fps、② InstancedMesh 200 sprite 1 draw call、③ GPU picking、④ camera.project DOM 同期、⑤ 既存 PNG billboard の見え方 | 1 週 | 未着手 |
 | **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag で `stage.ts` と並行、parity 達成後に Pixi 削除。ビルボード＋ Toon 地形＋ splatmap＋ blob shadow | 2 週 | 未着手 |
 
-### ロードマップ v2 後の予定（Ω 系、優先度再調整）
+### ロードマップ v2 後の予定（Ω 系、Σ-4 完走後に再開）
 
+**最初にやる**：`claude/review-progress-XaRZT` を本流に merge → Ω-6 と Ω-7 P2/P3 を正式化
+
+続けて：
 - **Ω-4 継続** 災害 P1 拡張（火災、熱波、消防署）
-- **Ω-5 拡張** クマ/疫病/地震/野盗
-- **Ω-6** 電力（ペダル発電所、電線、街灯、感電死）
-- **Ω-7 継続** 生産チェイン P2-（採石→精錬、牧場→織物）
+- **Ω-5 拡張** クマ/疫病/地震/野盗（+ 採用済み②**病気＆集団感染**を Σ-3 以降の時点で合わせる）
+- **Ω-6 P3〜** 電力拡張（より複雑な電気回路、停電、過負荷）
+- **Ω-7 P4〜** 生産チェイン拡張（ガラス、金属精錬、調合）
 - **Ω-8** 指示系統（ゾーン矩形 / 投げ縄 / 直接命令）
-- **Ω-9 継続** 社会・士気（学校、酒場、風呂）
+- **Ω-9 P2〜** 社会・士気（学校、酒場、風呂）＋ 採用済み⑥**カルト宗教化**
 - **Ω-10** 監督委任（フラナ/スズに job 委託）
 - **Ω-11** メタ進行（ラン終了、累計アンロック、図鑑拡張）
+- **Ω-12**（新規）採用済み⑦**潮汐** ＋ ⑧**神罰** を Σ-3 完了後に正式統合
 
 ### 採用済み新アイデア（Σ-1 以降に組み込み）
 
@@ -268,6 +288,29 @@ Plan agent 分析による Top 5 決定事項。迷ったらここに戻る。
 - 環境変数 `RENDER=3d` or 設定フラグでスイッチ可能に
 - feature parity 達成したら旧 `stage.ts` 削除 → Pixi を devDep から外す
 - 撤退判定ポイント：Σ-4-proto の 5 検証項目 / Σ-1 と Σ-4 の同一 seed 録画比較
+
+### ブランチ運用（現時点のトポロジー）
+
+```
+origin/claude/idle-village-game-7IfPd       ← 事実上の main（remote HEAD）
+├─ claude/review-progress-XaRZT             ← ⚠️ インフラ並行作業（Ω-6 / Ω-7 P2/P3）
+│
+└─ claude/evaluate-3d-topdown-view-PMH23    ← 3D 化路線の起点（CLAUDE.md v2 + agent）
+    ├─ claude/sigma-0-cleanup               ← Σ-0 掃除（未着手）
+    └─ claude/sigma-1-z-physics             ← Σ-1 z 物理（未着手）
+```
+
+**merge 順序（3D 路線優先方針）**：
+1. `evaluate-3d` → `idle-village` に merge（CLAUDE.md 統合済みなので衝突しない）
+2. `sigma-0` 完了 → `idle-village` に merge
+3. `sigma-1` 完了 → `idle-village` に rebase & merge
+4. Σ-2, Σ-3, Σ-4-proto, Σ-4 を順次
+5. Σ-4 完走後に `review-progress` を rebase & merge（Ω-6/7 を正式統合）
+6. Ω 系の残タスクへ
+
+**並行作業の注意**：
+- `sigma-1` の z 物理は `types.ts` の `Flight` 型を触る。`review-progress` も `types.ts` に `FeatureKind` 6 種と `DeathCauseId` 2 種を追加済 → **rebase 時に軽い衝突あり得るが別フィールド追加なので統合容易**
+- `sigma-0` の landmarks 削除は `world.ts` / `chats.ts` / `deaths.ts` を触る。`review-progress` も `world.ts` / `deaths.ts` を触るが**別領域（電力・生産チェイン系 vs POI 系）** で衝突は軽微
 
 ## 削除予定（Σ-0 掃除パスで実行）
 
