@@ -404,6 +404,13 @@ export function updateInfra(w: WorldState, dt: number) {
     f.workSec += dt;
     if (f.devLevel < 3 && f.workSec >= 30) f.devLevel = 3;
   }
+  // 神社：たまに ✨ バブルを発生させて祝福感を演出（5秒に1回程度）
+  for (const f of w.features) {
+    if (f.kind !== 'shrine') continue;
+    if (Math.random() < dt / 5) {
+      spawnBubble(w.bubbles, { x: f.pos.x + (Math.random() - 0.5) * 40, y: f.pos.y - 10 }, '✨', 'speech', 1.5);
+    }
+  }
   // 製材所：近くのちびわふが働くと wood→plank 変換。
   for (const f of w.features) {
     if (f.kind !== 'sawmill') continue;

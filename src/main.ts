@@ -191,6 +191,8 @@ async function start() {
   let uiTimer = 0;
   let lastRank: VillageRank = world.villageRank;
   let lastVillageLv = world.villageLv;
+  let lastWolfCount = 0;
+  let lastWolfDeaths = 0;
   const dtFixed = CONFIG.TICK_DT;
   let acc = 0;
   let prev = performance.now();
@@ -616,6 +618,18 @@ async function start() {
       }
       world.newDiscoveries = [];
       flashTabHighlight('dex');
+    }
+
+    // detect wolf appearance / kill
+    const wolfCount = world.wolves.filter((w) => w.state !== 'dead').length;
+    if (wolfCount > lastWolfCount && lastWolfCount === 0) {
+      flashToast(`🐺 オオカミ出現！(${wolfCount})`, 'discovery');
+    }
+    lastWolfCount = wolfCount;
+    const wolfDeaths = world.dex.wolf_bite?.count ?? 0;
+    if (wolfDeaths > lastWolfDeaths) {
+      flashToast(`🐺 噛まれて ${wolfDeaths - lastWolfDeaths} 人死亡…`, 'info');
+      lastWolfDeaths = wolfDeaths;
     }
 
     // detect rank promotion
