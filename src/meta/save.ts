@@ -41,6 +41,7 @@ interface SaveData {
   weather?: WorldState['weather'];
   weatherForecast?: WorldState['weatherForecast'];
   lastWeatherDayCount?: number;
+  wolvesKilled?: number;
 }
 
 // スロット概要（スタート画面で 3 枚のカードに表示）
@@ -115,10 +116,12 @@ export function save(w: WorldState, slot: SlotId) {
     shortestLifeName: w.shortestLifeName,
     resources: w.resources,
     obstacles: w.obstacles,
-    features: w.features,
+    // flow / saturated は tick 毎に再計算される transient フィールド。保存不要。
+    features: w.features.map(({ flow: _f, saturated: _s, ...rest }) => rest),
     weather: w.weather,
     weatherForecast: w.weatherForecast,
     lastWeatherDayCount: w.lastWeatherDayCount,
+    wolvesKilled: w.wolvesKilled,
   };
   try {
     localStorage.setItem(slotKey(slot), JSON.stringify(data));
@@ -162,6 +165,7 @@ export function load(w: WorldState, slot: SlotId): boolean {
     if (data.weather) w.weather = data.weather;
     if (Array.isArray(data.weatherForecast) && data.weatherForecast.length > 0) w.weatherForecast = data.weatherForecast;
     if (typeof data.lastWeatherDayCount === 'number') w.lastWeatherDayCount = data.lastWeatherDayCount;
+    if (typeof data.wolvesKilled === 'number') w.wolvesKilled = data.wolvesKilled;
     return true;
   } catch {
     return false;

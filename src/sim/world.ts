@@ -492,8 +492,6 @@ export function computeWaterFlow(w: WorldState): void {
   if (w.features.length === 0) return;
 
   const weatherMul = weatherWaterSourceMul(w.weather.kind);
-  // id → feature の高速参照
-  const byId = new Map<string, Feature>(w.features.map((f) => [f.id, f]));
 
   // BFS：水源から接続水路へ流量を伝播。
   // well（井戸）は drought 耐性：weatherMul に関係なく 0.8 units/sec 維持。
@@ -512,8 +510,10 @@ export function computeWaterFlow(w: WorldState): void {
     }
   }
 
-  while (queue.length > 0) {
-    const { f: cur } = queue.shift()!;
+  // インデックスポインタで BFS（queue.shift() の O(n) コストを回避）
+  let qi = 0;
+  while (qi < queue.length) {
+    const { f: cur } = queue[qi++];
     const curElev = getElevation(cur.pos.x, cur.pos.y);
     // 接続先（WATER_LINK_RADIUS 以内の未訪問 channel/water/well）。
     // 高低差ルール：下流（標高が 3 以上低い）にしか流れない。
@@ -533,7 +533,6 @@ export function computeWaterFlow(w: WorldState): void {
       queue.push({ f: nf, incoming: nf.flow ?? 0 });
     }
   }
-  void byId;
 }
 
 // 氾濫の最大半径 px
@@ -770,8 +769,9 @@ export function updateWolves(w: WorldState, dt: number) {
 
     // stalk：ターゲット再評価（1秒おき or 未設定）
     let target = wolf.targetChibiId !== null
-      ? w.chibis.find((c) => c.id === wolf.targetChibiId && isAlive(c) && !c.flight) ?? null
+      ? (chibiById(w, wolf.targetChibiId) ?? null)
       : null;
+    if (target && (!isAlive(target) || target.flight)) target = null;
     if (!target || Math.random() < dt * 0.5) {
       target = pickWolfTarget(w, wolf);
       wolf.targetChibiId = target ? target.id : null;
@@ -932,6 +932,12 @@ export function ensurePlots(w: WorldState) {
   if (!w.wolves) w.wolves = [];
   if (w.wolfSpawnCooldown === undefined) w.wolfSpawnCooldown = 0;
   if (w.wolvesKilled === undefined) w.wolvesKilled = 0;
+  // オオカミID連番をリセット（ラン毎に 1 から始め直す）
+  resetWolfIdSeq(1);
+  // モジュールレベルキャッシュをクリア（セーブロード後に旧参照が残らないよう）
+  _wanderEnvCache = null;
+  _featureIdCache = null;
+  _chibiIdCache = null;
 }
 
 export function populationCap(w: WorldState): number {
@@ -1567,7 +1573,21 @@ function featureById(w: WorldState, id: string): Feature | undefined {
   return _featureIdCache.map.get(id);
 }
 
-// 毎 tick 同じ値になるワーカー入力（畑/農耕舎/太鼓/障害物の位置リスト）を
+// chibi id → Chibiwafu のキャッシュ。オオカミのターゲット追跡（tick 毎に O(n) find）を O(1) に。
+// 配列参照 + length で差分検知。
+let _chibiIdCache: { chibis: Chibiwafu[]; len: number; map: Map<number, Chibiwafu> } | null = null;
+function chibiById(w: WorldState, id: number): Chibiwafu | undefined {
+  if (!_chibiIdCache
+      || _chibiIdCache.chibis !== w.chibis
+      || _chibiIdCache.len !== w.chibis.length) {
+    const map = new Map<number, Chibiwafu>();
+    for (const c of w.chibis) map.set(c.id, c);
+    _chibiIdCache = { chibis: w.chibis, len: w.chibis.length, map };
+  }
+  return _chibiIdCache.map.get(id);
+}
+
+// 毎 tick 同じ値になるワーカー入力（畑/農耕舎/太鼓/障害物/神社の位置リスト）を
 // chibi ごとに filter/map し直すと O(chibis × features) で高くつく。tick 単位にキャッシュ。
 interface WanderEnvCache {
   tick: number;
@@ -1575,12 +1595,17 @@ interface WanderEnvCache {
   noukouPositions: Vec2[];
   taikoPositions: Vec2[];
   obstaclePositions: Vec2[];
+  shrinePositions: Vec2[];
 }
 let _wanderEnvCache: WanderEnvCache | null = null;
 function getWanderEnv(w: WorldState): WanderEnvCache {
   if (_wanderEnvCache && _wanderEnvCache.tick === w.tick) return _wanderEnvCache;
   const farmPositions: Vec2[] = [];
-  for (const f of w.features) if (f.kind === 'farm') farmPositions.push(f.pos);
+  const shrinePositions: Vec2[] = [];
+  for (const f of w.features) {
+    if (f.kind === 'farm') farmPositions.push(f.pos);
+    else if (f.kind === 'shrine') shrinePositions.push(f.pos);
+  }
   const noukouPositions: Vec2[] = [];
   const taikoPositions: Vec2[] = [];
   for (const b of w.buildings) {
@@ -1591,7 +1616,7 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   // obstaclePositions の近くへ歩く。sawmill も労働対象として混ぜておく）
   const obstaclePositions: Vec2[] = w.obstacles.map((o) => o.pos);
   for (const f of w.features) if (f.kind === 'sawmill') obstaclePositions.push(f.pos);
-  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions };
+  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions };
   return _wanderEnvCache;
 }
 
@@ -1642,11 +1667,11 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   const toughMul = 1 - Math.max(0, c.params.tough - 50) * 0.006;  // tough100=0.7倍
   const mods = DIFFICULTY_MODS[w.difficulty];
   const wmods = weatherChibiMods(w.weather.kind);
-  // 神社（shrine）半径 200px 以内は士気ボーナスで空腹・疲労が -30%
+  // 神社（shrine）半径 200px 以内は士気ボーナスで空腹・疲労が -30%（tick キャッシュ利用）
+  const env = getWanderEnv(w);
   let shrineMul = 1.0;
-  for (const f of w.features) {
-    if (f.kind !== 'shrine') continue;
-    if (Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= 200) {
+  for (const sp of env.shrinePositions) {
+    if (Math.hypot(sp.x - c.pos.x, sp.y - c.pos.y) <= 200) {
       shrineMul = 0.7;
       break;
     }
