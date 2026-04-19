@@ -312,9 +312,15 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   const views = new Map<number, ChibiView>();
   const corpseViews = new Map<number, Sprite>();
-  const buildingViews: Container[] = [];
+  // buildings はレベル変化時のみ再構築（毎フレーム GPU 再生成を避ける）
+  const buildingViews: Array<{ container: Container; key: string }> = [];
   const npcViews = new Map<NpcId, NpcView>();
   const bubbleViews = new Map<number, BubbleView>();
+  // plotLayer は 3 フレームに 1 回だけ再構築（obstacles 140個×2Graphics を毎60fps は重すぎ）
+  let drawFrameCount = 0;
+  // chibi/corpse depth sort は PIXI の zIndex 機能を使う（直接 sort() は内部配列を壊す可能性）
+  chibiLayer.sortableChildren = true;
+  corpseLayer.sortableChildren = true;
 
   function resize(_w: number, _h: number) {
     // ワールドサイズは固定。表示領域が変わったらカメラの可視範囲再計算のみ。
@@ -327,7 +333,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   function setSeason(s: Season) {
     if (s === currentSeason) return;
     currentSeason = s;
-    bgLayer.removeChildren();
+    destroyAllChildren(bgLayer); // removeChildren() は GPU バッファを解放しない
     drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason, envArt);
   }
 
@@ -336,7 +342,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     if (w === currentBoundsW && h === currentBoundsH) return;
     currentBoundsW = w;
     currentBoundsH = h;
-    bgLayer.removeChildren();
+    destroyAllChildren(bgLayer); // removeChildren() は GPU バッファを解放しない
     drawBackground(bgLayer, currentBoundsW, currentBoundsH, currentSeason, envArt);
     clampCamera();
     applyCamera();
@@ -347,45 +353,55 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     setBounds(world.bounds.w, world.bounds.h);
     drawPhaseTint(world.dayPhase);
 
-    // 開拓要素（feature: 水源・水路・畑・道）+ 障害物 + 氾濫セル
-    // 毎フレーム Graphics を作り直すので、前フレームぶんは destroy して
-    // GPU バッファを確実に解放する（removeChildren だけだとリーク）
-    destroyAllChildren(plotLayer);
-    for (const fz of world.floodZones) {
-      plotLayer.addChild(drawFloodZone(fz));
-    }
-    for (const f of world.features) {
-      plotLayer.addChild(drawFeature(f));
-    }
-    for (const obs of world.obstacles) {
-      plotLayer.addChild(drawObstacle(obs));
+    drawFrameCount++;
+
+    // 開拓要素（feature / 障害物 / 氾濫セル）
+    // obstacle は最大 140 個 × 2 Graphics。毎 60fps 再生成は GPU ドライバを詰まらせる。
+    // → 3 フレームに 1 回だけ再構築（≒ 20fps 更新）。洪水半径の変化も十分滑らか。
+    if (drawFrameCount % 3 === 0) {
+      destroyAllChildren(plotLayer);
+      for (const fz of world.floodZones) {
+        plotLayer.addChild(drawFloodZone(fz));
+      }
+      for (const f of world.features) {
+        plotLayer.addChild(drawFeature(f));
+      }
+      for (const obs of world.obstacles) {
+        plotLayer.addChild(drawObstacle(obs));
+      }
     }
 
-    // landmarks (描き直しは季節が変わった時のみ。ここでは常時再描画して単純化)
-    destroyAllChildren(landmarkLayer);
-    for (const lm of world.landmarks) {
-      if (!landmarkActive(lm, world.season)) continue;
-      landmarkLayer.addChild(drawLandmark(lm, envArt));
+    // landmarks：季節変化時のみ再構築（静的 POI は毎フレーム再生成不要）
+    if (drawFrameCount % 3 === 0) {
+      destroyAllChildren(landmarkLayer);
+      for (const lm of world.landmarks) {
+        if (!landmarkActive(lm, world.season)) continue;
+        landmarkLayer.addChild(drawLandmark(lm, envArt));
+      }
     }
 
-    // buildings
+    // buildings：level 変化時のみ再構築。毎フレーム destroy+create は GPU 負荷大。
     while (buildingViews.length < world.buildings.length) {
-      const v = new Container();
-      buildingLayer.addChild(v);
-      buildingViews.push(v);
+      const container = new Container();
+      buildingLayer.addChild(container);
+      buildingViews.push({ container, key: '' });
     }
     while (buildingViews.length > world.buildings.length) {
-      const v = buildingViews.pop()!;
-      v.destroy({ children: true });
+      const entry = buildingViews.pop()!;
+      entry.container.destroy({ children: true });
     }
     for (let i = 0; i < world.buildings.length; i++) {
       const b = world.buildings[i]!;
       const def = BUILDINGS[b.defId];
-      const v = buildingViews[i]!;
-      destroyAllChildren(v);
-      const structure = drawBuildingStructure(b, def?.name.split('（')[0] ?? b.defId, envArt);
-      v.addChild(structure);
-      v.position.set(b.pos.x, b.pos.y);
+      const entry = buildingViews[i]!;
+      const key = `${b.defId}:${b.level}`;
+      if (entry.key !== key) {
+        entry.key = key;
+        destroyAllChildren(entry.container);
+        const structure = drawBuildingStructure(b, def?.name.split('（')[0] ?? b.defId, envArt);
+        entry.container.addChild(structure);
+        entry.container.position.set(b.pos.x, b.pos.y);
+      }
     }
 
     // corpses
@@ -396,6 +412,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         s.scale.set(calcScale(lib));
         s.alpha = 0.85;
         s.position.set(c.pos.x, c.pos.y);
+        s.zIndex = c.pos.y;
         corpseLayer.addChild(s);
         corpseViews.set(c.id, s);
       }
@@ -448,6 +465,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         wy = (Math.random() - 0.5) * 2;
       }
       v.container.position.set(c.pos.x + wx, c.pos.y + wy);
+      v.container.zIndex = c.pos.y;  // depth sort via PIXI zIndex（直接 sort() は内部配列を破壊）
       v.sprite.scale.x = (c.faceLeft ? -1 : 1) * calcScale(lib);
       if (v.lastState !== c.state) {
         v.sprite.texture = frameFor(lib, c.state);
@@ -497,10 +515,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
     // event overlays
     renderEventOverlay(eventUnderLayer, eventOverLayer, world);
-
-    // depth sort by y
-    chibiLayer.children.sort((a, b) => a.y - b.y);
-    corpseLayer.children.sort((a, b) => a.y - b.y);
+    // depth sort は sortableChildren=true + zIndex で PIXI が自動実行
   }
 
   function screenToWorld(cx: number, cy: number): { x: number; y: number } {
