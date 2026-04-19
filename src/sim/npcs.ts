@@ -174,10 +174,10 @@ export function pushNpcLife(n: NpcState, sec: number, text: string) {
 
 export function createNpcs(bounds: { w: number; h: number }): NpcState[] {
   return [
-    mkNpc('furana', { x: bounds.w / 2, y: 220 }, 10),
-    mkNpc('suzu',   { x: bounds.w * 0.25, y: 240 }),
-    mkNpc('lou',    { x: bounds.w * 0.82, y: 180 }),
-    mkNpc('cocoon', { x: bounds.w * 0.65, y: 300 }, 2),
+    mkNpc('furana', { x: bounds.w / 2,       y: bounds.h * 0.35 }, 10),
+    mkNpc('suzu',   { x: bounds.w * 0.4,     y: bounds.h * 0.38 }),
+    mkNpc('lou',    { x: bounds.w * 0.72,    y: bounds.h * 0.28 }),
+    mkNpc('cocoon', { x: bounds.w * 0.58,    y: bounds.h * 0.45 }, 2),
   ];
 }
 

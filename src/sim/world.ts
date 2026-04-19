@@ -171,23 +171,25 @@ export interface WorldState {
   obstacles: Obstacle[];
 }
 
-// フリー配置障害物：陸地（y 60〜380）かつフラナ拠点から離れた場所にランダム散在
+// フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
+// フラナ拠点（マップ中央）付近は除外。
 function createInitialObstacles(bounds: { w: number; h: number }, target = 24): Obstacle[] {
   const list: Obstacle[] = [];
   const kinds: ObstacleKind[] = ['rock', 'stump', 'bush'];
   const hpMap: Record<ObstacleKind, number> = { rock: 30, stump: 25, bush: 15 };
   const centerX = bounds.w / 2;
-  const centerY = 220;  // フラナ拠点
-  const minSpacing = 40;
+  const centerY = bounds.h * 0.35;
+  const minSpacing = 48;
+  const landBottom = CONFIG.DRY_Y_LIMIT - 40;
+  const landTop = 60;
   let attempts = 0;
   let seq = 0;
-  while (list.length < target && attempts < 500) {
+  while (list.length < target && attempts < 2000) {
     attempts++;
     const x = 60 + Math.random() * (bounds.w - 120);
-    const y = 80 + Math.random() * 300;
-    // フラナ拠点から 80px 以内は避ける
-    if (Math.hypot(x - centerX, y - centerY) < 80) continue;
-    // 既存障害物からも離す
+    const y = landTop + Math.random() * (landBottom - landTop);
+    // フラナ拠点から 120px 以内は避ける（初期村空間を確保）
+    if (Math.hypot(x - centerX, y - centerY) < 120) continue;
     if (list.some((o) => Math.hypot(o.pos.x - x, o.pos.y - y) < minSpacing)) continue;
     const k = kinds[Math.floor(Math.random() * kinds.length)]!;
     list.push({
@@ -201,18 +203,18 @@ function createInitialObstacles(bounds: { w: number; h: number }, target = 24): 
   return list;
 }
 
-// 初期 feature 配置：水源 1、水路 2（水源近傍）、畑 1（水路近傍）
+// 初期 feature 配置：フラナ拠点近くに 水源 1 / 水路 2 / 畑 1 を横並びに
+// （広いマップの中央付近、ちびわふが最初からアクセスできる位置）
 function createInitialFeatures(bounds: { w: number; h: number }): Feature[] {
   const features: Feature[] = [];
   let seq = 0;
   const mkId = () => `feat-${seq++}`;
-  // 水源：画面左寄り中段
-  const waterPos: Vec2 = { x: bounds.w * 0.22, y: 180 };
+  // 拠点中央の少し左に水源。フラナが bounds.w/2, bounds.h*0.35 付近にいる
+  const centerY = bounds.h * 0.35;
+  const waterPos: Vec2 = { x: bounds.w / 2 - 180, y: centerY };
   features.push({ id: mkId(), pos: waterPos, kind: 'water', devLevel: 3, workSec: 0 });
-  // 水路 2 本：水源の右隣に並べる
   features.push({ id: mkId(), pos: { x: waterPos.x + 55, y: waterPos.y }, kind: 'channel', devLevel: 2, workSec: 0 });
   features.push({ id: mkId(), pos: { x: waterPos.x + 110, y: waterPos.y }, kind: 'channel', devLevel: 2, workSec: 0 });
-  // 畑 1：水路の先
   features.push({ id: mkId(), pos: { x: waterPos.x + 165, y: waterPos.y }, kind: 'farm', devLevel: 2, workSec: 0 });
   return features;
 }
@@ -232,7 +234,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     hazardMul: 0.45,
     hungerMul: 0.75,
     fatigueMul: 0.75,
-    obstacleCount: 16,
+    obstacleCount: 50,
     eventIntervalMul: 1.5,
     initialResources: { food: 20, water: 0, wood: 15, stone: 10 },
   },
@@ -240,7 +242,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     hazardMul: 1.0,
     hungerMul: 1.0,
     fatigueMul: 1.0,
-    obstacleCount: 24,
+    obstacleCount: 90,
     eventIntervalMul: 1.0,
     initialResources: { food: 0, water: 0, wood: 0, stone: 0 },
   },
@@ -248,7 +250,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     hazardMul: 1.8,
     hungerMul: 1.4,
     fatigueMul: 1.3,
-    obstacleCount: 32,
+    obstacleCount: 140,
     eventIntervalMul: 0.55,
     initialResources: { food: 0, water: 0, wood: 0, stone: 0 },
   },
@@ -329,7 +331,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     dayProgress: 0,
     dayCount: 1,
     lastDayPhase: 'morning',
-    furanaPos: { x: bounds.w / 2, y: 220 },
+    furanaPos: { x: bounds.w / 2, y: bounds.h * 0.35 },
     chibis: [],
     corpses: [],
     maxCorpses: CONFIG.MAX_CORPSES_VISIBLE,
@@ -697,7 +699,7 @@ function flightStep(
     // 着地処理：水中 (y>414) なら溺死（ちびわふ）or 水HP削り（NPC）
     if (isChibi) {
       const c = entity as Chibiwafu;
-      if (c.pos.y > 414) {
+      if (c.pos.y > CONFIG.DRY_Y_LIMIT) {
         spawnBubble(w.bubbles, c.pos, 'わふぅ…', 'speech', 1.1);
         pushLife(c, Math.floor(c.ageSec), '水に落ちて沈んだ');
         damageChibi(w, c, c.hp, 'kamisama_drown');
@@ -713,7 +715,7 @@ function flightStep(
       }
     } else {
       const n = entity as NpcState;
-      if (n.pos.y > 414) {
+      if (n.pos.y > CONFIG.DRY_Y_LIMIT) {
         spawnBubble(w.bubbles, n.pos, 'わぷっ…', 'npc-speech', 1.2);
         damageNpc(w, n, 10);
         return;
@@ -1638,13 +1640,13 @@ function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punc
     if (Math.random() < 0.5) {
       const dir = target.pos.x < w.bounds.w / 2 ? 1 : -1;
       landX = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + dir * (250 + Math.random() * 150)));
-      landY = 430 + Math.random() * 40;
+      landY = CONFIG.DRY_Y_LIMIT + 16 + Math.random() * 40;
       pushLife(target, Math.floor(target.ageSec), 'フラナに川へぶん投げられた');
     } else {
       const ang = Math.random() * Math.PI * 2;
       const dist = 280 + Math.random() * 170;
       landX = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + Math.cos(ang) * dist));
-      landY = Math.max(40, Math.min(400, target.pos.y + Math.sin(ang) * dist));
+      landY = Math.max(40, Math.min(CONFIG.DRY_Y_LIMIT - 20, target.pos.y + Math.sin(ang) * dist));
       pushLife(target, Math.floor(target.ageSec), 'フラナにぶん投げられた');
     }
     target.target = null;

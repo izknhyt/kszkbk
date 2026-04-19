@@ -230,7 +230,7 @@ async function start() {
     const x = detail.worldX;
     const y = detail.worldY;
     // 川エリアには建てられない（path は橋代わりにできるが今回は未実装）
-    if (y > 414) {
+    if (y > CONFIG.DRY_Y_LIMIT) {
       flashToast('川には建てられない', 'info');
       return;
     }

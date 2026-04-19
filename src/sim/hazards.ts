@@ -1,4 +1,5 @@
 import type { DeathCauseId, Season, TraitId, Vec2 } from '../types';
+import { CONFIG } from '../config';
 import type { GlobalEvent } from './events';
 
 // =========================================================================
@@ -49,8 +50,8 @@ export const HAZARDS: HazardZone[] = [
     id: 'bouken_cliff',
     causeId: 'bouken_cliff',
     kind: 'rect',
-    rect: { x: 0, y: 420, w: 9999, h: 9999 },
-    ratePerSec: 3.0, // bridge (4.0) と競合するので高めに設定
+    rect: { x: 0, y: CONFIG.DRY_Y_LIMIT + 10, w: 99999, h: 99999 },
+    ratePerSec: 3.0,
     seasons: ['spring'],
     bypassSafeZone: true,
     requiresAnyTrait: ['bouken'],
@@ -60,16 +61,17 @@ export const HAZARDS: HazardZone[] = [
     id: 'mudriver',
     causeId: 'mudriver',
     kind: 'rect',
-    rect: { x: 0, y: 414, w: 9999, h: 9999 },
+    rect: { x: 0, y: CONFIG.DRY_Y_LIMIT, w: 99999, h: 99999 },
     ratePerSec: 0.35,
     traitMultipliers: { bouken: 1.5 },
     note: '泥川 — 冒険家は1.5倍の確率で溺れる',
   },
+  // bridge：画面中央の橋。広いマップなので bounds 中央に合わせて移動
   {
     id: 'bridge',
     causeId: 'bridge',
     kind: 'rect',
-    rect: { x: 178, y: 385, w: 34, h: 58 },
+    rect: { x: CONFIG.WORLD_W / 2 - 18, y: CONFIG.DRY_Y_LIMIT - 30, w: 36, h: 90 },
     ratePerSec: 4.0,
     traitMultipliers: { bouken: 1.5 },
     note: '丸太橋 — 渡ろうとすると落ちる（通過時間が短いので rate を高く）',
@@ -230,7 +232,7 @@ export const HAZARDS: HazardZone[] = [
     id: 'tabikko_boundary_r',
     causeId: 'tabikko_boundary',
     kind: 'rect',
-    rect: { x: 1040, y: 0, w: 200, h: 9999 }, // WORLD_W=1100 のほぼ右端
+    rect: { x: CONFIG.WORLD_W - 60, y: 0, w: 200, h: 99999 },
     ratePerSec: 0.08,
     bypassSafeZone: true,
     requiresAnyTrait: ['tabikko'],

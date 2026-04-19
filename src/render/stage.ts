@@ -152,17 +152,18 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     cameraLayer.scale.set(cameraScale);
   }
 
-  function fitCameraToViewport() {
+  // 広いマップでは全景フィットだとちびわふが小さすぎるので、
+  // 初期は 0.6 倍ズーム + フラナ拠点（マップ中央）を画面中央に
+  function focusOn(x: number, y: number, scale?: number) {
+    if (scale !== undefined) cameraScale = clamp(scale, CONFIG.CAMERA_MIN_SCALE, CONFIG.CAMERA_MAX_SCALE);
     const vw = app.renderer.width;
     const vh = app.renderer.height;
-    const fit = Math.min(vw / currentBoundsW, vh / currentBoundsH);
-    cameraScale = clamp(fit, CONFIG.CAMERA_MIN_SCALE, CONFIG.CAMERA_MAX_SCALE);
-    cameraX = 0;
-    cameraY = 0;
+    cameraX = vw / 2 - x * cameraScale;
+    cameraY = vh / 2 - y * cameraScale;
     clampCamera();
     applyCamera();
   }
-  fitCameraToViewport();
+  focusOn(currentBoundsW / 2, currentBoundsH * 0.35, 0.6);
 
   // --- 入力：ホイールでズーム（カーソル中心）、ドラッグでパン ----------------
   const canvas = app.canvas;
@@ -486,7 +487,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     resize,
     draw,
     setSeason,
-    resetCamera: fitCameraToViewport,
+    resetCamera: () => focusOn(currentBoundsW / 2, currentBoundsH * 0.35, 0.6),
     screenToWorld,
     setHitTest,
   };
@@ -1050,28 +1051,34 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
   bridgeRoad.rotation = -0.28;
   layer.addChild(roads, bridgeRoad);
 
+  // 川は y=DRY_Y_LIMIT 以降を覆う（procedural fallback）
+  const riverY = CONFIG.DRY_Y_LIMIT;
   const river = new Graphics();
-  river.rect(0, 420, w, h - 420).fill({ color: palette.river });
-  river.rect(0, 420, w, 4).fill({ color: 0x3a2a1a, alpha: 0.25 });
-  for (let i = 0; i < 12; i++) {
-    river.ellipse(80 + i * 86, 458 + (i % 3) * 18, 22, 4).fill({ color: 0xf5e8c8, alpha: 0.22 });
+  river.rect(0, riverY, w, h - riverY).fill({ color: palette.river });
+  river.rect(0, riverY, w, 4).fill({ color: 0x3a2a1a, alpha: 0.25 });
+  const waveCount = Math.max(12, Math.floor(w / 250));
+  for (let i = 0; i < waveCount; i++) {
+    river.ellipse(80 + i * 86, riverY + 38 + (i % 3) * 18, 22, 4).fill({ color: 0xf5e8c8, alpha: 0.22 });
   }
   layer.addChild(river);
 
   const shoreline = new Graphics();
-  shoreline.rect(0, 412, w, 12).fill({ color: 0xe6d8b9, alpha: 0.92 });
+  shoreline.rect(0, riverY - 8, w, 12).fill({ color: 0xe6d8b9, alpha: 0.92 });
   for (let i = 0; i < 18; i++) {
-    shoreline.circle(20 + i * (w / 18), 421 + (i % 2) * 2, 5).fill({ color: 0xfaf3e1, alpha: 0.45 });
+    shoreline.circle(20 + i * (w / 18), riverY + 1 + (i % 2) * 2, 5).fill({ color: 0xfaf3e1, alpha: 0.45 });
   }
   layer.addChild(shoreline);
 
+  // 丸太橋：マップ中央に置く（川を跨ぐ）
+  const bridgeX = w / 2 - 18;
+  const bridgeY = riverY - 30;
   const bridge = new Graphics();
-  bridge.roundRect(186, 410, 28, 90, 6).fill({ color: 0x81532c }).stroke({ color: 0x3a2a1a, width: 1.5 });
-  for (let i = 0; i < 6; i++) {
-    bridge.rect(189, 420 + i * 12, 22, 4).fill({ color: 0xb78853 });
+  bridge.roundRect(bridgeX, bridgeY, 36, 110, 6).fill({ color: 0x81532c }).stroke({ color: 0x3a2a1a, width: 1.5 });
+  for (let i = 0; i < 8; i++) {
+    bridge.rect(bridgeX + 3, bridgeY + 12 + i * 12, 30, 4).fill({ color: 0xb78853 });
   }
-  bridge.rect(189, 410, 4, 90).fill({ color: 0x65411f });
-  bridge.rect(207, 410, 4, 90).fill({ color: 0x65411f });
+  bridge.rect(bridgeX + 3, bridgeY, 4, 110).fill({ color: 0x65411f });
+  bridge.rect(bridgeX + 29, bridgeY, 4, 110).fill({ color: 0x65411f });
   layer.addChild(bridge);
 
   for (let i = 0; i < 14; i++) {

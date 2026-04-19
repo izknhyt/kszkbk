@@ -26,43 +26,44 @@ export interface Landmark {
 
 // 既定のワールドレイアウト。createWorld の後に landmarkList() で取得する。
 export function landmarkList(bounds: { w: number; h: number }): Landmark[] {
+  // 広いマップなので上下も散らす（h 割合を使う）
   return [
     {
       id: 'stonebread',
       kind: 'stonebread_rock',
-      pos: { x: bounds.w * 0.18, y: 270 },
+      pos: { x: bounds.w * 0.18, y: bounds.h * 0.28 },
       label: '石パン岩',
     },
     {
       id: 'philosophy',
       kind: 'philosophy_stone',
-      pos: { x: bounds.w * 0.88, y: 280 },
+      pos: { x: bounds.w * 0.88, y: bounds.h * 0.30 },
       label: '哲学石',
     },
     {
       id: 'mudpool',
       kind: 'mudwater_pool',
-      pos: { x: bounds.w * 0.42, y: 370 },
+      pos: { x: bounds.w * 0.42, y: bounds.h * 0.55 },
       label: '泥水池',
     },
     {
       id: 'beer',
       kind: 'beer_barrel',
-      pos: { x: bounds.w * 0.32, y: 260 },
+      pos: { x: bounds.w * 0.32, y: bounds.h * 0.25 },
       label: '泥水ビール樽',
       seasons: ['spring'],
     },
     {
       id: 'flowers',
       kind: 'flower_patch',
-      pos: { x: bounds.w * 0.70, y: 310 },
+      pos: { x: bounds.w * 0.70, y: bounds.h * 0.42 },
       label: '花畑',
       seasons: ['spring'],
     },
     {
       id: 'totem',
       kind: 'kusozako_totem',
-      pos: { x: bounds.w * 0.50, y: 280 },
+      pos: { x: bounds.w * 0.50, y: bounds.h * 0.32 },
       label: 'わふ棒（村の柱）',
     },
   ];
