@@ -126,7 +126,7 @@ export interface WorldState {
   // 水:   水源 + 水路で補給、畑にも必要（将来）
   // 木材: 伐採で得る、建物の材料
   // 石材: 石切で得る、建物の材料
-  resources: { food: number; water: number; wood: number; stone: number; plank: number };
+  resources: { food: number; water: number; wood: number; stone: number; plank: number; power: number; brick: number; wool: number; cloth: number };
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
@@ -184,6 +184,8 @@ export interface WorldState {
   wolfSpawnCooldown: number;
   // 撃破したオオカミ数（統計）
   wolvesKilled: number;
+  // 直近の落雷ヒット位置（UI/FX 用。transient、保存しない）
+  lastThunderStrikeAt?: { x: number; y: number; tick: number };
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -310,7 +312,7 @@ export interface DifficultyMods {
   fatigueMul: number;      // 疲労上昇速度乗算
   obstacleCount: number;   // 初期障害物数
   eventIntervalMul: number; // 音頭/火事のインターバル乗算（大きいほど間が空く）
-  initialResources: { food: number; water: number; wood: number; stone: number; plank: number };
+  initialResources: { food: number; water: number; wood: number; stone: number; plank: number; power: number; brick: number; wool: number; cloth: number };
 }
 export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
   beginner: {
@@ -319,7 +321,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 0.75,
     obstacleCount: 50,
     eventIntervalMul: 1.5,
-    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2 },
+    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, power: 5, brick: 0, wool: 0, cloth: 0 },
   },
   standard: {
     hazardMul: 1.0,
@@ -327,7 +329,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.0,
     obstacleCount: 90,
     eventIntervalMul: 1.0,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0, wool: 0, cloth: 0 },
   },
   hell: {
     hazardMul: 1.8,
@@ -335,7 +337,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.3,
     obstacleCount: 140,
     eventIntervalMul: 0.55,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0, wool: 0, cloth: 0 },
   },
 };
 export function currentMods(w: WorldState): DifficultyMods {
@@ -376,6 +378,73 @@ export function computeWateredFeatureIds(w: WorldState): Set<string> {
 const SAWMILL_WORKER_RADIUS = 45;
 const SAWMILL_PLANK_PER_SEC_PER_WORKER = 0.06;  // 1 worker で 17 秒に 1 plank
 const SAWMILL_WOOD_COST_PER_PLANK = 2;          // 木 2 → 板 1
+
+// 精錬所（kiln）：近くのちびわふが働くと stone→brick 変換。
+const KILN_WORKER_RADIUS = 45;
+const KILN_BRICK_PER_SEC_PER_WORKER = 0.04;  // 1 worker で 25 秒に 1 brick
+const KILN_STONE_COST_PER_BRICK = 3;         // 石 3 → レンガ 1
+
+// 牧場（pasture）：ちびわふ不要で wool を自動生産。雪/乾燥で半減。
+const PASTURE_WOOL_PER_SEC = 0.03;           // 単独で 33 秒に 1 wool
+// 織機（loom）：近くのちびわふが wool→cloth 変換。
+const LOOM_WORKER_RADIUS = 45;
+const LOOM_CLOTH_PER_SEC_PER_WORKER = 0.05; // 1 worker で 20 秒に 1 cloth
+const LOOM_WOOL_COST_PER_CLOTH = 2;         // 羊毛 2 → 布 1
+
+// 発電所（generator）：近くのちびわふがペダル漕ぎして power を生成。
+// 街灯（streetlamp）：夜間に power を消費して半径を照らし、オオカミ威圧＋野宿 HP ドレイン半減。
+// 電線（powerline）：発電所から街灯まで BFS で接続されていないと街灯は光らない（P2a）。
+const GENERATOR_WORKER_RADIUS = 40;
+const GENERATOR_POWER_PER_SEC_PER_WORKER = 0.3;
+const GENERATOR_WORKER_FATIGUE_PER_SEC = 0.15;
+const GENERATOR_MAX_WORKERS = 3;
+const POWER_CAPACITY = 30;
+export const STREETLAMP_RADIUS = 140;
+const STREETLAMP_POWER_PER_SEC = 0.2;
+export const POWERLINE_CONNECT_RADIUS = 90;  // generator/powerline/streetlamp 間の接続距離
+
+// 発電所から電線経由で電力到達可能な街灯 id を BFS で算出。
+// O((g+p+l)²) の辺生成は powerline が 50 以下想定で十分軽い。
+export function computePoweredLampIds(w: WorldState): Set<string> {
+  const powered = new Set<string>();
+  const sources = w.features.filter((f) => f.kind === 'generator');
+  if (sources.length === 0) return powered;
+  const nodes = w.features.filter(
+    (f) => f.kind === 'generator' || f.kind === 'powerline' || f.kind === 'streetlamp',
+  );
+  // 接続判定：頂点間距離 <= POWERLINE_CONNECT_RADIUS
+  const R2 = POWERLINE_CONNECT_RADIUS * POWERLINE_CONNECT_RADIUS;
+  const adj = new Map<string, string[]>();
+  for (const n of nodes) adj.set(n.id, []);
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i]!;
+      const b = nodes[j]!;
+      const dx = a.pos.x - b.pos.x;
+      const dy = a.pos.y - b.pos.y;
+      if (dx * dx + dy * dy <= R2) {
+        adj.get(a.id)!.push(b.id);
+        adj.get(b.id)!.push(a.id);
+      }
+    }
+  }
+  // BFS from all generators
+  const visited = new Set<string>();
+  const queue: string[] = [];
+  for (const g of sources) { visited.add(g.id); queue.push(g.id); }
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  for (let head = 0; head < queue.length; head++) {
+    const id = queue[head]!;
+    const n = byId.get(id);
+    if (n?.kind === 'streetlamp') powered.add(id);
+    for (const nb of adj.get(id) ?? []) {
+      if (visited.has(nb)) continue;
+      visited.add(nb);
+      queue.push(nb);
+    }
+  }
+  return powered;
+}
 
 export function updateInfra(w: WorldState, dt: number) {
   if (w.features.length === 0) return;
@@ -428,6 +497,188 @@ export function updateInfra(w: WorldState, dt: number) {
     }
     // wood 不足で止まっている場合は workSec が満タンで待機
     if (f.workSec > 1) f.workSec = 1;
+  }
+  // 精錬所（kiln）：近くのちびわふが働くと stone→brick 変換。製材所と同じ労働ループ。
+  for (const f of w.features) {
+    if (f.kind !== 'kiln') continue;
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      if (c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= KILN_WORKER_RADIUS) workers++;
+    }
+    if (workers === 0) continue;
+    const progress = dt * KILN_BRICK_PER_SEC_PER_WORKER * Math.min(3, workers);
+    f.workSec += progress;
+    while (f.workSec >= 1 && w.resources.stone >= KILN_STONE_COST_PER_BRICK) {
+      f.workSec -= 1;
+      w.resources.stone -= KILN_STONE_COST_PER_BRICK;
+      w.resources.brick += 1;
+    }
+    if (f.workSec > 1) f.workSec = 1;
+  }
+  // 牧場：ちびわふ不要で wool を自動生産。雪/乾燥で半減。
+  const pastureMul = (w.weather.kind === 'snow' || w.weather.kind === 'drought') ? 0.5 : 1.0;
+  for (const f of w.features) {
+    if (f.kind !== 'pasture') continue;
+    w.resources.wool += dt * PASTURE_WOOL_PER_SEC * pastureMul;
+  }
+  // 織機：近くのちびわふが wool→cloth 変換。
+  for (const f of w.features) {
+    if (f.kind !== 'loom') continue;
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      if (c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= LOOM_WORKER_RADIUS) workers++;
+    }
+    if (workers === 0) continue;
+    const progress = dt * LOOM_CLOTH_PER_SEC_PER_WORKER * Math.min(3, workers);
+    f.workSec += progress;
+    while (f.workSec >= 1 && w.resources.wool >= LOOM_WOOL_COST_PER_CLOTH) {
+      f.workSec -= 1;
+      w.resources.wool -= LOOM_WOOL_COST_PER_CLOTH;
+      w.resources.cloth += 1;
+    }
+    if (f.workSec > 1) f.workSec = 1;
+  }
+  // 発電所：ワーカーがペダルを漕いで power を生成、ワーカーは追加疲労。
+  for (const f of w.features) {
+    if (f.kind !== 'generator') continue;
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      if (c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= GENERATOR_WORKER_RADIUS) {
+        if (workers < GENERATOR_MAX_WORKERS) {
+          c.fatigue = Math.min(100, c.fatigue + dt * GENERATOR_WORKER_FATIGUE_PER_SEC);
+        }
+        workers++;
+      }
+    }
+    if (workers === 0) { f.flow = 0; continue; }
+    const active = Math.min(GENERATOR_MAX_WORKERS, workers);
+    const gain = dt * GENERATOR_POWER_PER_SEC_PER_WORKER * active;
+    w.resources.power = Math.min(POWER_CAPACITY, w.resources.power + gain);
+    f.flow = active;  // 描画で歯車回転速度として利用
+  }
+  // 街灯：夜間のみ稼働、接続済み & power 消費で光る。飽和フラグで「光ってるかどうか」を保持。
+  const lampActive = w.dayPhase === 'night' || w.dayPhase === 'evening';
+  const poweredLamps = lampActive ? computePoweredLampIds(w) : null;
+  for (const f of w.features) {
+    if (f.kind !== 'streetlamp') continue;
+    if (!lampActive || !poweredLamps || !poweredLamps.has(f.id)) { f.saturated = false; continue; }
+    const need = dt * STREETLAMP_POWER_PER_SEC;
+    if (w.resources.power >= need) {
+      w.resources.power -= need;
+      f.saturated = true;  // 光っている
+    } else {
+      f.saturated = false;  // 電力切れ
+    }
+  }
+}
+
+// ちびわふが稼働中の街灯半径内に居るか。オオカミターゲット回避・夜のHPドレイン半減に使う。
+export function chibiUnderStreetlamp(w: WorldState, x: number, y: number): boolean {
+  for (const f of w.features) {
+    if (f.kind !== 'streetlamp') continue;
+    if (!f.saturated) continue;
+    if (Math.hypot(f.pos.x - x, f.pos.y - y) <= STREETLAMP_RADIUS) return true;
+  }
+  return false;
+}
+
+// 雷・感電（storm / 雨天中のみ発動）。
+// - 感電死：稼働中の電線/街灯/発電所に半径内で触れていると確率死
+// - 落雷：storm 中のみ、発電所がランダムに落雷直撃で爆発破壊 + 周囲の chibi にダメージ
+const ELECTROCUTE_RADIUS_LAMP = 28;
+const ELECTROCUTE_RADIUS_LINE = 22;
+const ELECTROCUTE_RADIUS_GEN  = 35;
+const THUNDER_BLAST_RADIUS = 80;
+const THUNDER_BLAST_DAMAGE = 40;
+function updateThunderstrike(w: WorldState, dt: number) {
+  const wk = w.weather.kind;
+  const isStorm = wk === 'storm';
+  const isRainy = isStorm || wk === 'heavy_rain' || wk === 'light_rain';
+  if (!isRainy) return;
+  // 感電確率 (per sec)：storm 1.0 / heavy_rain 0.25 / light_rain 0.08 の基礎値
+  const electroRate = isStorm ? 1.0 : wk === 'heavy_rain' ? 0.25 : 0.08;
+  // 稼働中の街灯・電線（接続済みの両端で通電）・発電所（稼働=ワーカー>0）を「危険源」とする
+  const poweredLamps = computePoweredLampIds(w);
+  const liveLamps = w.features.filter((f) => f.kind === 'streetlamp' && f.saturated);
+  // 電線：稼働中街灯に電気的に繋がっている電線を「通電中」とみなす（発電所起点 BFS 再利用）
+  const liveLines = (() => {
+    if (poweredLamps.size === 0) return [] as typeof w.features;
+    // 発電所 BFS で辿れる電線を集める（computePoweredLampIds と同じアルゴを再実行、
+    // ここでは powerline の id も拾う必要があるため inline）
+    const gens = w.features.filter((f) => f.kind === 'generator');
+    const nodes = w.features.filter(
+      (f) => f.kind === 'generator' || f.kind === 'powerline' || f.kind === 'streetlamp',
+    );
+    const R2 = POWERLINE_CONNECT_RADIUS * POWERLINE_CONNECT_RADIUS;
+    const adj = new Map<string, string[]>();
+    for (const n of nodes) adj.set(n.id, []);
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i]!, b = nodes[j]!;
+        const dx = a.pos.x - b.pos.x, dy = a.pos.y - b.pos.y;
+        if (dx * dx + dy * dy <= R2) {
+          adj.get(a.id)!.push(b.id);
+          adj.get(b.id)!.push(a.id);
+        }
+      }
+    }
+    const visited = new Set<string>();
+    const queue: string[] = [];
+    for (const g of gens) { visited.add(g.id); queue.push(g.id); }
+    for (let h = 0; h < queue.length; h++) {
+      for (const nb of adj.get(queue[h]!) ?? []) {
+        if (!visited.has(nb)) { visited.add(nb); queue.push(nb); }
+      }
+    }
+    return w.features.filter((f) => f.kind === 'powerline' && visited.has(f.id));
+  })();
+  const liveGens = w.features.filter((f) => f.kind === 'generator' && (f.flow ?? 0) > 0);
+  // 各 chibi に最短危険源距離を判定し、感電ロール
+  for (const c of w.chibis) {
+    if (!isAlive(c) || c.flight) continue;
+    let inZone = false;
+    for (const f of liveLamps) {
+      if (Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= ELECTROCUTE_RADIUS_LAMP) { inZone = true; break; }
+    }
+    if (!inZone) for (const f of liveLines) {
+      if (Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= ELECTROCUTE_RADIUS_LINE) { inZone = true; break; }
+    }
+    if (!inZone) for (const f of liveGens) {
+      if (Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= ELECTROCUTE_RADIUS_GEN) { inZone = true; break; }
+    }
+    if (!inZone) continue;
+    const p = 1 - Math.exp(-electroRate * 0.04 * dt);  // 0.04 base = 「危険源に1秒いると storm 中 ~4% 死」
+    if (Math.random() < p) {
+      spawnBubble(w.bubbles, c.pos, '⚡', 'speech', 1.2);
+      kill(w, c, 'electrocution');
+    }
+  }
+  // 落雷：storm 中のみ発電所に直撃。平均 45 秒に 1 回。
+  if (!isStorm) return;
+  const gens = w.features.filter((f) => f.kind === 'generator');
+  if (gens.length === 0) return;
+  const strikeProb = 1 - Math.exp(-dt / 45);
+  if (Math.random() < strikeProb) {
+    const hit = gens[Math.floor(Math.random() * gens.length)]!;
+    spawnBubble(w.bubbles, { x: hit.pos.x, y: hit.pos.y - 20 }, '⚡⚡', 'speech', 2.5);
+    // 周囲の chibi にダメージ、死亡は thunder_blast
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      const d = Math.hypot(c.pos.x - hit.pos.x, c.pos.y - hit.pos.y);
+      if (d > THUNDER_BLAST_RADIUS) continue;
+      const falloff = 1 - d / THUNDER_BLAST_RADIUS;
+      const dmg = THUNDER_BLAST_DAMAGE * falloff;
+      damageChibi(w, c, dmg, 'thunder_blast');
+    }
+    // 発電所を破壊（features から削除）
+    w.features = w.features.filter((f) => f.id !== hit.id);
+    w.lastThunderStrikeAt = { x: hit.pos.x, y: hit.pos.y, tick: w.tick };
   }
 }
 
@@ -694,6 +945,8 @@ function pickWolfTarget(w: WorldState, wolf: Wolf): Chibiwafu | null {
     // 家で寝てる子は強く忌避（家が盾）。野宿で寝てる子は好物。
     if (c.state === 'sleep' && c.homeFid) priority -= 300;
     if (c.state === 'sleep' && !c.homeFid) priority += 80;  // 寝てる野宿は狩りやすい
+    // 稼働中の街灯の明かりの下ならオオカミは警戒して避ける
+    if (chibiUnderStreetlamp(w, c.pos.x, c.pos.y)) priority -= 220;
     const d = Math.hypot(c.pos.x - wolf.pos.x, c.pos.y - wolf.pos.y);
     priority -= d * 0.04;  // 近いほど優先
     return { c, priority };
@@ -1610,7 +1863,7 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   // 作業対象：障害物 + 製材所（chibiwafu.ts の wanderStep は「労働」として
   // obstaclePositions の近くへ歩く。sawmill も労働対象として混ぜておく）
   const obstaclePositions: Vec2[] = w.obstacles.map((o) => o.pos);
-  for (const f of w.features) if (f.kind === 'sawmill') obstaclePositions.push(f.pos);
+  for (const f of w.features) if (f.kind === 'sawmill' || f.kind === 'kiln' || f.kind === 'loom') obstaclePositions.push(f.pos);
   _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions };
   return _wanderEnvCache;
 }
@@ -1686,8 +1939,10 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     const recoveryMul = atHome ? 1.6 : isOpenAir ? 0.4 : 1.0;
     c.fatigue = Math.max(0, c.fatigue - dt * 0.70 * recoveryMul);
     if (isOpenAir) {
-      // 野宿の寒さ HP ドレイン
-      c.hp = Math.max(0, c.hp - dt * 0.15);
+      // 野宿の寒さ HP ドレイン。街灯の明かりの下なら半減。
+      const lit = chibiUnderStreetlamp(w, c.pos.x, c.pos.y);
+      const drain = lit ? 0.075 : 0.15;
+      c.hp = Math.max(0, c.hp - dt * drain);
       if (c.hp <= 0) { kill(w, c, 'fatigue_death'); return; }
     }
   }
@@ -2728,6 +2983,7 @@ export function tickWorld(w: WorldState, dt: number) {
   updateLabor(w, dt);
   computeWaterFlow(w);
   updateInfra(w, dt);
+  updateThunderstrike(w, dt);
   updateFloodZones(w, dt);
   updateWolves(w, dt);
   updateStomps(w, dt);

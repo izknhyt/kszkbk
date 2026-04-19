@@ -56,6 +56,10 @@
             <div class="stat"><span>🪵</span><b id="stat-wood">0</b></div>
             <div class="stat"><span>🪨</span><b id="stat-stone">0</b></div>
             <div class="stat"><span>🪚</span><b id="stat-plank">0</b></div>
+            <div class="stat"><span>⚡</span><b id="stat-power">0</b></div>
+            <div class="stat"><span>🧱</span><b id="stat-brick">0</b></div>
+            <div class="stat"><span>🐑</span><b id="stat-wool">0</b></div>
+            <div class="stat"><span>🧶</span><b id="stat-cloth">0</b></div>
           </div>
           <div class="weather-row">
             <span class="weather-now" id="weather-now">☀ 快晴</span>
@@ -82,6 +86,12 @@
               <button class="plot-build-btn" data-plot-kind="firewatch" title="火の見やぐら (wood×10 + stone×2) — 半径180pxの火事ダメージ×0.25">🔥 火の見<small>🪵×10 🪨×2</small></button>
               <button class="plot-build-btn" data-plot-kind="sawmill" title="製材所 (wood×8 + stone×4) — 近くのちびわふが wood 2 → plank 1 に変換">🪚 製材所<small>🪵×8 🪨×4</small></button>
               <button class="plot-build-btn" data-plot-kind="shrine" title="神社 (wood×3 + stone×5 + plank×2) — 半径200px以内のちびわふの空腹・疲労が-30%">⛩ 神社<small>🪵×3 🪨×5 🪚×2</small></button>
+              <button class="plot-build-btn" data-plot-kind="generator" title="ペダル発電所 (wood×6 + stone×4 + plank×3) — 近くのちびわふが漕いで電力を生む（疲労+）">⚡ 発電所<small>🪵×6 🪨×4 🪚×3</small></button>
+              <button class="plot-build-btn" data-plot-kind="streetlamp" title="街灯 (wood×2 + stone×1 + plank×1) — 夜に電力を消費して半径140を照らす。オオカミ忌避＋野宿のHPドレイン半減">💡 街灯<small>🪵×2 🪨×1 🪚×1</small></button>
+              <button class="plot-build-btn" data-plot-kind="powerline" title="電線 (wood×1 + plank×1) — 発電所と街灯を距離90px以内で繋ぐ中継。未接続の街灯は光らない">🪜 電線<small>🪵×1 🪚×1</small></button>
+              <button class="plot-build-btn" data-plot-kind="kiln" title="精錬所 (wood×4 + stone×8) — 近くのちびわふが stone×3 を brick×1 に変換。建材として将来の建物に使用">🧱 精錬所<small>🪵×4 🪨×8</small></button>
+              <button class="plot-build-btn" data-plot-kind="pasture" title="牧場 (wood×3 + stone×2) — 放置で wool を 0.03/sec 自動生産。雪/乾燥で半減。">🐑 牧場<small>🪵×3 🪨×2</small></button>
+              <button class="plot-build-btn" data-plot-kind="loom" title="織機 (wood×6 + plank×2) — 近くのちびわふが wool×2 を cloth×1 に変換">🧶 織機<small>🪵×6 🪚×2</small></button>
             </div>
             <div id="plot-build-hint" class="plot-build-hint">ボタンを押してから地面の好きな場所を左クリック</div>
           </div>

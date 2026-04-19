@@ -117,7 +117,9 @@ export type DeathCauseId =
   | 'hunger_death'            // 空腹で餓死
   | 'fatigue_death'           // 疲労で衰弱死
   | 'flood_drown'            // 洪水に流されて溺死
-  | 'wolf_bite';             // オオカミに噛み殺された
+  | 'wolf_bite'              // オオカミに噛み殺された
+  | 'electrocution'          // 雷・電線・発電所の事故で感電死
+  | 'thunder_blast';         // 発電所への落雷で爆発死（周囲巻き込み）
 
 export interface DeathCause {
   id: DeathCauseId;
@@ -156,7 +158,7 @@ export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
 // フリー配置の開拓要素（水源・水路・畑・道）。
 // タイル/グリッド無しで任意の座標に置ける。水の伝播は距離ベースで判定。
-export type FeatureKind = 'water' | 'channel' | 'path' | 'farm' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine';
+export type FeatureKind = 'water' | 'channel' | 'path' | 'farm' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln' | 'pasture' | 'loom';
 
 export interface Feature {
   id: string;

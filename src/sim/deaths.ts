@@ -310,6 +310,21 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 28,
     template: (n) => `${n}は夜の闇から現れたオオカミに一噛みされ、まもりんだけが残った。`,
   },
+  electrocution: {
+    id: 'electrocution',
+    title: '感電死',
+    rare: false,
+    uncommon: true,
+    points: 32,
+    template: (n) => `${n}は光る電線を触り、ピカッと一瞬だけ明るくなって倒れた。`,
+  },
+  thunder_blast: {
+    id: 'thunder_blast',
+    title: '落雷直撃',
+    rare: true,
+    points: 48,
+    template: (n) => `${n}はペダル発電所の屋根に落ちた雷をもろに受け、黒焦げになった。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;
