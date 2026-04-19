@@ -68,6 +68,10 @@ export interface LifeEvent {
 export interface FlightState {
   vx: number;  // px/sec
   vy: number;
+  // Σ-1-a z物理：posZ が getElevation(x,y) 以下になると崖落下着地
+  vz: number;       // z方向速度 terrain-units/sec（負 = 下降）
+  posZ: number;     // 現在高度（getElevation と同スケール）
+  startElev: number; // 発射地点の地形高度（崖落下ダメージ算出用）
   leftSec: number;
   totalSec: number;
   hitKeys: string[];  // 同一個体を重ねて巻き添えしない
@@ -117,7 +121,11 @@ export type DeathCauseId =
   | 'hunger_death'            // 空腹で餓死
   | 'fatigue_death'           // 疲労で衰弱死
   | 'flood_drown'            // 洪水に流されて溺死
-  | 'wolf_bite';             // オオカミに噛み殺された
+  | 'wolf_bite'              // オオカミに噛み殺された
+  // --- Σ-1 z物理 追加 ----------------------------------------------------------
+  | 'cliff_fall'             // 崖から落ちて地面に激突
+  | 'slope_fall'             // 坂で足を滑らせて滑落死
+  | 'river_swept';           // 激流に流されて溺死
 
 export interface DeathCause {
   id: DeathCauseId;

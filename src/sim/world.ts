@@ -1178,6 +1178,9 @@ export function damageChibi(w: WorldState, c: Chibiwafu, amount: number, causeId
 
 // ちびわふ／NPC を "空中に投げ飛ばす" 物理的な飛行を起動する。
 // 指定した速度で飛び、毎 tick 当たり判定を行い、landTime 経過で着地処理。
+// Σ-1-a: z物理も同時に初期化。重力加速度 CLIFF_GRAVITY で posZ が地形高度以下になると崖落下着地。
+const CLIFF_GRAVITY = 200; // terrain-units/sec²
+
 export function launchFlight(
   entity: Chibiwafu | NpcState,
   vx: number,
@@ -1186,9 +1189,17 @@ export function launchFlight(
   landingDamage: number,
   landCauseId: DeathCauseId,
 ): void {
+  const startElev = getElevation(entity.pos.x, entity.pos.y);
+  // posZ 初期値：頂点から自由落下開始→ flightSec 後に地面に到達する高さ
+  // posZ(t) = startElev + posZOffset - 0.5*CLIFF_GRAVITY*t²
+  // 着地（posZ = startElev）: t = flightSec → posZOffset = 0.5*CLIFF_GRAVITY*flightSec²
+  const posZOffset = 0.5 * CLIFF_GRAVITY * flightSec * flightSec;
   const flight: FlightState = {
     vx,
     vy,
+    vz: 0,                       // 頂点スタート（初速なし、重力のみ）
+    posZ: startElev + posZOffset, // 平地着地ならちょうど flightSec で地面到達
+    startElev,
     leftSec: flightSec,
     totalSec: flightSec,
     hitKeys: [],
@@ -1212,6 +1223,9 @@ function flightStep(
   entity.pos.y += f.vy * dt;
   f.vy += 180 * dt;
   f.leftSec -= dt;
+  // Σ-1-a z物理：重力で posZ を下降、地形以下になると崖着地
+  f.vz -= CLIFF_GRAVITY * dt;
+  f.posZ += f.vz * dt;
   // 横方向は画面内にクランプ（反射はしない、端で止まる）
   if (entity.pos.x < 16) { entity.pos.x = 16; f.vx = Math.abs(f.vx) * 0.5; }
   if (entity.pos.x > w.bounds.w - 16) { entity.pos.x = w.bounds.w - 16; f.vx = -Math.abs(f.vx) * 0.5; }
@@ -1241,12 +1255,23 @@ function flightStep(
     damageNpc(w, n, 3 + Math.floor(Math.random() * 4));
   }
 
-  // 着地：leftSec 切れ or 画面下端へ接触
-  if (f.leftSec <= 0 || entity.pos.y >= w.bounds.h - 10) {
+  // 着地：leftSec 切れ or 画面下端 or z軸で地形以下（崖落下）
+  const groundZ = getElevation(entity.pos.x, entity.pos.y);
+  const zLanded = f.posZ <= groundZ;
+  if (f.leftSec <= 0 || entity.pos.y >= w.bounds.h - 10 || zLanded) {
+    // Σ-1-a 崖落下チェック：発射地点 vs 着地地点の高低差 >= 15 で即死級ダメージ
+    if (isChibi) {
+      const drop = f.startElev - groundZ;
+      if (drop >= 15) {
+        const cliffDmg = Math.floor(30 + drop * 1.5);
+        f.landingDamage = Math.max(f.landingDamage, cliffDmg);
+        f.landCauseId = 'cliff_fall';
+      }
+    }
     // 位置クランプ（水＝泥川ゾーンはそのまま、陸は地面に）
     entity.pos.y = Math.min(entity.pos.y, w.bounds.h - 16);
     entity.flight = null;
-    // 着地処理：水中 (y>414) なら溺死（ちびわふ）or 水HP削り（NPC）
+    // 着地処理：水中 (y > DRY_Y_LIMIT) なら溺死（ちびわふ）or 水HP削り（NPC）
     if (isChibi) {
       const c = entity as Chibiwafu;
       if (c.pos.y > CONFIG.DRY_Y_LIMIT) {
@@ -1256,12 +1281,14 @@ function flightStep(
         return;
       }
       setState(c, 'hurt', 1.4);
-      spawnBubble(w.bubbles, c.pos, 'どさっわふ', 'speech', 1.2);
+      const isCliff = f.landCauseId === 'cliff_fall';
+      spawnBubble(w.bubbles, c.pos, isCliff ? 'ぎゃーわふっ！！' : 'どさっわふ', 'speech', 1.2);
       const died = damageChibi(w, c, f.landingDamage, f.landCauseId as DeathCauseId);
+      const action = isCliff ? '崖から落下して激突' : '投げられて地面に激突';
       if (died) {
-        pushLife(c, Math.floor(c.ageSec), `投げられて地面に激突死（-${f.landingDamage}HP）`);
+        pushLife(c, Math.floor(c.ageSec), `${action}死（-${f.landingDamage}HP）`);
       } else {
-        pushLife(c, Math.floor(c.ageSec), `投げられて地面に激突（-${f.landingDamage}HP）`);
+        pushLife(c, Math.floor(c.ageSec), `${action}（-${f.landingDamage}HP）`);
       }
     } else {
       const n = entity as NpcState;
