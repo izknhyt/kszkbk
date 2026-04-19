@@ -172,14 +172,13 @@ export interface WorldState {
 }
 
 // フリー配置障害物：陸地（y 60〜380）かつフラナ拠点から離れた場所にランダム散在
-function createInitialObstacles(bounds: { w: number; h: number }): Obstacle[] {
+function createInitialObstacles(bounds: { w: number; h: number }, target = 24): Obstacle[] {
   const list: Obstacle[] = [];
   const kinds: ObstacleKind[] = ['rock', 'stump', 'bush'];
   const hpMap: Record<ObstacleKind, number> = { rock: 30, stump: 25, bush: 15 };
   const centerX = bounds.w / 2;
   const centerY = 220;  // フラナ拠点
   const minSpacing = 40;
-  const target = 24;  // 目標個数
   let attempts = 0;
   let seq = 0;
   while (list.length < target && attempts < 500) {
@@ -216,6 +215,46 @@ function createInitialFeatures(bounds: { w: number; h: number }): Feature[] {
   // 畑 1：水路の先
   features.push({ id: mkId(), pos: { x: waterPos.x + 165, y: waterPos.y }, kind: 'farm', devLevel: 2, workSec: 0 });
   return features;
+}
+
+// 難度に応じた補正テーブル。createWorld / ensurePlots / updateChibi /
+// runHazards / scheduleEvents 等で参照する。
+export interface DifficultyMods {
+  hazardMul: number;       // HAZARDS の ratePerSec 乗算
+  hungerMul: number;       // 空腹上昇速度乗算
+  fatigueMul: number;      // 疲労上昇速度乗算
+  obstacleCount: number;   // 初期障害物数
+  eventIntervalMul: number; // 音頭/火事のインターバル乗算（大きいほど間が空く）
+  initialResources: { food: number; water: number; wood: number; stone: number };
+}
+export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
+  beginner: {
+    hazardMul: 0.45,
+    hungerMul: 0.75,
+    fatigueMul: 0.75,
+    obstacleCount: 16,
+    eventIntervalMul: 1.5,
+    initialResources: { food: 20, water: 0, wood: 15, stone: 10 },
+  },
+  standard: {
+    hazardMul: 1.0,
+    hungerMul: 1.0,
+    fatigueMul: 1.0,
+    obstacleCount: 24,
+    eventIntervalMul: 1.0,
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0 },
+  },
+  hell: {
+    hazardMul: 1.8,
+    hungerMul: 1.4,
+    fatigueMul: 1.3,
+    obstacleCount: 32,
+    eventIntervalMul: 0.55,
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0 },
+  },
+};
+export function currentMods(w: WorldState): DifficultyMods {
+  return DIFFICULTY_MODS[w.difficulty];
 }
 
 // 接続距離：water/channel 同士はこの半径以内で繋がる
@@ -298,7 +337,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     points: 0,
     totalPointsEarned: 0,
     villageLv: 1,
-    resources: { food: 0, water: 0, wood: 0, stone: 0 },
+    resources: { ...DIFFICULTY_MODS[difficulty].initialResources },
     totalDeaths: 0,
     totalBirths: 0,
     stompCount: 0,
@@ -340,7 +379,7 @@ export function ensurePlots(w: WorldState) {
     w.features = createInitialFeatures(w.bounds);
   }
   if (!w.obstacles || w.obstacles.length === 0) {
-    w.obstacles = createInitialObstacles(w.bounds);
+    w.obstacles = createInitialObstacles(w.bounds, DIFFICULTY_MODS[w.difficulty].obstacleCount);
   }
 }
 
@@ -381,14 +420,14 @@ function computeOndoInterval(w: WorldState): number {
   const taiko = countBuildingLevels(w, 'taiko');
   const base = CONFIG.ONDO_BASE_INTERVAL_SEC + CONFIG.ONDO_INTERVAL_PER_TAIKO * taiko;
   const floored = Math.max(CONFIG.ONDO_INTERVAL_MIN_SEC, base);
-  return floored + (Math.random() - 0.5) * 20;
+  return (floored + (Math.random() - 0.5) * 20) * DIFFICULTY_MODS[w.difficulty].eventIntervalMul;
 }
 
 function computeFireInterval(w: WorldState): number {
   const kouba = countBuildingLevels(w, 'kouba');
   const base = CONFIG.FIRE_BASE_INTERVAL_SEC + CONFIG.FIRE_INTERVAL_PER_KOUBA * kouba;
   const floored = Math.max(CONFIG.FIRE_INTERVAL_MIN_SEC, base);
-  return floored + (Math.random() - 0.5) * 20;
+  return (floored + (Math.random() - 0.5) * 20) * DIFFICULTY_MODS[w.difficulty].eventIntervalMul;
 }
 
 function scheduleEvents(w: WorldState, dt: number) {
@@ -912,6 +951,8 @@ function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone
     }
     // パラメータ補正（運の悪さ・丈夫さ）
     rate *= derivedHazardSusceptibility(c.params);
+    // 難度補正（災害頻度）
+    rate *= DIFFICULTY_MODS[w.difficulty].hazardMul;
     if (Math.random() < rate * dt) {
       kill(w, c, zone.causeId);
       return true;
@@ -931,9 +972,10 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   // --- サバイバル（空腹・疲労） ---------------------------------------
   // 空腹は時間で上昇（tough が高いと耐性↑）。疲労は活動系ステートで上昇、睡眠で回復。
   const toughMul = 1 - Math.max(0, c.params.tough - 50) * 0.006;  // tough100=0.7倍
-  c.hunger += dt * 1.2 * toughMul;  // 100 到達まで ~83秒（tough100 なら 119秒）
+  const mods = DIFFICULTY_MODS[w.difficulty];
+  c.hunger += dt * 1.2 * toughMul * mods.hungerMul;  // 100 到達まで 標準で ~83秒
   // sleep 以外は疲労が溜まる（hurt/cry でも休息にならない）
-  if (c.state !== 'sleep') c.fatigue += dt * 0.55 * toughMul;  // ~180秒で疲労死
+  if (c.state !== 'sleep') c.fatigue += dt * 0.55 * toughMul * mods.fatigueMul;
   if (c.state === 'sleep') c.fatigue = Math.max(0, c.fatigue - dt * 0.70);
   if (c.state === 'eating') c.hunger = Math.max(0, c.hunger - dt * 6);   // 食事で一気に回復
   c.hunger = Math.max(0, Math.min(100, c.hunger));
