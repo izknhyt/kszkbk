@@ -1303,7 +1303,8 @@ function drawFeature(f: import('../types').Feature): Container {
     : f.kind === 'house' ? 24 : f.kind === 'well' ? 20 : f.kind === 'firewatch' ? 26
     : f.kind === 'sawmill' ? 24 : f.kind === 'shrine' ? 26
     : f.kind === 'generator' ? 22 : f.kind === 'streetlamp' ? 14
-    : f.kind === 'powerline' ? 10 : f.kind === 'kiln' ? 24 : 16;
+    : f.kind === 'powerline' ? 10 : f.kind === 'kiln' ? 24
+    : f.kind === 'pasture' ? 26 : f.kind === 'loom' ? 22 : 16;
 
   // 水路の通水状態に応じて色を変える
   // 通常青 → 飽和時オレンジ赤（氾濫警告）
@@ -1337,6 +1338,8 @@ function drawFeature(f: import('../types').Feature): Container {
     streetlamp: 0x5a5240,
     powerline: 0x6a5848,
     kiln: 0xb86030,
+    pasture: 0x7ab060,
+    loom: 0xa07858,
   };
   // 井戸：丸い石枠 + 中央に水、上に屋根
   if (f.kind === 'well') {
@@ -1371,6 +1374,52 @@ function drawFeature(f: import('../types').Feature): Container {
     g.rect(-radius + 4, -radius + 10, (radius - 4) * 2, 3).fill({ color: kindColor.shrine }).stroke({ color: 0x5a1005, width: 1 });
     // 中央の短冊（紙垂）
     g.rect(-1.5, -radius + 12, 3, 8).fill({ color: 0xffffff }).stroke({ color: 0x3a2a10, width: 0.8 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 牧場：草地（緑の楕円）+ 柵 + もふもふ羊（白丸）。
+  if (f.kind === 'pasture') {
+    // 草地
+    g.ellipse(0, 0, radius, radius - 6).fill({ color: kindColor.pasture, alpha: 0.5 });
+    // 柵（4辺の短い線）
+    const pw = radius - 2;
+    g.rect(-pw, -pw + 4, pw * 2, 3).fill({ color: 0x6a4a20 });
+    g.rect(-pw, pw - 6, pw * 2, 3).fill({ color: 0x6a4a20 });
+    g.rect(-pw, -pw + 4, 3, pw * 2 - 7).fill({ color: 0x6a4a20 });
+    g.rect(pw - 3, -pw + 4, 3, pw * 2 - 7).fill({ color: 0x6a4a20 });
+    // 羊 3 匹（白い丸 + 顔の点）
+    const sheep = [{ x: -8, y: -4 }, { x: 6, y: 2 }, { x: -2, y: 8 }];
+    for (const s of sheep) {
+      g.circle(s.x, s.y, 5).fill({ color: 0xf0ece4 }).stroke({ color: 0x8a7868, width: 0.8 });
+      g.circle(s.x + 3, s.y - 2, 2.5).fill({ color: 0xe0d8cc }); // 頭
+      g.circle(s.x + 4, s.y - 1.5, 0.8).fill({ color: 0x3a3020 }); // 目
+    }
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 織機：茶色の木枠 + タテ糸 + ちびわふが操作中に布が現れる。
+  if (f.kind === 'loom') {
+    // 外枠（木の矩形フレーム）
+    g.rect(-radius + 2, -radius + 4, (radius - 2) * 2, radius + 8)
+      .fill({ color: kindColor.loom, alpha: 0.85 }).stroke({ color: 0x3a1a05, width: 2 });
+    // タテ糸（縦線 5 本）
+    const threadX = [-10, -5, 0, 5, 10];
+    for (const tx of threadX) {
+      g.moveTo(tx, -radius + 8).lineTo(tx, radius + 2)
+        .stroke({ color: 0xd8c8a0, width: 1, alpha: 0.8 });
+    }
+    // ヨコ糸（稼働中は追加）
+    if (f.workSec > 0) {
+      for (let row = 0; row < 4; row++) {
+        const ry = -radius + 10 + row * 5;
+        g.moveTo(-10, ry).lineTo(10, ry)
+          .stroke({ color: 0xe8a058, width: 1.5, alpha: 0.9 });
+      }
+    }
+    // シャトル（横に走る小さな棒）
+    g.rect(-8, 0, 16, 3).fill({ color: 0x8a4a20 }).stroke({ color: 0x3a1a05, width: 0.8 });
     c.addChild(g);
     c.position.set(f.pos.x, f.pos.y);
     return c;

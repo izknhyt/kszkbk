@@ -129,7 +129,7 @@ export interface WorldState {
   // 水:   水源 + 水路で補給、畑にも必要（将来）
   // 木材: 伐採で得る、建物の材料
   // 石材: 石切で得る、建物の材料
-  resources: { food: number; water: number; wood: number; stone: number; plank: number; power: number; brick: number };
+  resources: { food: number; water: number; wood: number; stone: number; plank: number; power: number; brick: number; wool: number; cloth: number };
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
@@ -316,7 +316,7 @@ export interface DifficultyMods {
   fatigueMul: number;      // 疲労上昇速度乗算
   obstacleCount: number;   // 初期障害物数
   eventIntervalMul: number; // 音頭/火事のインターバル乗算（大きいほど間が空く）
-  initialResources: { food: number; water: number; wood: number; stone: number; plank: number; power: number; brick: number };
+  initialResources: { food: number; water: number; wood: number; stone: number; plank: number; power: number; brick: number; wool: number; cloth: number };
 }
 export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
   beginner: {
@@ -325,7 +325,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 0.75,
     obstacleCount: 50,
     eventIntervalMul: 1.5,
-    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, power: 5, brick: 0 },
+    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, power: 5, brick: 0, wool: 0, cloth: 0 },
   },
   standard: {
     hazardMul: 1.0,
@@ -333,7 +333,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.0,
     obstacleCount: 90,
     eventIntervalMul: 1.0,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0, wool: 0, cloth: 0 },
   },
   hell: {
     hazardMul: 1.8,
@@ -341,7 +341,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.3,
     obstacleCount: 140,
     eventIntervalMul: 0.55,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0, wool: 0, cloth: 0 },
   },
 };
 export function currentMods(w: WorldState): DifficultyMods {
@@ -387,6 +387,13 @@ const SAWMILL_WOOD_COST_PER_PLANK = 2;          // 木 2 → 板 1
 const KILN_WORKER_RADIUS = 45;
 const KILN_BRICK_PER_SEC_PER_WORKER = 0.04;  // 1 worker で 25 秒に 1 brick
 const KILN_STONE_COST_PER_BRICK = 3;         // 石 3 → レンガ 1
+
+// 牧場（pasture）：ちびわふ不要で wool を自動生産。雪/乾燥で半減。
+const PASTURE_WOOL_PER_SEC = 0.03;           // 単独で 33 秒に 1 wool
+// 織機（loom）：近くのちびわふが wool→cloth 変換。
+const LOOM_WORKER_RADIUS = 45;
+const LOOM_CLOTH_PER_SEC_PER_WORKER = 0.05; // 1 worker で 20 秒に 1 cloth
+const LOOM_WOOL_COST_PER_CLOTH = 2;         // 羊毛 2 → 布 1
 
 // 発電所（generator）：近くのちびわふがペダル漕ぎして power を生成。
 // 街灯（streetlamp）：夜間に power を消費して半径を照らし、オオカミ威圧＋野宿 HP ドレイン半減。
@@ -511,6 +518,31 @@ export function updateInfra(w: WorldState, dt: number) {
       f.workSec -= 1;
       w.resources.stone -= KILN_STONE_COST_PER_BRICK;
       w.resources.brick += 1;
+    }
+    if (f.workSec > 1) f.workSec = 1;
+  }
+  // 牧場：ちびわふ不要で wool を自動生産。雪/乾燥で半減。
+  const pastureMul = (w.weather.kind === 'snow' || w.weather.kind === 'drought') ? 0.5 : 1.0;
+  for (const f of w.features) {
+    if (f.kind !== 'pasture') continue;
+    w.resources.wool += dt * PASTURE_WOOL_PER_SEC * pastureMul;
+  }
+  // 織機：近くのちびわふが wool→cloth 変換。
+  for (const f of w.features) {
+    if (f.kind !== 'loom') continue;
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      if (c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= LOOM_WORKER_RADIUS) workers++;
+    }
+    if (workers === 0) continue;
+    const progress = dt * LOOM_CLOTH_PER_SEC_PER_WORKER * Math.min(3, workers);
+    f.workSec += progress;
+    while (f.workSec >= 1 && w.resources.wool >= LOOM_WOOL_COST_PER_CLOTH) {
+      f.workSec -= 1;
+      w.resources.wool -= LOOM_WOOL_COST_PER_CLOTH;
+      w.resources.cloth += 1;
     }
     if (f.workSec > 1) f.workSec = 1;
   }
@@ -1836,7 +1868,7 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   // 作業対象：障害物 + 製材所（chibiwafu.ts の wanderStep は「労働」として
   // obstaclePositions の近くへ歩く。sawmill も労働対象として混ぜておく）
   const obstaclePositions: Vec2[] = w.obstacles.map((o) => o.pos);
-  for (const f of w.features) if (f.kind === 'sawmill' || f.kind === 'kiln') obstaclePositions.push(f.pos);
+  for (const f of w.features) if (f.kind === 'sawmill' || f.kind === 'kiln' || f.kind === 'loom') obstaclePositions.push(f.pos);
   _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions };
   return _wanderEnvCache;
 }

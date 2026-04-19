@@ -204,7 +204,7 @@ async function start() {
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
-  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln';
+  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln' | 'pasture' | 'loom';
   let buildMode: BuildKind | null = null;
   const plotBuildCosts: Record<BuildKind, { wood: number; stone: number; plank?: number }> = {
     farm:       { wood: 2, stone: 0 },
@@ -219,11 +219,14 @@ async function start() {
     streetlamp: { wood: 2, stone: 1, plank: 1 },
     powerline:  { wood: 1, stone: 0, plank: 1 },
     kiln:       { wood: 4, stone: 8 },
+    pasture:    { wood: 3, stone: 2 },
+    loom:       { wood: 6, stone: 0, plank: 2 },
   };
   const buildModeLabel: Record<BuildKind, string> = {
     farm: '畑', channel: '水路', path: '道', house: '家',
     well: '井戸', firewatch: '火の見やぐら', sawmill: '製材所', shrine: '神社',
     generator: 'ペダル発電所', streetlamp: '街灯', powerline: '電線', kiln: '精錬所',
+    pasture: '牧場', loom: '織機',
   };
   function setBuildMode(m: typeof buildMode) {
     buildMode = m;
@@ -288,6 +291,7 @@ async function start() {
       farm: '🌾 畑', channel: '💧 水路', path: '🛤 道', house: '🏠 家',
       well: '⛲ 井戸', firewatch: '🔥 火の見やぐら', sawmill: '🪚 製材所', shrine: '⛩ 神社',
       generator: '⚡ ペダル発電所', streetlamp: '💡 街灯', powerline: '🪜 電線', kiln: '🧱 精錬所',
+      pasture: '🐑 牧場', loom: '🧶 織機',
     };
     flashToast(`${emojiMap[buildMode]} を建てた`, 'info');
     // 建設モードは継続
@@ -542,6 +546,8 @@ async function start() {
         : f.kind === 'streetlamp' ? (f.saturated ? '#ffe070' : '#6a604a')
         : f.kind === 'powerline' ? '#6a5848'
         : f.kind === 'kiln' ? '#b86030'
+        : f.kind === 'pasture' ? '#7ab060'
+        : f.kind === 'loom' ? '#a07858'
         : '#8b7048';
       mctx.fillRect(f.pos.x * sx - 2, f.pos.y * sy - 2, 4, 4);
     }
