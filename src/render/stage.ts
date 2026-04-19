@@ -1,5 +1,6 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, TextStyle, Texture } from 'pixi.js';
 import type { WorldState } from '../sim/world';
+import { getElevation } from '../sim/world';
 import type { Chibiwafu, DayPhase, HitTarget, PlacedBuilding, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
 import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
@@ -1169,6 +1170,28 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
     patches.ellipse(x, y, rx, ry).fill({ color: 0xb6c785, alpha: 0.18 });
   }
   layer.addChild(patches);
+
+  // 高低差の等高線風の tint（高台は明るめ、低地は薄暗め）
+  // マップを 40x20 のグリッドでサンプリングして楕円で重ねる
+  const elevLayer = new Graphics();
+  const colsE = 40;
+  const rowsE = 20;
+  const cellW = w / colsE;
+  const cellH = riverY / rowsE;
+  for (let gy = 0; gy < rowsE; gy++) {
+    for (let gx = 0; gx < colsE; gx++) {
+      const cx = (gx + 0.5) * cellW;
+      const cy = (gy + 0.5) * cellH;
+      const elev = getElevation(cx, cy);
+      // 標高 50 を基準に +で明るく、-で暗く
+      const delta = (elev - 50) / 50;  // -1..+1
+      if (Math.abs(delta) < 0.15) continue;
+      const color = delta > 0 ? 0xf6e4b8 : 0x6e5430;
+      const alpha = Math.min(0.22, Math.abs(delta) * 0.16);
+      elevLayer.ellipse(cx, cy, cellW * 0.7, cellH * 0.7).fill({ color, alpha });
+    }
+  }
+  layer.addChild(elevLayer);
 
   // 村の中央広場（フラナ拠点 = w/2, h*0.35 近くを土色で）
   const centerX = w / 2;

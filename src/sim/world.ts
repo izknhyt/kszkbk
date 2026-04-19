@@ -480,12 +480,17 @@ export function computeWaterFlow(w: WorldState): void {
 
   while (queue.length > 0) {
     const { f: cur } = queue.shift()!;
-    // 接続先（WATER_LINK_RADIUS 以内の未訪問 channel/water/well）
+    const curElev = getElevation(cur.pos.x, cur.pos.y);
+    // 接続先（WATER_LINK_RADIUS 以内の未訪問 channel/water/well）。
+    // 高低差ルール：下流（標高が 3 以上低い）にしか流れない。
+    // 水平 or 微妙な上り（-3〜+3）は許容して詰まり防止。
     for (const nf of w.features) {
       if (visited.has(nf.id)) continue;
       if (nf.kind !== 'channel' && nf.kind !== 'water' && nf.kind !== 'well') continue;
       const dist = Math.hypot(nf.pos.x - cur.pos.x, nf.pos.y - cur.pos.y);
       if (dist > WATER_LINK_RADIUS) continue;
+      const nfElev = getElevation(nf.pos.x, nf.pos.y);
+      if (nfElev > curElev + 3) continue;  // 上り坂には流れない
       visited.add(nf.id);
       // 流量 = 上流から引き継ぎ（分岐は簡略化：全量伝播）
       nf.flow = (nf.flow ?? 0) + (cur.flow ?? 0);
@@ -546,12 +551,15 @@ export function updateFloodZones(w: WorldState, dt: number): void {
     });
   }
 
-  // ちびわふを洪水に巻き込む
+  // ちびわふを洪水に巻き込む（ただし標高が洪水源より 15 以上高い子は安全）
   for (const c of w.chibis) {
     if (!isAlive(c) || c.flight) continue;
+    const chibiElev = getElevation(c.pos.x, c.pos.y);
     for (const fz of w.floodZones) {
       const d = Math.hypot(c.pos.x - fz.x, c.pos.y - fz.y);
       if (d > fz.radius) continue;
+      const floodElev = getElevation(fz.x, fz.y);
+      if (chibiElev > floodElev + 15) continue;  // 高台は安全
       // 確率的に流す
       if (Math.random() > FLOOD_SWEEP_CHANCE_PER_SEC * dt) continue;
       // 中心から外側方向へ流す + 横流れ成分
@@ -568,6 +576,30 @@ export function updateFloodZones(w: WorldState, dt: number): void {
 // feature 近傍判定ヘルパ（他モジュール用）
 export function isFarmFeature(f: Feature): boolean {
   return f.kind === 'farm';
+}
+
+// =========================================================================
+// 高低差地形（Ω-3-b）
+// procedural な標高マップ。0〜100 を返す。
+//   北側（y<400）→ 高地 60-80
+//   中央拠点付近 → 中位 40-50
+//   川付近（y>DRY_Y_LIMIT-200）→ 低地 0-15
+//   西の端 → ゆるい斜面 +10
+// 水は必ず高→低へ流れる。洪水は標高差が 15 以上ある高台には届かない。
+// =========================================================================
+export function getElevation(x: number, y: number): number {
+  const dryLimit = CONFIG.DRY_Y_LIMIT;
+  // 基礎：南（川側）低、北（上部）高
+  const southness = Math.max(0, Math.min(1, y / dryLimit));
+  let base = 70 - southness * 55;  // y=0 → 70, y=dryLimit → 15
+  // 川ゾーン（y > dryLimit - 150）は強制低地
+  if (y > dryLimit - 150) base = Math.max(0, base - 20);
+  if (y > dryLimit) base = 0;
+  // 西の端は丘（x<600 の帯を +15）
+  if (x < 600) base += (600 - x) / 600 * 15;
+  // なだらかな起伏（sin ノイズでリアリティ、振幅 ±4）
+  const noise = Math.sin(x * 0.003) * 2 + Math.cos(y * 0.004 + x * 0.002) * 2;
+  return Math.max(0, Math.min(100, base + noise));
 }
 
 // =========================================================================
