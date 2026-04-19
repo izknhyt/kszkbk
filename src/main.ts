@@ -200,15 +200,19 @@ async function start() {
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
-  let buildMode: 'farm' | 'channel' | 'path' | 'house' | null = null;
-  const plotBuildCosts: Record<'farm' | 'channel' | 'path' | 'house', { wood: number; stone: number }> = {
-    farm:    { wood: 2, stone: 0 },
-    channel: { wood: 0, stone: 1 },
-    path:    { wood: 0, stone: 1 },
-    house:   { wood: 6, stone: 3 },
+  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch';
+  let buildMode: BuildKind | null = null;
+  const plotBuildCosts: Record<BuildKind, { wood: number; stone: number }> = {
+    farm:      { wood: 2, stone: 0 },
+    channel:   { wood: 0, stone: 1 },
+    path:      { wood: 0, stone: 1 },
+    house:     { wood: 6, stone: 3 },
+    well:      { wood: 1, stone: 8 },
+    firewatch: { wood: 10, stone: 2 },
   };
-  const buildModeLabel: Record<'farm' | 'channel' | 'path' | 'house', string> = {
+  const buildModeLabel: Record<BuildKind, string> = {
     farm: '畑', channel: '水路', path: '道', house: '家',
+    well: '井戸', firewatch: '火の見やぐら',
   };
   function setBuildMode(m: typeof buildMode) {
     buildMode = m;
@@ -224,7 +228,7 @@ async function start() {
   }
   document.querySelectorAll<HTMLButtonElement>('.plot-build-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const kind = btn.dataset.plotKind as 'farm' | 'channel' | 'path' | 'house';
+      const kind = btn.dataset.plotKind as BuildKind;
       setBuildMode(buildMode === kind ? null : kind);
     });
   });
@@ -263,8 +267,11 @@ async function start() {
     // feature 追加（id はランダム）
     const id = `feat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     world.features.push({ id, pos: { x, y }, kind: buildMode, devLevel: 2, workSec: 0 });
-    const kindEmoji = buildMode === 'farm' ? '🌾 畑' : buildMode === 'channel' ? '💧 水路' : buildMode === 'house' ? '🏠 家' : '🛤 道';
-    flashToast(`${kindEmoji} を建てた`, 'info');
+    const emojiMap: Record<BuildKind, string> = {
+      farm: '🌾 畑', channel: '💧 水路', path: '🛤 道', house: '🏠 家',
+      well: '⛲ 井戸', firewatch: '🔥 火の見やぐら',
+    };
+    flashToast(`${emojiMap[buildMode]} を建てた`, 'info');
     // 建設モードは継続
   });
 

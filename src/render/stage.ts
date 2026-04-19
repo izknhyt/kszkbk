@@ -1246,7 +1246,8 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
 function drawFeature(f: import('../types').Feature): Container {
   const c = new Container();
   const g = new Graphics();
-  const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18 : f.kind === 'house' ? 24 : 16;
+  const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18
+    : f.kind === 'house' ? 24 : f.kind === 'well' ? 20 : f.kind === 'firewatch' ? 26 : 16;
 
   // 水路の通水状態に応じて色を変える
   // 通常青 → 飽和時オレンジ赤（氾濫警告）
@@ -1272,7 +1273,46 @@ function drawFeature(f: import('../types').Feature): Container {
     farm:    0x6ea241,
     path:    0x8b7048,
     house:   0xb85a3a,
+    well:    0x4a7898,
+    firewatch: 0xb0553a,
   };
+  // 井戸：丸い石枠 + 中央に水、上に屋根
+  if (f.kind === 'well') {
+    // 石枠
+    g.circle(0, 0, radius).fill({ color: 0x8a7a68 }).stroke({ color: 0x3a2a10, width: 2 });
+    // 中の水
+    g.circle(0, 0, radius - 7).fill({ color: kindColor.well, alpha: 0.9 });
+    // 屋根（三角）
+    g.moveTo(-radius - 2, -radius + 4).lineTo(0, -radius - 10).lineTo(radius + 2, -radius + 4)
+      .closePath().fill({ color: 0x5a3a20 }).stroke({ color: 0x2a1a05, width: 1.5 });
+    // 支柱
+    g.rect(-radius + 2, -radius + 4, 2, 6).fill({ color: 0x3a2a10 });
+    g.rect(radius - 4, -radius + 4, 2, 6).fill({ color: 0x3a2a10 });
+    // 波紋マーク
+    g.moveTo(-radius * 0.5, -2).lineTo(-radius * 0.15, -5).lineTo(radius * 0.15, -2).lineTo(radius * 0.5, -5)
+      .stroke({ color: 0xffffff, width: 1.5, alpha: 0.7 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 火の見やぐら：高い四角柱 + 上部展望台 + 赤い鐘
+  if (f.kind === 'firewatch') {
+    // 脚（4本の柱、上すぼまり）
+    g.poly([-radius + 6, radius, -radius + 4, -radius + 6, -6, -radius + 6, -6, radius])
+      .fill({ color: 0x6a4a20 }).stroke({ color: 0x2a1a05, width: 1.5 });
+    g.poly([radius - 6, radius, radius - 4, -radius + 6, 6, -radius + 6, 6, radius])
+      .fill({ color: 0x6a4a20 }).stroke({ color: 0x2a1a05, width: 1.5 });
+    // 展望台（四角）
+    g.rect(-radius, -radius - 2, radius * 2, 8).fill({ color: 0x8a5a2a }).stroke({ color: 0x3a1a05, width: 1.5 });
+    // 屋根
+    g.moveTo(-radius - 4, -radius - 2).lineTo(0, -radius - 14).lineTo(radius + 4, -radius - 2)
+      .closePath().fill({ color: kindColor.firewatch }).stroke({ color: 0x4a1a05, width: 1.5 });
+    // 鐘
+    g.circle(0, -radius - 4, 3.5).fill({ color: 0xcaa05a }).stroke({ color: 0x3a1a05, width: 1 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
   // 家は四角ベース + 屋根三角、それ以外は円形
   if (f.kind === 'house') {
     // 壁

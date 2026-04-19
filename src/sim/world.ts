@@ -357,13 +357,13 @@ export function computeWateredFeatureIds(w: WorldState): Set<string> {
   const watered = new Set<string>();
   const queue: Feature[] = [];
   for (const f of w.features) {
-    if (f.kind === 'water') { watered.add(f.id); queue.push(f); }
+    if (f.kind === 'water' || f.kind === 'well') { watered.add(f.id); queue.push(f); }
   }
   while (queue.length > 0) {
     const cur = queue.shift()!;
     for (const f of w.features) {
       if (watered.has(f.id)) continue;
-      if (f.kind !== 'channel' && f.kind !== 'water') continue;
+      if (f.kind !== 'channel' && f.kind !== 'water' && f.kind !== 'well') continue;
       if (Math.hypot(f.pos.x - cur.pos.x, f.pos.y - cur.pos.y) <= WATER_LINK_RADIUS) {
         watered.add(f.id);
         queue.push(f);
@@ -375,10 +375,12 @@ export function computeWateredFeatureIds(w: WorldState): Set<string> {
 
 // 食料生産 + 畑の成長。watered な水路/水源から FARM_IRRIGATION_RADIUS 内にある
 // farm feature は 0.08/秒で食料生産、workSec 蓄積で devLevel が上がる。
+// 近くに well（井戸）があれば drought でも最低 0.4 倍生産を維持。
 export function updateInfra(w: WorldState, dt: number) {
   if (w.features.length === 0) return;
   const watered = computeWateredFeatureIds(w);
   const wateredFeatures = w.features.filter((f) => watered.has(f.id));
+  const wells = w.features.filter((f) => f.kind === 'well');
   // 気象による生産倍率：乾燥/雪 → 停止、雨 → 加速
   const weatherMul = weatherFarmMul(w.weather.kind);
   for (const f of w.features) {
@@ -387,7 +389,13 @@ export function updateInfra(w: WorldState, dt: number) {
       (wf) => Math.hypot(wf.pos.x - f.pos.x, wf.pos.y - f.pos.y) <= FARM_IRRIGATION_RADIUS,
     );
     if (!irrigated) continue;
-    w.resources.food += dt * 0.08 * weatherMul;
+    // 井戸が近い farm は drought/snow でも 0.4 倍生産（耐災害ボーナス）
+    let effectiveMul = weatherMul;
+    if (effectiveMul < 0.4) {
+      const nearWell = wells.some((wf) => Math.hypot(wf.pos.x - f.pos.x, wf.pos.y - f.pos.y) <= FARM_IRRIGATION_RADIUS);
+      if (nearWell) effectiveMul = 0.4;
+    }
+    w.resources.food += dt * 0.08 * effectiveMul;
     f.workSec += dt;
     if (f.devLevel < 3 && f.workSec >= 30) f.devLevel = 3;
   }
@@ -453,7 +461,8 @@ export function computeWaterFlow(w: WorldState): void {
   // id → feature の高速参照
   const byId = new Map<string, Feature>(w.features.map((f) => [f.id, f]));
 
-  // BFS：水源から接続水路へ流量を伝播
+  // BFS：水源から接続水路へ流量を伝播。
+  // well（井戸）は drought 耐性：weatherMul に関係なく 0.8 units/sec 維持。
   const visited = new Set<string>();
   const queue: Array<{ f: Feature; incoming: number }> = [];
   for (const f of w.features) {
@@ -461,15 +470,20 @@ export function computeWaterFlow(w: WorldState): void {
       f.flow = weatherMul * 1.0;
       visited.add(f.id);
       queue.push({ f, incoming: f.flow });
+    } else if (f.kind === 'well') {
+      // 井戸は干魃に強い。最低 0.8、通常 1.0、雨天で少し増加。
+      f.flow = Math.max(0.8, 0.8 + weatherMul * 0.3);
+      visited.add(f.id);
+      queue.push({ f, incoming: f.flow });
     }
   }
 
   while (queue.length > 0) {
     const { f: cur } = queue.shift()!;
-    // 接続先（WATER_LINK_RADIUS 以内の未訪問 channel/water）
+    // 接続先（WATER_LINK_RADIUS 以内の未訪問 channel/water/well）
     for (const nf of w.features) {
       if (visited.has(nf.id)) continue;
-      if (nf.kind !== 'channel' && nf.kind !== 'water') continue;
+      if (nf.kind !== 'channel' && nf.kind !== 'water' && nf.kind !== 'well') continue;
       const dist = Math.hypot(nf.pos.x - cur.pos.x, nf.pos.y - cur.pos.y);
       if (dist > WATER_LINK_RADIUS) continue;
       visited.add(nf.id);
@@ -1348,7 +1362,15 @@ function resolveEvent(w: WorldState, dt: number) {
       if (Math.random() < peak * dt) kill(w, c, 'ondo');
     } else if (w.event.kind === 'fire') {
       // 農民気質は火に強い（-30%）。
-      const rate = c.traits.includes('noumin') ? peak * 0.7 : peak;
+      let rate = c.traits.includes('noumin') ? peak * 0.7 : peak;
+      // 火の見やぐら（firewatch）半径 180px 以内は延焼を大幅減（×0.25）
+      const firewatches = w.features.filter((f) => f.kind === 'firewatch');
+      for (const fw of firewatches) {
+        if (Math.hypot(fw.pos.x - c.pos.x, fw.pos.y - c.pos.y) <= 180) {
+          rate *= 0.25;
+          break;
+        }
+      }
       if (Math.random() < rate * dt) kill(w, c, 'fire');
       else if (Math.random() < 0.08) setState(c, 'hurt', 1);
     } else if (w.event.kind === 'taiko_festival') {
@@ -1392,10 +1414,13 @@ export function triggerBokaigi(w: WorldState) {
 }
 
 export function triggerFire(w: WorldState) {
+  // 火の見やぐらがあれば火事の持続時間を 60% に短縮（消火活動の抽象化）
+  const hasFirewatch = w.features.some((f) => f.kind === 'firewatch');
+  const dur = hasFirewatch ? CONFIG.FIRE_DURATION_SEC * 0.6 : CONFIG.FIRE_DURATION_SEC;
   w.event = {
     kind: 'fire',
-    duration: CONFIG.FIRE_DURATION_SEC,
-    remaining: CONFIG.FIRE_DURATION_SEC,
+    duration: dur,
+    remaining: dur,
     intensity: CONFIG.FIRE_KILL_RATE + 0.05,
   };
 }
