@@ -25,13 +25,25 @@ const DAY_PHASE_TINT: Record<DayPhase, { color: number; alpha: number }> = {
   night:   { color: 0x1a2550, alpha: 0.34 },
 };
 
+export interface CameraView {
+  x: number;       // ワールド座標の左上
+  y: number;
+  w: number;       // 画面に映っているワールド幅
+  h: number;
+  scale: number;
+  bounds: { w: number; h: number };  // ワールド全体サイズ
+}
+
 export interface StageHandle {
   app: Application;
   resize: (w: number, h: number) => void;
   draw: (world: WorldState) => void;
   setSeason: (s: Season) => void;
-  // カメラ状態（HUDからの操作用に露出）
+  // カメラ操作（HUD・ミニマップ・キーボードから使う）
   resetCamera: () => void;
+  focusOn: (x: number, y: number, scale?: number) => void;
+  panCamera: (dx: number, dy: number) => void;      // dx/dy はワールド座標 pixel
+  getCamera: () => CameraView;
   // 画面座標（client）→ ワールド座標に変換
   screenToWorld: (cx: number, cy: number) => { x: number; y: number };
   // pointerdown 位置（world座標）にある対象（ちびわふ or NPC）を返す callback を登録。
@@ -488,6 +500,26 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     draw,
     setSeason,
     resetCamera: () => focusOn(currentBoundsW / 2, currentBoundsH * 0.35, 0.6),
+    focusOn,
+    panCamera: (dx: number, dy: number) => {
+      // dx/dy はワールド座標でのオフセット。スケール変換して画面座標に変換後 camera 更新。
+      cameraX -= dx * cameraScale;
+      cameraY -= dy * cameraScale;
+      clampCamera();
+      applyCamera();
+    },
+    getCamera: (): CameraView => {
+      const vw = app.renderer.width;
+      const vh = app.renderer.height;
+      return {
+        x: -cameraX / cameraScale,
+        y: -cameraY / cameraScale,
+        w: vw / cameraScale,
+        h: vh / cameraScale,
+        scale: cameraScale,
+        bounds: { w: currentBoundsW, h: currentBoundsH },
+      };
+    },
     screenToWorld,
     setHitTest,
   };

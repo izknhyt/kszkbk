@@ -456,6 +456,83 @@ async function start() {
   // ピン中の個体が「生きている → 死んだ」の境界を 1 度だけ検出するためのフラグ
   let pinnedWasAlive = false;
 
+  // --- ミニマップ（右下 240×135）---------------------------------------
+  const minimap = document.getElementById('minimap') as HTMLCanvasElement | null;
+  const mctx = minimap ? minimap.getContext('2d') : null;
+  if (minimap && mctx) {
+    minimap.addEventListener('click', (e) => {
+      const rect = minimap.getBoundingClientRect();
+      const nx = (e.clientX - rect.left) / rect.width;
+      const ny = (e.clientY - rect.top) / rect.height;
+      const cam = stage.getCamera();
+      stage.focusOn(nx * cam.bounds.w, ny * cam.bounds.h);
+    });
+  }
+  function drawMinimap() {
+    if (!minimap || !mctx) return;
+    const cam = stage.getCamera();
+    const W = minimap.width, H = minimap.height;
+    const sx = W / cam.bounds.w;
+    const sy = H / cam.bounds.h;
+    // 背景：陸地＋川
+    mctx.fillStyle = '#c0a87a';
+    mctx.fillRect(0, 0, W, H);
+    const riverY = (CONFIG.DRY_Y_LIMIT) * sy;
+    mctx.fillStyle = '#8a6a42';
+    mctx.fillRect(0, riverY, W, H - riverY);
+    // 障害物（茶の点）
+    mctx.fillStyle = '#3a2a1a';
+    for (const o of world.obstacles) {
+      mctx.fillRect(o.pos.x * sx - 1, o.pos.y * sy - 1, 2, 2);
+    }
+    // feature：水源青・水路水色・畑緑・道茶
+    for (const f of world.features) {
+      mctx.fillStyle = f.kind === 'water' ? '#3a6ea0'
+        : f.kind === 'channel' ? '#6ba2d2'
+        : f.kind === 'farm' ? '#6ea241'
+        : '#8b7048';
+      mctx.fillRect(f.pos.x * sx - 2, f.pos.y * sy - 2, 4, 4);
+    }
+    // ちびわふ（白点）
+    mctx.fillStyle = '#f8f0d0';
+    for (const c of world.chibis) {
+      mctx.fillRect(c.pos.x * sx - 1, c.pos.y * sy - 1, 2, 2);
+    }
+    // NPC：フラナ白大・ココン橙・スズ桃・ルー灰
+    for (const n of world.npcs) {
+      if (n.dead) continue;
+      mctx.fillStyle = n.id === 'furana' ? '#ffffff'
+        : n.id === 'cocoon' ? '#ff7e3a'
+        : n.id === 'suzu' ? '#ffb6c1'
+        : '#888';
+      const r = n.id === 'furana' ? 4 : 3;
+      mctx.fillRect(n.pos.x * sx - r/2, n.pos.y * sy - r/2, r, r);
+    }
+    // 現在カメラビューの矩形
+    mctx.strokeStyle = '#ffd580';
+    mctx.lineWidth = 1.5;
+    mctx.strokeRect(cam.x * sx, cam.y * sy, cam.w * sx, cam.h * sy);
+  }
+
+  // --- キーボードカメラ操作 ---------------------------------------------
+  // WASD / 矢印キーで保持中はカメラをパン。F でフラナ即フォーカス、R でリセット。
+  const heldKeys = new Set<string>();
+  window.addEventListener('keydown', (e) => {
+    // input 要素にフォーカスしている時は無視（モーダルなど）
+    if (document.activeElement && (document.activeElement as HTMLElement).tagName === 'INPUT') return;
+    const k = e.key.toLowerCase();
+    heldKeys.add(k);
+    if (k === 'f') {
+      const f = world.npcs.find((n) => n.id === 'furana');
+      if (f) stage.focusOn(f.pos.x, f.pos.y);
+    } else if (k === 'r') {
+      stage.resetCamera();
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    heldKeys.delete(e.key.toLowerCase());
+  });
+
   function loop(now: number) {
     const dtReal = Math.min(0.2, (now - prev) / 1000);
     prev = now;
@@ -468,7 +545,21 @@ async function start() {
       steps += 1;
     }
     if (acc > dtFixed * maxSteps) acc = 0;
+
+    // キーボードパン：保持中のキーで dtReal 秒ぶんカメラ移動
+    const panSpeed = 800;  // world px / sec
+    let pdx = 0, pdy = 0;
+    if (heldKeys.has('a') || heldKeys.has('arrowleft'))  pdx -= 1;
+    if (heldKeys.has('d') || heldKeys.has('arrowright')) pdx += 1;
+    if (heldKeys.has('w') || heldKeys.has('arrowup'))    pdy -= 1;
+    if (heldKeys.has('s') || heldKeys.has('arrowdown'))  pdy += 1;
+    if (pdx !== 0 || pdy !== 0) {
+      const len = Math.hypot(pdx, pdy);
+      stage.panCamera((pdx / len) * panSpeed * dtReal, (pdy / len) * panSpeed * dtReal);
+    }
+
     stage.draw(world);
+    drawMinimap();
 
     // drain new dex discoveries → toast
     if (world.newDiscoveries.length > 0) {

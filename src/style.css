@@ -272,6 +272,35 @@ html, body {
   cursor: pointer;
 }
 
+/* ミニマップ（右下、stage 右脇 HUD の外に置く） */
+.minimap {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  width: 240px;
+  height: 135px;
+  border: 2px solid #3a2a1a;
+  border-radius: 6px;
+  background: #cdb380;
+  z-index: 500;
+  cursor: crosshair;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  image-rendering: pixelated;
+}
+.camera-help {
+  position: fixed;
+  right: 12px;
+  bottom: 150px;
+  z-index: 500;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: #f8eecb;
+  background: rgba(58, 42, 26, 0.8);
+  border-radius: 4px;
+  pointer-events: none;
+  font-family: sans-serif;
+}
+
 /* 難度バッジ（HUD） */
 .stat-difficulty {
   margin-left: 4px;
