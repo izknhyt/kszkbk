@@ -199,11 +199,15 @@ async function start() {
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
-  let buildMode: 'farm' | 'channel' | 'path' | null = null;
-  const plotBuildCosts: Record<'farm' | 'channel' | 'path', { wood: number; stone: number }> = {
+  let buildMode: 'farm' | 'channel' | 'path' | 'house' | null = null;
+  const plotBuildCosts: Record<'farm' | 'channel' | 'path' | 'house', { wood: number; stone: number }> = {
     farm:    { wood: 2, stone: 0 },
     channel: { wood: 0, stone: 1 },
     path:    { wood: 0, stone: 1 },
+    house:   { wood: 6, stone: 3 },
+  };
+  const buildModeLabel: Record<'farm' | 'channel' | 'path' | 'house', string> = {
+    farm: '畑', channel: '水路', path: '道', house: '家',
   };
   function setBuildMode(m: typeof buildMode) {
     buildMode = m;
@@ -213,13 +217,13 @@ async function start() {
     const hint = document.getElementById('plot-build-hint');
     if (hint) {
       hint.textContent = m
-        ? `${m === 'farm' ? '畑' : m === 'channel' ? '水路' : '道'} モード：地面を左クリックで設置／再押下で解除`
+        ? `${buildModeLabel[m]} モード：地面を左クリックで設置／再押下で解除`
         : 'ボタンを押してから地面の好きな場所を左クリック';
     }
   }
   document.querySelectorAll<HTMLButtonElement>('.plot-build-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const kind = btn.dataset.plotKind as 'farm' | 'channel' | 'path';
+      const kind = btn.dataset.plotKind as 'farm' | 'channel' | 'path' | 'house';
       setBuildMode(buildMode === kind ? null : kind);
     });
   });
@@ -258,7 +262,8 @@ async function start() {
     // feature 追加（id はランダム）
     const id = `feat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     world.features.push({ id, pos: { x, y }, kind: buildMode, devLevel: 2, workSec: 0 });
-    flashToast(`${buildMode === 'farm' ? '🌾 畑' : buildMode === 'channel' ? '💧 水路' : '🛤 道'} を建てた`, 'info');
+    const kindEmoji = buildMode === 'farm' ? '🌾 畑' : buildMode === 'channel' ? '💧 水路' : buildMode === 'house' ? '🏠 家' : '🛤 道';
+    flashToast(`${kindEmoji} を建てた`, 'info');
     // 建設モードは継続
   });
 
@@ -485,11 +490,12 @@ async function start() {
     for (const o of world.obstacles) {
       mctx.fillRect(o.pos.x * sx - 1, o.pos.y * sy - 1, 2, 2);
     }
-    // feature：水源青・水路水色・畑緑・道茶
+    // feature：水源青・水路水色・畑緑・道茶・家赤茶
     for (const f of world.features) {
       mctx.fillStyle = f.kind === 'water' ? '#3a6ea0'
         : f.kind === 'channel' ? '#6ba2d2'
         : f.kind === 'farm' ? '#6ea241'
+        : f.kind === 'house' ? '#b85a3a'
         : '#8b7048';
       mctx.fillRect(f.pos.x * sx - 2, f.pos.y * sy - 2, 4, 4);
     }

@@ -1215,6 +1215,59 @@ function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone
   return false;
 }
 
+// ============================================================
+// Ω-3 住居・夜（家 feature + 帰宅 AI）
+// ============================================================
+
+// 家1棟の収容人数
+const HOUSE_CAPACITY = 4;
+// 家に「到着」とみなす距離
+const HOUSE_ARRIVAL_RADIUS = 26;
+// 帰宅途中の walking 状態として target を設定する距離（遠すぎたら諦めて野宿）
+const HOUSE_MAX_WALK_DIST = 1400;
+
+// 各家の現在使用人数を数える（O(chibis)）。夜開始時 or 10秒おきに呼ぶ前提。
+function isAtHome(w: WorldState, c: Chibiwafu): boolean {
+  if (!c.homeFid) return false;
+  const h = w.features.find((f) => f.id === c.homeFid);
+  if (!h) return false;
+  return Math.hypot(h.pos.x - c.pos.x, h.pos.y - c.pos.y) <= HOUSE_ARRIVAL_RADIUS;
+}
+
+function countHomeOccupants(w: WorldState): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const c of w.chibis) {
+    if (!isAlive(c) || !c.homeFid) continue;
+    map.set(c.homeFid, (map.get(c.homeFid) ?? 0) + 1);
+  }
+  return map;
+}
+
+// 家が無い（or 割当家が消された）ちびわふに、最も近い空き家を割り当てる。
+// 家がなければ null のまま（野宿）。
+function assignHomeIfNeeded(w: WorldState, c: Chibiwafu, occupants: Map<string, number>): void {
+  // 既に家があって、その家がまだ存在＋定員内なら維持
+  if (c.homeFid) {
+    const h = w.features.find((f) => f.id === c.homeFid && f.kind === 'house');
+    if (h && (occupants.get(c.homeFid) ?? 0) <= HOUSE_CAPACITY) return;
+    c.homeFid = null;
+  }
+  // 空き家から最寄りを選ぶ
+  let best: Feature | null = null;
+  let bestDist = Infinity;
+  for (const f of w.features) {
+    if (f.kind !== 'house') continue;
+    const used = occupants.get(f.id) ?? 0;
+    if (used >= HOUSE_CAPACITY) continue;
+    const d = Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y);
+    if (d < bestDist) { bestDist = d; best = f; }
+  }
+  if (best) {
+    c.homeFid = best.id;
+    occupants.set(best.id, (occupants.get(best.id) ?? 0) + 1);
+  }
+}
+
 function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone[]) {
   if (!isAlive(c)) return;
   c.ageSec += dt;
@@ -1236,7 +1289,18 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     c.hp = Math.max(0, c.hp - dt * wmods.coldHpDrain);
     if (c.hp <= 0) { kill(w, c, 'fatigue_death'); return; }  // TODO: 凍傷専用死因は後ほど
   }
-  if (c.state === 'sleep') c.fatigue = Math.max(0, c.fatigue - dt * 0.70);
+  // 睡眠回復：家で寝てると 1.6×、野宿（夜＋家なし）は 0.4× + 冷気 HP ドレイン
+  if (c.state === 'sleep') {
+    const atHome = c.homeFid && isAtHome(w, c);
+    const isOpenAir = w.dayPhase === 'night' && !atHome;
+    const recoveryMul = atHome ? 1.6 : isOpenAir ? 0.4 : 1.0;
+    c.fatigue = Math.max(0, c.fatigue - dt * 0.70 * recoveryMul);
+    if (isOpenAir) {
+      // 野宿の寒さ HP ドレイン
+      c.hp = Math.max(0, c.hp - dt * 0.15);
+      if (c.hp <= 0) { kill(w, c, 'fatigue_death'); return; }
+    }
+  }
   if (c.state === 'eating') c.hunger = Math.max(0, c.hunger - dt * 6);   // 食事で一気に回復
   c.hunger = Math.max(0, Math.min(100, c.hunger));
   c.fatigue = Math.max(0, Math.min(100, c.fatigue));
@@ -1258,6 +1322,21 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   if (c.flight) {
     flightStep(w, c, true, dt);
     return;
+  }
+  // 夕夜の帰宅 AI：家があれば target を家にセット、到着で sleep に入る
+  if ((w.dayPhase === 'evening' || w.dayPhase === 'night') && c.state === 'idle' && c.homeFid) {
+    const home = w.features.find((f) => f.id === c.homeFid);
+    if (home) {
+      const d = Math.hypot(home.pos.x - c.pos.x, home.pos.y - c.pos.y);
+      if (d <= HOUSE_ARRIVAL_RADIUS) {
+        // 到着：夜なら寝る、夕なら家でゴロゴロ
+        if (w.dayPhase === 'night') setState(c, 'sleep', 5);
+      } else if (d <= HOUSE_MAX_WALK_DIST) {
+        // 家へ向かって target を書き換え（wanderStep が次 tick で使う）
+        c.target = { x: home.pos.x, y: home.pos.y };
+        c.targetLandmarkId = null;
+      }
+    }
   }
   c.stateTimer -= dt;
   if (c.stateTimer <= 0 && c.state !== 'dead') {
@@ -2245,6 +2324,9 @@ export function tickWorld(w: WorldState, dt: number) {
   scheduleEvents(w, dt);
   resolveEvent(w, dt);
   const hazards = getActiveHazards(w);
+  // 住居割当：家が足りないちびわふに最寄りの空き家を紐付ける（tick 毎）
+  const homeOccupants = countHomeOccupants(w);
+  for (const c of w.chibis) if (isAlive(c)) assignHomeIfNeeded(w, c, homeOccupants);
   for (const c of w.chibis) updateChibi(w, c, dt, hazards);
   // ちびわふ移動後に空間分割ハッシュを再構築（以降の近傍検索はこれを使う）
   w.chibiHash.rebuild(w.chibis.filter(isAlive));

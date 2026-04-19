@@ -1164,7 +1164,7 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
 function drawFeature(f: import('../types').Feature): Container {
   const c = new Container();
   const g = new Graphics();
-  const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18 : 16;
+  const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18 : f.kind === 'house' ? 24 : 16;
 
   // 水路の通水状態に応じて色を変える
   // 通常青 → 飽和時オレンジ赤（氾濫警告）
@@ -1189,7 +1189,22 @@ function drawFeature(f: import('../types').Feature): Container {
     channel: channelColor,
     farm:    0x6ea241,
     path:    0x8b7048,
+    house:   0xb85a3a,
   };
+  // 家は四角ベース + 屋根三角、それ以外は円形
+  if (f.kind === 'house') {
+    // 壁
+    g.rect(-radius + 4, -radius + 10, (radius - 4) * 2, radius + 6)
+      .fill({ color: kindColor.house, alpha: 0.9 }).stroke({ color: 0x3a1a10, width: 1.5 });
+    // 屋根
+    g.moveTo(-radius + 2, -radius + 10).lineTo(0, -radius - 2).lineTo(radius - 2, -radius + 10)
+      .closePath().fill({ color: 0x5a2a1a }).stroke({ color: 0x2a1005, width: 1.5 });
+    // ドア
+    g.rect(-4, 4, 8, 12).fill({ color: 0x3a1a0a });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
   g.circle(0, 0, radius).fill({ color: kindColor[f.kind], alpha: 0.78 }).stroke({ color: 0x2a1a10, width: 1.5 });
   // 溢れている水路は外周リング（オレンジ）
   if (f.saturated) {

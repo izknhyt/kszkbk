@@ -56,6 +56,8 @@ export interface Chibiwafu {
   hunger: number;
   // 疲労度 0-100。活動で上昇、睡眠で減る。100 で exhaustion。
   fatigue: number;
+  // 割当て住居の feature id。null なら野宿組（夜に HP ドレイン + 疲労回復鈍化）
+  homeFid: string | null;
 }
 
 export interface LifeEvent {
@@ -155,7 +157,7 @@ export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
 // フリー配置の開拓要素（水源・水路・畑・道）。
 // タイル/グリッド無しで任意の座標に置ける。水の伝播は距離ベースで判定。
-export type FeatureKind = 'water' | 'channel' | 'path' | 'farm';
+export type FeatureKind = 'water' | 'channel' | 'path' | 'farm' | 'house';
 
 export interface Feature {
   id: string;

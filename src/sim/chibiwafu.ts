@@ -52,6 +52,7 @@ export function spawnChibiwafu(args: SpawnArgs): Chibiwafu {
     flight: null,
     hunger: 0,
     fatigue: 0,
+    homeFid: null,
   };
 }
 
