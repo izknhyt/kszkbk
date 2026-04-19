@@ -1270,7 +1270,8 @@ function drawFeature(f: import('../types').Feature): Container {
   const c = new Container();
   const g = new Graphics();
   const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18
-    : f.kind === 'house' ? 24 : f.kind === 'well' ? 20 : f.kind === 'firewatch' ? 26 : 16;
+    : f.kind === 'house' ? 24 : f.kind === 'well' ? 20 : f.kind === 'firewatch' ? 26
+    : f.kind === 'sawmill' ? 24 : 16;
 
   // 水路の通水状態に応じて色を変える
   // 通常青 → 飽和時オレンジ赤（氾濫警告）
@@ -1298,6 +1299,7 @@ function drawFeature(f: import('../types').Feature): Container {
     house:   0xb85a3a,
     well:    0x4a7898,
     firewatch: 0xb0553a,
+    sawmill: 0x8d6238,
   };
   // 井戸：丸い石枠 + 中央に水、上に屋根
   if (f.kind === 'well') {
@@ -1314,6 +1316,24 @@ function drawFeature(f: import('../types').Feature): Container {
     // 波紋マーク
     g.moveTo(-radius * 0.5, -2).lineTo(-radius * 0.15, -5).lineTo(radius * 0.15, -2).lineTo(radius * 0.5, -5)
       .stroke({ color: 0xffffff, width: 1.5, alpha: 0.7 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 製材所：茶色の小屋 + 丸太 + ノコギリ
+  if (f.kind === 'sawmill') {
+    // 小屋
+    g.rect(-radius + 2, -radius + 8, (radius - 2) * 2, radius + 4)
+      .fill({ color: kindColor.sawmill }).stroke({ color: 0x3a2005, width: 1.5 });
+    // 切妻屋根
+    g.moveTo(-radius, -radius + 8).lineTo(0, -radius - 4).lineTo(radius, -radius + 8)
+      .closePath().fill({ color: 0x5a3010 }).stroke({ color: 0x2a1005, width: 1.5 });
+    // 丸太 3 本積み
+    g.circle(-radius + 4, radius - 2, 4).fill({ color: 0xbe8554 }).stroke({ color: 0x3a2a10, width: 1 });
+    g.circle(-radius + 11, radius - 2, 4).fill({ color: 0xbe8554 }).stroke({ color: 0x3a2a10, width: 1 });
+    g.circle(-radius + 18, radius - 2, 4).fill({ color: 0xbe8554 }).stroke({ color: 0x3a2a10, width: 1 });
+    // ノコギリ光（白い線）
+    g.moveTo(-4, -2).lineTo(6, -2).stroke({ color: 0xeeeeee, width: 2 });
     c.addChild(g);
     c.position.set(f.pos.x, f.pos.y);
     return c;

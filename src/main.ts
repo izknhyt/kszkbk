@@ -200,7 +200,7 @@ async function start() {
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
-  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch';
+  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill';
   let buildMode: BuildKind | null = null;
   const plotBuildCosts: Record<BuildKind, { wood: number; stone: number }> = {
     farm:      { wood: 2, stone: 0 },
@@ -209,10 +209,11 @@ async function start() {
     house:     { wood: 6, stone: 3 },
     well:      { wood: 1, stone: 8 },
     firewatch: { wood: 10, stone: 2 },
+    sawmill:   { wood: 8, stone: 4 },
   };
   const buildModeLabel: Record<BuildKind, string> = {
     farm: '畑', channel: '水路', path: '道', house: '家',
-    well: '井戸', firewatch: '火の見やぐら',
+    well: '井戸', firewatch: '火の見やぐら', sawmill: '製材所',
   };
   function setBuildMode(m: typeof buildMode) {
     buildMode = m;
@@ -269,7 +270,7 @@ async function start() {
     world.features.push({ id, pos: { x, y }, kind: buildMode, devLevel: 2, workSec: 0 });
     const emojiMap: Record<BuildKind, string> = {
       farm: '🌾 畑', channel: '💧 水路', path: '🛤 道', house: '🏠 家',
-      well: '⛲ 井戸', firewatch: '🔥 火の見やぐら',
+      well: '⛲ 井戸', firewatch: '🔥 火の見やぐら', sawmill: '🪚 製材所',
     };
     flashToast(`${emojiMap[buildMode]} を建てた`, 'info');
     // 建設モードは継続

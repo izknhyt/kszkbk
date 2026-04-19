@@ -129,7 +129,7 @@ export interface WorldState {
   // 水:   水源 + 水路で補給、畑にも必要（将来）
   // 木材: 伐採で得る、建物の材料
   // 石材: 石切で得る、建物の材料
-  resources: { food: number; water: number; wood: number; stone: number };
+  resources: { food: number; water: number; wood: number; stone: number; plank: number };
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
@@ -314,7 +314,7 @@ export interface DifficultyMods {
   fatigueMul: number;      // 疲労上昇速度乗算
   obstacleCount: number;   // 初期障害物数
   eventIntervalMul: number; // 音頭/火事のインターバル乗算（大きいほど間が空く）
-  initialResources: { food: number; water: number; wood: number; stone: number };
+  initialResources: { food: number; water: number; wood: number; stone: number; plank: number };
 }
 export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
   beginner: {
@@ -323,7 +323,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 0.75,
     obstacleCount: 50,
     eventIntervalMul: 1.5,
-    initialResources: { food: 20, water: 0, wood: 15, stone: 10 },
+    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2 },
   },
   standard: {
     hazardMul: 1.0,
@@ -331,7 +331,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.0,
     obstacleCount: 90,
     eventIntervalMul: 1.0,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
   },
   hell: {
     hazardMul: 1.8,
@@ -339,7 +339,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.3,
     obstacleCount: 140,
     eventIntervalMul: 0.55,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
   },
 };
 export function currentMods(w: WorldState): DifficultyMods {
@@ -376,6 +376,11 @@ export function computeWateredFeatureIds(w: WorldState): Set<string> {
 // 食料生産 + 畑の成長。watered な水路/水源から FARM_IRRIGATION_RADIUS 内にある
 // farm feature は 0.08/秒で食料生産、workSec 蓄積で devLevel が上がる。
 // 近くに well（井戸）があれば drought でも最低 0.4 倍生産を維持。
+// 製材所（sawmill）は近くのちびわふが wood→plank に変換する。
+const SAWMILL_WORKER_RADIUS = 45;
+const SAWMILL_PLANK_PER_SEC_PER_WORKER = 0.06;  // 1 worker で 17 秒に 1 plank
+const SAWMILL_WOOD_COST_PER_PLANK = 2;          // 木 2 → 板 1
+
 export function updateInfra(w: WorldState, dt: number) {
   if (w.features.length === 0) return;
   const watered = computeWateredFeatureIds(w);
@@ -398,6 +403,28 @@ export function updateInfra(w: WorldState, dt: number) {
     w.resources.food += dt * 0.08 * effectiveMul;
     f.workSec += dt;
     if (f.devLevel < 3 && f.workSec >= 30) f.devLevel = 3;
+  }
+  // 製材所：近くのちびわふが働くと wood→plank 変換。
+  for (const f of w.features) {
+    if (f.kind !== 'sawmill') continue;
+    // worker 数（alive, idle 以外の「移動可能」状態のみカウント）
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      if (c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= SAWMILL_WORKER_RADIUS) workers++;
+    }
+    if (workers === 0) continue;
+    // 進捗を workSec に貯めて、1 plank 分溜まったら wood を消費して plank を生成
+    const progress = dt * SAWMILL_PLANK_PER_SEC_PER_WORKER * Math.min(3, workers);
+    f.workSec += progress;
+    while (f.workSec >= 1 && w.resources.wood >= SAWMILL_WOOD_COST_PER_PLANK) {
+      f.workSec -= 1;
+      w.resources.wood -= SAWMILL_WOOD_COST_PER_PLANK;
+      w.resources.plank += 1;
+    }
+    // wood 不足で止まっている場合は workSec が満タンで待機
+    if (f.workSec > 1) f.workSec = 1;
   }
 }
 
@@ -1553,7 +1580,10 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
     if (b.defId === 'noukou') noukouPositions.push(b.pos);
     else if (b.defId === 'taiko') taikoPositions.push(b.pos);
   }
+  // 作業対象：障害物 + 製材所（chibiwafu.ts の wanderStep は「労働」として
+  // obstaclePositions の近くへ歩く。sawmill も労働対象として混ぜておく）
   const obstaclePositions: Vec2[] = w.obstacles.map((o) => o.pos);
+  for (const f of w.features) if (f.kind === 'sawmill') obstaclePositions.push(f.pos);
   _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions };
   return _wanderEnvCache;
 }
