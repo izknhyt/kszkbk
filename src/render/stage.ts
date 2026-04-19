@@ -623,12 +623,8 @@ async function loadEnvironmentArt(): Promise<EnvironmentArt> {
     landmarkFrames: {},
   };
 
-  try {
-    const background = await loadImage('/mockup/background.png');
-    art.background = Texture.from(background);
-  } catch (err) {
-    console.warn('[stage] background art load failed, falling back to procedural background', err);
-  }
+  // Ω-2 時点：3200×1800 の広大マップにラスタ画像は合わないため procedural 固定。
+  // 将来 bg を差し替える時はここで loadImage して art.background に入れる。
 
   try {
     const buildingSheet = await loadImage('/mockup/buildings.png');
@@ -1026,6 +1022,15 @@ function drawNpc(n: NpcState, furanaLib: SpriteLibrary): NpcView {
   return { container: c };
 }
 
+// 決定論的乱数。背景が毎フレーム違う形にならないよう、シード固定で再現する。
+function seededRand(seed: number): () => number {
+  let s = (seed | 0) || 1;
+  return () => {
+    s = (s * 1664525 + 1013904223) | 0;
+    return ((s >>> 8) & 0xffffff) / 0xffffff;
+  };
+}
+
 function drawBackground(layer: Container, w: number, h: number, season: Season, envArt: EnvironmentArt) {
   layer.removeChildren();
   if (envArt.background) {
@@ -1048,92 +1053,104 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
     return;
   }
 
+  // 3200×1800 スケール対応の procedural 背景。
+  // 画像を使わず、Graphics のみで季節色の草原 + 川 + 橋 + 装飾を生成する。
   const palette = SEASON_COLORS[season];
+  const riverY = CONFIG.DRY_Y_LIMIT;
+
+  // 草原ベース（上領域）
   const grass = new Graphics();
-  grass.rect(0, 0, w, h).fill({ color: palette.grass });
+  grass.rect(0, 0, w, riverY).fill({ color: palette.grass });
   layer.addChild(grass);
 
-  const morningGlow = new Graphics();
-  morningGlow.ellipse(w * 0.24, h * 0.16, w * 0.28, h * 0.16).fill({ color: 0xfff2cc, alpha: 0.18 });
-  layer.addChild(morningGlow);
-
-  const upperMeadow = new Graphics();
-  upperMeadow.ellipse(w * 0.25, h * 0.22, w * 0.22, h * 0.12).fill({ color: 0xd9d08e, alpha: 0.28 });
-  upperMeadow.ellipse(w * 0.78, h * 0.17, w * 0.18, h * 0.11).fill({ color: 0xb0c985, alpha: 0.24 });
-  upperMeadow.ellipse(w * 0.52, h * 0.48, w * 0.35, h * 0.14).fill({ color: 0xcbd792, alpha: 0.2 });
-  layer.addChild(upperMeadow);
-
-  const cropBeds = new Graphics();
-  for (let i = 0; i < 5; i++) {
-    const x = 90 + i * (w * 0.12);
-    cropBeds.roundRect(x, 88 + (i % 2) * 8, w * 0.1, 48, 10).fill({ color: i % 2 === 0 ? 0xa3b85e : 0x8ca04d, alpha: 0.52 });
-    cropBeds.roundRect(x + 8, 98 + (i % 2) * 8, w * 0.1 - 16, 6, 4).fill({ color: 0xd8c085, alpha: 0.4 });
-    cropBeds.roundRect(x + 8, 112 + (i % 2) * 8, w * 0.1 - 16, 6, 4).fill({ color: 0xd8c085, alpha: 0.32 });
+  // 地面の斑点ノイズ（scale に応じて密度を合わせる）
+  const noise = new Graphics();
+  const dots = Math.floor((w * riverY) / 14000);  // ~400 dots for 3200×1150
+  const rand = seededRand(season.length + w);
+  for (let i = 0; i < dots; i++) {
+    const x = rand() * w;
+    const y = rand() * (riverY - 10);
+    const r = 2 + rand() * 3;
+    const c = rand() < 0.5 ? 0xc5ba8a : 0xa8b66a;
+    noise.circle(x, y, r).fill({ color: c, alpha: 0.22 });
   }
-  layer.addChild(cropBeds);
+  layer.addChild(noise);
 
+  // ふんわりした草原のパッチ（大きな楕円でムラを作る）
+  const patches = new Graphics();
+  const patchCount = Math.floor(w / 320);
+  for (let i = 0; i < patchCount; i++) {
+    const x = (i + 0.5) * (w / patchCount) + (rand() - 0.5) * 180;
+    const y = 80 + rand() * (riverY - 180);
+    const rx = 180 + rand() * 140;
+    const ry = 70 + rand() * 50;
+    patches.ellipse(x, y, rx, ry).fill({ color: 0xb6c785, alpha: 0.18 });
+  }
+  layer.addChild(patches);
+
+  // 村の中央広場（フラナ拠点 = w/2, h*0.35 近くを土色で）
+  const centerX = w / 2;
+  const centerY = h * 0.35;
   const commons = new Graphics();
-  commons.ellipse(w * 0.54, h * 0.34, w * 0.32, h * 0.17).fill({ color: palette.dirt, alpha: 0.95 });
-  commons.ellipse(w * 0.5, h * 0.33, w * 0.18, h * 0.09).fill({ color: 0xf1e0bb, alpha: 0.85 });
-  commons.ellipse(w * 0.68, h * 0.3, w * 0.11, h * 0.06).fill({ color: 0xe9d0a4, alpha: 0.75 });
+  commons.ellipse(centerX, centerY, 280, 160).fill({ color: palette.dirt, alpha: 0.75 });
+  commons.ellipse(centerX, centerY, 180, 100).fill({ color: 0xe9d3a8, alpha: 0.55 });
   layer.addChild(commons);
 
-  const roads = new Graphics();
-  roads.ellipse(w * 0.46, 318, w * 0.18, 26).fill({ color: 0xe7d5af, alpha: 0.86 });
-  roads.rotation = -0.08;
-  const bridgeRoad = new Graphics();
-  bridgeRoad.ellipse(220, 390, 150, 24).fill({ color: 0xe7d5af, alpha: 0.9 });
-  bridgeRoad.rotation = -0.28;
-  layer.addChild(roads, bridgeRoad);
-
-  // 川は y=DRY_Y_LIMIT 以降を覆う（procedural fallback）
-  const riverY = CONFIG.DRY_Y_LIMIT;
+  // 川（y >= DRY_Y_LIMIT）
   const river = new Graphics();
   river.rect(0, riverY, w, h - riverY).fill({ color: palette.river });
-  river.rect(0, riverY, w, 4).fill({ color: 0x3a2a1a, alpha: 0.25 });
-  const waveCount = Math.max(12, Math.floor(w / 250));
+  river.rect(0, riverY, w, 4).fill({ color: 0x3a2a1a, alpha: 0.3 });
+  const waveCount = Math.floor(w / 110);
   for (let i = 0; i < waveCount; i++) {
-    river.ellipse(80 + i * 86, riverY + 38 + (i % 3) * 18, 22, 4).fill({ color: 0xf5e8c8, alpha: 0.22 });
+    const wx = 40 + i * 110 + (i % 2) * 28;
+    const wy = riverY + 30 + (i % 4) * 80;
+    river.ellipse(wx, wy, 28, 5).fill({ color: 0xf5e8c8, alpha: 0.18 });
   }
   layer.addChild(river);
 
+  // 川岸
   const shoreline = new Graphics();
-  shoreline.rect(0, riverY - 8, w, 12).fill({ color: 0xe6d8b9, alpha: 0.92 });
-  for (let i = 0; i < 18; i++) {
-    shoreline.circle(20 + i * (w / 18), riverY + 1 + (i % 2) * 2, 5).fill({ color: 0xfaf3e1, alpha: 0.45 });
+  shoreline.rect(0, riverY - 10, w, 14).fill({ color: 0xe6d8b9, alpha: 0.9 });
+  const shoreDots = Math.floor(w / 120);
+  for (let i = 0; i < shoreDots; i++) {
+    const x = 20 + i * 120;
+    shoreline.circle(x, riverY + 2 + (i % 2) * 3, 5).fill({ color: 0xfaf3e1, alpha: 0.45 });
   }
   layer.addChild(shoreline);
 
-  // 丸太橋：マップ中央に置く（川を跨ぐ）
-  const bridgeX = w / 2 - 18;
-  const bridgeY = riverY - 30;
+  // 丸太橋（マップ中央）
+  const bridgeX = w / 2 - 22;
+  const bridgeY = riverY - 36;
   const bridge = new Graphics();
-  bridge.roundRect(bridgeX, bridgeY, 36, 110, 6).fill({ color: 0x81532c }).stroke({ color: 0x3a2a1a, width: 1.5 });
-  for (let i = 0; i < 8; i++) {
-    bridge.rect(bridgeX + 3, bridgeY + 12 + i * 12, 30, 4).fill({ color: 0xb78853 });
+  bridge.roundRect(bridgeX, bridgeY, 44, 140, 8).fill({ color: 0x81532c }).stroke({ color: 0x3a2a1a, width: 1.5 });
+  for (let i = 0; i < 10; i++) {
+    bridge.rect(bridgeX + 4, bridgeY + 14 + i * 12, 36, 4).fill({ color: 0xb78853 });
   }
-  bridge.rect(bridgeX + 3, bridgeY, 4, 110).fill({ color: 0x65411f });
-  bridge.rect(bridgeX + 29, bridgeY, 4, 110).fill({ color: 0x65411f });
+  bridge.rect(bridgeX + 3, bridgeY, 4, 140).fill({ color: 0x65411f });
+  bridge.rect(bridgeX + 37, bridgeY, 4, 140).fill({ color: 0x65411f });
   layer.addChild(bridge);
 
-  for (let i = 0; i < 14; i++) {
-    const flowers = new Graphics();
-    const x = 70 + (i * 83) % (w - 120);
-    const y = 70 + ((i * 47) % 320);
+  // 花（季節色でアクセント、全域に散りばめる）
+  const flowerCount = Math.floor((w * riverY) / 38000);
+  const flowers = new Graphics();
+  for (let i = 0; i < flowerCount; i++) {
+    const x = rand() * w;
+    const y = 40 + rand() * (riverY - 80);
     flowers.circle(x, y, 4).fill({ color: palette.accents, alpha: 0.5 });
-    flowers.circle(x + 9, y - 4, 3).fill({ color: 0xfff3d8, alpha: 0.45 });
-    flowers.circle(x - 7, y + 5, 2.5).fill({ color: 0xbad27d, alpha: 0.45 });
-    layer.addChild(flowers);
+    flowers.circle(x + 8, y - 3, 3).fill({ color: 0xfff3d8, alpha: 0.4 });
   }
+  layer.addChild(flowers);
 
-  for (let i = 0; i < 9; i++) {
-    const stones = new Graphics();
-    const x = 90 + i * 105;
-    const y = 386 - (i % 2) * 18;
-    stones.ellipse(x, y, 12, 7).fill({ color: 0xb7aa9b, alpha: 0.55 });
-    stones.ellipse(x + 12, y + 4, 8, 5).fill({ color: 0x938579, alpha: 0.4 });
-    layer.addChild(stones);
+  // 石ころ
+  const stoneCount = Math.floor(w / 180);
+  const stones = new Graphics();
+  for (let i = 0; i < stoneCount; i++) {
+    const x = rand() * w;
+    const y = 60 + rand() * (riverY - 120);
+    stones.ellipse(x, y, 12, 7).fill({ color: 0xb7aa9b, alpha: 0.5 });
+    stones.ellipse(x + 10, y + 3, 7, 4).fill({ color: 0x938579, alpha: 0.38 });
   }
+  layer.addChild(stones);
 
   const vignette = new Graphics();
   vignette.rect(0, 0, w, 24).fill({ color: 0x000000, alpha: 0.04 });
