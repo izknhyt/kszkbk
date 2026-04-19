@@ -119,7 +119,9 @@ export type DeathCauseId =
   | 'hunger_death'            // 空腹で餓死
   | 'fatigue_death'           // 疲労で衰弱死
   | 'flood_drown'            // 洪水に流されて溺死
-  | 'wolf_bite';             // オオカミに噛み殺された
+  | 'wolf_bite'              // オオカミに噛み殺された
+  | 'electrocution'          // 雷・電線・発電所の事故で感電死
+  | 'thunder_blast';         // 発電所への落雷で爆発死（周囲巻き込み）
 
 export interface DeathCause {
   id: DeathCauseId;

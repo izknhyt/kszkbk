@@ -193,6 +193,8 @@ async function start() {
   let lastVillageLv = world.villageLv;
   let lastWolfCount = 0;
   let lastWolfDeaths = 0;
+  let lastThunderTick = -1;
+  let lastElectroDeaths = 0;
   const dtFixed = CONFIG.TICK_DT;
   let acc = 0;
   let prev = performance.now();
@@ -638,6 +640,19 @@ async function start() {
     if (wolfDeaths > lastWolfDeaths) {
       flashToast(`🐺 噛まれて ${wolfDeaths - lastWolfDeaths} 人死亡…`, 'info');
       lastWolfDeaths = wolfDeaths;
+    }
+
+    // 落雷：発電所が爆破されたら toast。lastThunderStrikeAt.tick を監視
+    const thunderTick = world.lastThunderStrikeAt?.tick ?? -1;
+    if (thunderTick > lastThunderTick) {
+      flashToast('⚡ 発電所に落雷直撃！', 'info');
+      lastThunderTick = thunderTick;
+    }
+    // 感電死の累計
+    const electroDeaths = world.dex.electrocution?.count ?? 0;
+    if (electroDeaths > lastElectroDeaths) {
+      flashToast(`⚡ 感電死 ${electroDeaths - lastElectroDeaths} 人…`, 'info');
+      lastElectroDeaths = electroDeaths;
     }
 
     // detect rank promotion

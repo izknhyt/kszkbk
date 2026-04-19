@@ -188,6 +188,8 @@ export interface WorldState {
   wolfSpawnCooldown: number;
   // 撃破したオオカミ数（統計）
   wolvesKilled: number;
+  // 直近の落雷ヒット位置（UI/FX 用。transient、保存しない）
+  lastThunderStrikeAt?: { x: number; y: number; tick: number };
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -532,6 +534,100 @@ export function chibiUnderStreetlamp(w: WorldState, x: number, y: number): boole
     if (Math.hypot(f.pos.x - x, f.pos.y - y) <= STREETLAMP_RADIUS) return true;
   }
   return false;
+}
+
+// 雷・感電（storm / 雨天中のみ発動）。
+// - 感電死：稼働中の電線/街灯/発電所に半径内で触れていると確率死
+// - 落雷：storm 中のみ、発電所がランダムに落雷直撃で爆発破壊 + 周囲の chibi にダメージ
+const ELECTROCUTE_RADIUS_LAMP = 28;
+const ELECTROCUTE_RADIUS_LINE = 22;
+const ELECTROCUTE_RADIUS_GEN  = 35;
+const THUNDER_BLAST_RADIUS = 80;
+const THUNDER_BLAST_DAMAGE = 40;
+function updateThunderstrike(w: WorldState, dt: number) {
+  const wk = w.weather.kind;
+  const isStorm = wk === 'storm';
+  const isRainy = isStorm || wk === 'heavy_rain' || wk === 'light_rain';
+  if (!isRainy) return;
+  // 感電確率 (per sec)：storm 1.0 / heavy_rain 0.25 / light_rain 0.08 の基礎値
+  const electroRate = isStorm ? 1.0 : wk === 'heavy_rain' ? 0.25 : 0.08;
+  // 稼働中の街灯・電線（接続済みの両端で通電）・発電所（稼働=ワーカー>0）を「危険源」とする
+  const poweredLamps = computePoweredLampIds(w);
+  const liveLamps = w.features.filter((f) => f.kind === 'streetlamp' && f.saturated);
+  // 電線：稼働中街灯に電気的に繋がっている電線を「通電中」とみなす（発電所起点 BFS 再利用）
+  const liveLines = (() => {
+    if (poweredLamps.size === 0) return [] as typeof w.features;
+    // 発電所 BFS で辿れる電線を集める（computePoweredLampIds と同じアルゴを再実行、
+    // ここでは powerline の id も拾う必要があるため inline）
+    const gens = w.features.filter((f) => f.kind === 'generator');
+    const nodes = w.features.filter(
+      (f) => f.kind === 'generator' || f.kind === 'powerline' || f.kind === 'streetlamp',
+    );
+    const R2 = POWERLINE_CONNECT_RADIUS * POWERLINE_CONNECT_RADIUS;
+    const adj = new Map<string, string[]>();
+    for (const n of nodes) adj.set(n.id, []);
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i]!, b = nodes[j]!;
+        const dx = a.pos.x - b.pos.x, dy = a.pos.y - b.pos.y;
+        if (dx * dx + dy * dy <= R2) {
+          adj.get(a.id)!.push(b.id);
+          adj.get(b.id)!.push(a.id);
+        }
+      }
+    }
+    const visited = new Set<string>();
+    const queue: string[] = [];
+    for (const g of gens) { visited.add(g.id); queue.push(g.id); }
+    for (let h = 0; h < queue.length; h++) {
+      for (const nb of adj.get(queue[h]!) ?? []) {
+        if (!visited.has(nb)) { visited.add(nb); queue.push(nb); }
+      }
+    }
+    return w.features.filter((f) => f.kind === 'powerline' && visited.has(f.id));
+  })();
+  const liveGens = w.features.filter((f) => f.kind === 'generator' && (f.flow ?? 0) > 0);
+  // 各 chibi に最短危険源距離を判定し、感電ロール
+  for (const c of w.chibis) {
+    if (!isAlive(c) || c.flight) continue;
+    let inZone = false;
+    for (const f of liveLamps) {
+      if (Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= ELECTROCUTE_RADIUS_LAMP) { inZone = true; break; }
+    }
+    if (!inZone) for (const f of liveLines) {
+      if (Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= ELECTROCUTE_RADIUS_LINE) { inZone = true; break; }
+    }
+    if (!inZone) for (const f of liveGens) {
+      if (Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= ELECTROCUTE_RADIUS_GEN) { inZone = true; break; }
+    }
+    if (!inZone) continue;
+    const p = 1 - Math.exp(-electroRate * 0.04 * dt);  // 0.04 base = 「危険源に1秒いると storm 中 ~4% 死」
+    if (Math.random() < p) {
+      spawnBubble(w.bubbles, c.pos, '⚡', 'speech', 1.2);
+      kill(w, c, 'electrocution');
+    }
+  }
+  // 落雷：storm 中のみ発電所に直撃。平均 45 秒に 1 回。
+  if (!isStorm) return;
+  const gens = w.features.filter((f) => f.kind === 'generator');
+  if (gens.length === 0) return;
+  const strikeProb = 1 - Math.exp(-dt / 45);
+  if (Math.random() < strikeProb) {
+    const hit = gens[Math.floor(Math.random() * gens.length)]!;
+    spawnBubble(w.bubbles, { x: hit.pos.x, y: hit.pos.y - 20 }, '⚡⚡', 'speech', 2.5);
+    // 周囲の chibi にダメージ、死亡は thunder_blast
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      const d = Math.hypot(c.pos.x - hit.pos.x, c.pos.y - hit.pos.y);
+      if (d > THUNDER_BLAST_RADIUS) continue;
+      const falloff = 1 - d / THUNDER_BLAST_RADIUS;
+      const dmg = THUNDER_BLAST_DAMAGE * falloff;
+      damageChibi(w, c, dmg, 'thunder_blast');
+    }
+    // 発電所を破壊（features から削除）
+    w.features = w.features.filter((f) => f.id !== hit.id);
+    w.lastThunderStrikeAt = { x: hit.pos.x, y: hit.pos.y, tick: w.tick };
+  }
 }
 
 // 天気による畑生産倍率：乾燥/雪 完全停止、雨 加速、熱波 半減
@@ -2867,6 +2963,7 @@ export function tickWorld(w: WorldState, dt: number) {
   updateLabor(w, dt);
   computeWaterFlow(w);
   updateInfra(w, dt);
+  updateThunderstrike(w, dt);
   updateFloodZones(w, dt);
   updateWolves(w, dt);
   updateStomps(w, dt);
