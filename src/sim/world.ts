@@ -129,7 +129,7 @@ export interface WorldState {
   // 水:   水源 + 水路で補給、畑にも必要（将来）
   // 木材: 伐採で得る、建物の材料
   // 石材: 石切で得る、建物の材料
-  resources: { food: number; water: number; wood: number; stone: number; plank: number; power: number };
+  resources: { food: number; water: number; wood: number; stone: number; plank: number; power: number; brick: number };
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
@@ -316,7 +316,7 @@ export interface DifficultyMods {
   fatigueMul: number;      // 疲労上昇速度乗算
   obstacleCount: number;   // 初期障害物数
   eventIntervalMul: number; // 音頭/火事のインターバル乗算（大きいほど間が空く）
-  initialResources: { food: number; water: number; wood: number; stone: number; plank: number; power: number };
+  initialResources: { food: number; water: number; wood: number; stone: number; plank: number; power: number; brick: number };
 }
 export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
   beginner: {
@@ -325,7 +325,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 0.75,
     obstacleCount: 50,
     eventIntervalMul: 1.5,
-    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, power: 5 },
+    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, power: 5, brick: 0 },
   },
   standard: {
     hazardMul: 1.0,
@@ -333,7 +333,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.0,
     obstacleCount: 90,
     eventIntervalMul: 1.0,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0 },
   },
   hell: {
     hazardMul: 1.8,
@@ -341,7 +341,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.3,
     obstacleCount: 140,
     eventIntervalMul: 0.55,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0 },
   },
 };
 export function currentMods(w: WorldState): DifficultyMods {
@@ -382,6 +382,11 @@ export function computeWateredFeatureIds(w: WorldState): Set<string> {
 const SAWMILL_WORKER_RADIUS = 45;
 const SAWMILL_PLANK_PER_SEC_PER_WORKER = 0.06;  // 1 worker で 17 秒に 1 plank
 const SAWMILL_WOOD_COST_PER_PLANK = 2;          // 木 2 → 板 1
+
+// 精錬所（kiln）：近くのちびわふが働くと stone→brick 変換。
+const KILN_WORKER_RADIUS = 45;
+const KILN_BRICK_PER_SEC_PER_WORKER = 0.04;  // 1 worker で 25 秒に 1 brick
+const KILN_STONE_COST_PER_BRICK = 3;         // 石 3 → レンガ 1
 
 // 発電所（generator）：近くのちびわふがペダル漕ぎして power を生成。
 // 街灯（streetlamp）：夜間に power を消費して半径を照らし、オオカミ威圧＋野宿 HP ドレイン半減。
@@ -488,6 +493,25 @@ export function updateInfra(w: WorldState, dt: number) {
       w.resources.plank += 1;
     }
     // wood 不足で止まっている場合は workSec が満タンで待機
+    if (f.workSec > 1) f.workSec = 1;
+  }
+  // 精錬所（kiln）：近くのちびわふが働くと stone→brick 変換。製材所と同じ労働ループ。
+  for (const f of w.features) {
+    if (f.kind !== 'kiln') continue;
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      if (c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= KILN_WORKER_RADIUS) workers++;
+    }
+    if (workers === 0) continue;
+    const progress = dt * KILN_BRICK_PER_SEC_PER_WORKER * Math.min(3, workers);
+    f.workSec += progress;
+    while (f.workSec >= 1 && w.resources.stone >= KILN_STONE_COST_PER_BRICK) {
+      f.workSec -= 1;
+      w.resources.stone -= KILN_STONE_COST_PER_BRICK;
+      w.resources.brick += 1;
+    }
     if (f.workSec > 1) f.workSec = 1;
   }
   // 発電所：ワーカーがペダルを漕いで power を生成、ワーカーは追加疲労。
@@ -1812,7 +1836,7 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   // 作業対象：障害物 + 製材所（chibiwafu.ts の wanderStep は「労働」として
   // obstaclePositions の近くへ歩く。sawmill も労働対象として混ぜておく）
   const obstaclePositions: Vec2[] = w.obstacles.map((o) => o.pos);
-  for (const f of w.features) if (f.kind === 'sawmill') obstaclePositions.push(f.pos);
+  for (const f of w.features) if (f.kind === 'sawmill' || f.kind === 'kiln') obstaclePositions.push(f.pos);
   _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions };
   return _wanderEnvCache;
 }

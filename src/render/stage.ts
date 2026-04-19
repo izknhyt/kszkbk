@@ -1303,7 +1303,7 @@ function drawFeature(f: import('../types').Feature): Container {
     : f.kind === 'house' ? 24 : f.kind === 'well' ? 20 : f.kind === 'firewatch' ? 26
     : f.kind === 'sawmill' ? 24 : f.kind === 'shrine' ? 26
     : f.kind === 'generator' ? 22 : f.kind === 'streetlamp' ? 14
-    : f.kind === 'powerline' ? 10 : 16;
+    : f.kind === 'powerline' ? 10 : f.kind === 'kiln' ? 24 : 16;
 
   // 水路の通水状態に応じて色を変える
   // 通常青 → 飽和時オレンジ赤（氾濫警告）
@@ -1336,6 +1336,7 @@ function drawFeature(f: import('../types').Feature): Container {
     generator: 0x7a7088,
     streetlamp: 0x5a5240,
     powerline: 0x6a5848,
+    kiln: 0xb86030,
   };
   // 井戸：丸い石枠 + 中央に水、上に屋根
   if (f.kind === 'well') {
@@ -1370,6 +1371,30 @@ function drawFeature(f: import('../types').Feature): Container {
     g.rect(-radius + 4, -radius + 10, (radius - 4) * 2, 3).fill({ color: kindColor.shrine }).stroke({ color: 0x5a1005, width: 1 });
     // 中央の短冊（紙垂）
     g.rect(-1.5, -radius + 12, 3, 8).fill({ color: 0xffffff }).stroke({ color: 0x3a2a10, width: 0.8 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 精錬所（窯）：レンガ色の丸い窯 + 煙突 + 炎口。稼働中（workSec>0）は炎マーク。
+  if (f.kind === 'kiln') {
+    // 窯の胴体（楕円ぽく見せる）
+    g.ellipse(0, 2, radius - 2, radius - 6).fill({ color: kindColor.kiln }).stroke({ color: 0x4a1a05, width: 2 });
+    // レンガ模様（横線 3 本）
+    for (let row = -1; row <= 1; row++) {
+      g.moveTo(-(radius - 6), row * 4).lineTo(radius - 6, row * 4)
+        .stroke({ color: 0x4a1a05, width: 0.8, alpha: 0.5 });
+    }
+    // 煙突（上部）
+    g.rect(-4, -radius - 4, 8, radius - 4).fill({ color: 0x4a3020 }).stroke({ color: 0x2a1005, width: 1.2 });
+    // 煙突蓋
+    g.rect(-6, -radius - 6, 12, 3).fill({ color: 0x3a2010 }).stroke({ color: 0x1a1005, width: 1 });
+    // 炉口（正面の丸窓）
+    g.circle(0, 6, 5).fill({ color: f.workSec > 0 ? 0xff8820 : 0x3a1a05 });
+    // 稼働中：炎ちら（橙色の揺らぎ）
+    if (f.workSec > 0) {
+      g.moveTo(-3, 6).lineTo(0, -radius + 8).lineTo(3, 6)
+        .fill({ color: 0xff6010, alpha: 0.7 });
+    }
     c.addChild(g);
     c.position.set(f.pos.x, f.pos.y);
     return c;
