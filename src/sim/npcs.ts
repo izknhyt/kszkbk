@@ -1,4 +1,5 @@
 import type { ChibiState, FlightState, LifeEvent, Vec2 } from '../types';
+import { findDryTile } from './terrain/query';
 
 export type NpcId = 'suzu' | 'lou' | 'cocoon' | 'furana';
 
@@ -174,10 +175,10 @@ export function pushNpcLife(n: NpcState, sec: number, text: string) {
 
 export function createNpcs(bounds: { w: number; h: number }): NpcState[] {
   return [
-    mkNpc('furana', { x: bounds.w / 2,       y: bounds.h * 0.35 }, 10),
-    mkNpc('suzu',   { x: bounds.w * 0.4,     y: bounds.h * 0.38 }),
-    mkNpc('lou',    { x: bounds.w * 0.72,    y: bounds.h * 0.28 }),
-    mkNpc('cocoon', { x: bounds.w * 0.58,    y: bounds.h * 0.45 }, 2),
+    mkNpc('furana', findDryTile(bounds.w / 2,       bounds.h * 0.35, 160), 10),
+    mkNpc('suzu',   findDryTile(bounds.w * 0.4,     bounds.h * 0.38, 160)),
+    mkNpc('lou',    findDryTile(bounds.w * 0.72,    bounds.h * 0.28, 160)),
+    mkNpc('cocoon', findDryTile(bounds.w * 0.58,    bounds.h * 0.45, 160), 2),
   ];
 }
 

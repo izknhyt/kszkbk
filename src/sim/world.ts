@@ -1,4 +1,7 @@
 import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
+import { seedFromRunId } from './terrain/noise';
+import { generateTerrain } from './terrain/generators';
+import { findDryTile, isSeaAt, setQueryTerrain } from './terrain/query';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -192,10 +195,12 @@ export interface WorldState {
   terrain: TerrainTile[][];
   // Σ-2-b: ちびわふが盛り土・切り土を行うジョブキュー（persist 対象）
   terraformJobs: TerraformJob[];
+  // --- Σ-3 地形シード ---------------------------------------------------
+  // runId から派生。difficulty ごとに異なる地形プリセットを同一シードで再現可能。
+  terrainSeed: number;
 }
 
-// フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
-// フラナ拠点（マップ中央）付近は除外。
+// フリー配置障害物：陸地タイルのみ、フラナ拠点付近は除外。
 function createInitialObstacles(bounds: { w: number; h: number }, target = 24): Obstacle[] {
   const list: Obstacle[] = [];
   const kinds: ObstacleKind[] = ['rock', 'stump', 'bush'];
@@ -203,14 +208,13 @@ function createInitialObstacles(bounds: { w: number; h: number }, target = 24): 
   const centerX = bounds.w / 2;
   const centerY = bounds.h * 0.35;
   const minSpacing = 48;
-  const landBottom = CONFIG.DRY_Y_LIMIT - 40;
-  const landTop = 60;
   let attempts = 0;
   let seq = 0;
   while (list.length < target && attempts < 2000) {
     attempts++;
     const x = 60 + Math.random() * (bounds.w - 120);
-    const y = landTop + Math.random() * (landBottom - landTop);
+    const y = 60 + Math.random() * (bounds.h - 120);
+    if (isSeaAt(x, y)) continue;  // Σ-3-d: 海タイル除外
     // フラナ拠点から 120px 以内は避ける（初期村空間を確保）
     if (Math.hypot(x - centerX, y - centerY) < 120) continue;
     if (list.some((o) => Math.hypot(o.pos.x - x, o.pos.y - y) < minSpacing)) continue;
@@ -234,7 +238,7 @@ function createInitialFeatures(bounds: { w: number; h: number }): Feature[] {
   const mkId = () => `feat-${seq++}`;
   // 拠点中央の少し左に水源。フラナが bounds.w/2, bounds.h*0.35 付近にいる
   const centerY = bounds.h * 0.35;
-  const waterPos: Vec2 = { x: bounds.w / 2 - 180, y: centerY };
+  const waterPos: Vec2 = findDryTile(bounds.w / 2 - 180, centerY, 200);
   features.push({ id: mkId(), pos: waterPos, kind: 'water', devLevel: 3, workSec: 0 });
   features.push({ id: mkId(), pos: { x: waterPos.x + 55, y: waterPos.y }, kind: 'channel', devLevel: 2, workSec: 0 });
   features.push({ id: mkId(), pos: { x: waterPos.x + 110, y: waterPos.y }, kind: 'channel', devLevel: 2, workSec: 0 });
@@ -884,7 +888,11 @@ let _activeTerrain: TerrainTile[][] | null = null;
 
 export function activateTerrain(terrain: TerrainTile[][]): void {
   _activeTerrain = terrain;
+  setQueryTerrain(terrain);  // chibiwafu.ts など他モジュールも同期
 }
+
+// world.ts 内から呼ぶ isSeaAt は query.ts の実装を再エクスポート
+export { isSeaAt };
 
 // 既存の procedural 算出式（initTerrain の充填＆ v10 以前の load マイグレーション用）
 export function proceduralElevation(x: number, y: number): number {
@@ -907,8 +915,18 @@ function elevToMaterial(elev: number, isRiver: boolean): TerrainMaterial {
   return 'sand';
 }
 
-// procedural 値でタイル配列を初期化する
-export function initTerrain(bounds: { w: number; h: number }): TerrainTile[][] {
+// タイルを初期化する。
+// difficulty + seed が渡された場合は Σ-3 ジェネレータを使用。
+// 引数なし（fallback）は proceduralElevation で旧来動作（v11 以前セーブ互換）。
+export function initTerrain(
+  bounds: { w: number; h: number },
+  difficulty?: Difficulty,
+  seed?: number,
+): TerrainTile[][] {
+  if (difficulty !== undefined && seed !== undefined) {
+    return generateTerrain(difficulty, seed, bounds);
+  }
+  // fallback: v11 以前 procedural
   const grid: TerrainTile[][] = [];
   for (let row = 0; row < TERRAIN_ROWS; row++) {
     const rowArr: TerrainTile[] = [];
@@ -1187,7 +1205,9 @@ function spawnWolfGroup(w: WorldState) {
   // map 端からまとまって入ってくる。edge は 4 方向からランダム
   const edge = Math.floor(Math.random() * 4);
   const baseX = edge === 0 ? 20 : edge === 1 ? w.bounds.w - 20 : Math.random() * w.bounds.w;
-  const baseY = edge === 2 ? 40 : edge === 3 ? CONFIG.DRY_Y_LIMIT - 40 : 60 + Math.random() * (CONFIG.DRY_Y_LIMIT - 120);
+  // 陸地端: 旧 DRY_Y_LIMIT の代わりに bounds.h * 0.85 を安全な陸地上限として使う
+  const safeBottom = w.bounds.h * 0.85;
+  const baseY = edge === 2 ? 40 : edge === 3 ? safeBottom - 40 : 60 + Math.random() * (safeBottom - 120);
   for (let i = 0; i < count; i++) {
     w.wolves.push({
       id: _wolfIdSeq++,
@@ -1337,8 +1357,8 @@ export function updateWolves(w: WorldState, dt: number) {
     // 接近
     wolf.pos.x += (dx / d) * wolf.speed * dt;
     wolf.pos.y += (dy / d) * wolf.speed * dt;
-    // 川には行かない
-    if (wolf.pos.y > CONFIG.DRY_Y_LIMIT - 20) wolf.pos.y = CONFIG.DRY_Y_LIMIT - 20;
+    // 海タイルには入らない（DRY_Y_LIMIT 旧境界の代わりにタイル判定）
+    if (isSeaAt(wolf.pos.x, wolf.pos.y)) wolf.pos.y -= wolf.speed * dt * 2;
   }
 }
 
@@ -1373,10 +1393,12 @@ function createDex(): Record<DeathCauseId, DexEntry> {
 
 export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
   const bounds = { w: CONFIG.WORLD_W, h: CONFIG.WORLD_H };
-  const terrain = initTerrain(bounds);
+  const runId = `run-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000).toString(36)}`;
+  const terrainSeed = seedFromRunId(runId);
+  const terrain = initTerrain(bounds, difficulty, terrainSeed);
   activateTerrain(terrain);
   return {
-    runId: `run-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000).toString(36)}`,
+    runId,
     runStartedAtMs: Date.now(),
     difficulty,
     tick: 0,
@@ -1440,6 +1462,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     wolfSpawnCooldown: 0,
     wolvesKilled: 0,
     terrain,
+    terrainSeed,
     terraformJobs: [],
   };
 }
@@ -1461,12 +1484,22 @@ export function ensurePlots(w: WorldState) {
   if (!w.wolves) w.wolves = [];
   if (w.wolfSpawnCooldown === undefined) w.wolfSpawnCooldown = 0;
   if (w.wolvesKilled === undefined) w.wolvesKilled = 0;
-  // Σ-2: ロード後に地形タイルを再アクティブ化（v10 以前のセーブは procedural で再生成）
-  if (!w.terrain || w.terrain.length === 0) w.terrain = initTerrain(w.bounds);
+  // Σ-2/3: ロード後に地形タイルを再アクティブ化（v11 以前のセーブは seed で再生成）
+  if (!w.terrain || w.terrain.length === 0) {
+    if (!w.terrainSeed) w.terrainSeed = seedFromRunId(w.runId);
+    w.terrain = initTerrain(w.bounds, w.difficulty, w.terrainSeed);
+  }
   if (!w.terraformJobs) w.terraformJobs = [];
   // buryTimer は transient なのでロード後リセット
   for (const row of w.terrain) for (const tile of row) tile.buryTimer = 0;
   activateTerrain(w.terrain);
+  // Σ-3-d: ロード済み障害物が海タイルにある場合は陸地へ移動
+  for (const obs of w.obstacles) {
+    if (isSeaAt(obs.pos.x, obs.pos.y)) {
+      const dry = findDryTile(obs.pos.x, obs.pos.y, 200);
+      obs.pos = dry;
+    }
+  }
   // オオカミID連番をリセット（ラン毎に 1 から始め直す）
   resetWolfIdSeq(1);
   // モジュールレベルキャッシュをクリア（セーブロード後に旧参照が残らないよう）
@@ -1811,10 +1844,10 @@ function flightStep(
     // 位置クランプ（水＝泥川ゾーンはそのまま、陸は地面に）
     entity.pos.y = Math.min(entity.pos.y, w.bounds.h - 16);
     entity.flight = null;
-    // 着地処理：水中 (y > DRY_Y_LIMIT) なら溺死（ちびわふ）or 水HP削り（NPC）
+    // 着地処理：海タイルなら溺死（ちびわふ）or 水HP削り（NPC）
     if (isChibi) {
       const c = entity as Chibiwafu;
-      if (c.pos.y > CONFIG.DRY_Y_LIMIT) {
+      if (isSeaAt(c.pos.x, c.pos.y)) {
         spawnBubble(w.bubbles, c.pos, 'わふぅ…', 'speech', 1.1);
         pushLife(c, Math.floor(c.ageSec), '水に落ちて沈んだ');
         damageChibi(w, c, c.hp, 'kamisama_drown');
@@ -1832,7 +1865,7 @@ function flightStep(
       }
     } else {
       const n = entity as NpcState;
-      if (n.pos.y > CONFIG.DRY_Y_LIMIT) {
+      if (isSeaAt(n.pos.x, n.pos.y)) {
         spawnBubble(w.bubbles, n.pos, 'わぷっ…', 'npc-speech', 1.2);
         damageNpc(w, n, 10);
         return;
@@ -1966,7 +1999,7 @@ export function forceSpawn(w: WorldState) {
   const child = spawnChibiwafu({
     name,
     birthTick: w.tick,
-    pos: { x: w.furanaPos.x + jitter(), y: w.furanaPos.y + 30 + Math.abs(jitter()) },
+    pos: findDryTile(w.furanaPos.x + jitter(), w.furanaPos.y + 30 + Math.abs(jitter()), 120),
     maxAgeSec: maxAge,
     traits,
     params,
@@ -2064,7 +2097,12 @@ function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone
   for (const zone of hazards) {
     if (!hazardActiveInSeason(zone, w.season)) continue;
     if (insideSafe && !zone.bypassSafeZone) continue;
-    if (!pointInZone(zone, c.pos)) continue;
+    // 'sea' kind は isSeaAt で判定（DRY_Y_LIMIT rect の代替）
+    if (zone.kind === 'sea') {
+      if (!isSeaAt(c.pos.x, c.pos.y)) continue;
+    } else {
+      if (!pointInZone(zone, c.pos)) continue;
+    }
     // trait gate
     if (zone.requiresAnyTrait && !zone.requiresAnyTrait.some((t) => c.traits.includes(t))) continue;
     // event gate
@@ -3012,18 +3050,24 @@ function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punc
     pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をぶん投げた（機嫌${Math.round(n.mood)}）`);
 
     const startPos = { x: target.pos.x, y: target.pos.y };
-    // 目的地：50% 川 / 50% ランダム遠投
+    // 目的地：50% 水辺へ / 50% ランダム遠投
+    // 水辺: フラナから離れた方向に向かって海タイルが最初に現れる座標を探す
     let landX: number, landY: number;
     if (Math.random() < 0.5) {
       const dir = target.pos.x < w.bounds.w / 2 ? 1 : -1;
       landX = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + dir * (250 + Math.random() * 150)));
-      landY = CONFIG.DRY_Y_LIMIT + 16 + Math.random() * 40;
-      pushLife(target, Math.floor(target.ageSec), 'フラナに川へぶん投げられた');
+      // 海マスクで水辺を探す（最大 bounds.h まで走査）
+      let waterY = w.bounds.h * 0.75;
+      for (let sy = Math.round(target.pos.y); sy < w.bounds.h - 20; sy += 16) {
+        if (isSeaAt(landX, sy)) { waterY = sy + 16; break; }
+      }
+      landY = waterY + Math.random() * 40;
+      pushLife(target, Math.floor(target.ageSec), 'フラナに海へぶん投げられた');
     } else {
       const ang = Math.random() * Math.PI * 2;
       const dist = 280 + Math.random() * 170;
       landX = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + Math.cos(ang) * dist));
-      landY = Math.max(40, Math.min(CONFIG.DRY_Y_LIMIT - 20, target.pos.y + Math.sin(ang) * dist));
+      landY = Math.max(40, Math.min(w.bounds.h - 20, target.pos.y + Math.sin(ang) * dist));
       pushLife(target, Math.floor(target.ageSec), 'フラナにぶん投げられた');
     }
     target.target = null;

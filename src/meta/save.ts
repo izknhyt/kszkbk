@@ -8,12 +8,13 @@ export type SlotId = 1 | 2 | 3;
 
 const OLD_SINGLE_KEY = 'kszkbk:save:v1';
 const slotKey = (slot: SlotId) => `kszkbk:save:slot${slot}`;
-const CURRENT_VERSION = 11;
+const CURRENT_VERSION = 12;
 
 // v1-v8 の履歴は README 省略。v9：スロット制、runId/difficulty 追加
 // v10：weather / weatherForecast 追加
 // v11：Σ-2 タイル式ハイトマップ（terrain RLE + terraformJobs + soil リソース）
-type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+// v12：Σ-3 terrainSeed（procedural ジェネレータ切り替え）
+type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
 
 // =========================================================================
 // Σ-2 地形 RLE 圧縮ユーティリティ
@@ -130,6 +131,8 @@ interface SaveData {
   // v11+: Σ-2 地形
   terrain?: TerrainSave;
   terraformJobs?: TerraformJob[];
+  // v12+: Σ-3 地形シード
+  terrainSeed?: number;
 }
 
 // スロット概要（スタート画面で 3 枚のカードに表示）
@@ -212,6 +215,7 @@ export function save(w: WorldState, slot: SlotId) {
     wolvesKilled: w.wolvesKilled,
     terrain: serializeTerrain(w.terrain),
     terraformJobs: w.terraformJobs,
+    terrainSeed: w.terrainSeed,
   };
   try {
     localStorage.setItem(slotKey(slot), JSON.stringify(data));
@@ -226,7 +230,7 @@ export function load(w: WorldState, slot: SlotId): boolean {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw) as SaveData;
-    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(data.version)) return false;
+    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(data.version)) return false;
     if (data.runId) w.runId = data.runId;
     if (typeof data.runStartedAtMs === 'number') w.runStartedAtMs = data.runStartedAtMs;
     if (data.difficulty) w.difficulty = data.difficulty;
@@ -262,6 +266,8 @@ export function load(w: WorldState, slot: SlotId): boolean {
       activateTerrain(w.terrain);
     }
     if (Array.isArray(data.terraformJobs)) w.terraformJobs = data.terraformJobs;
+    // v12+: terrainSeed。旧セーブは ensurePlots で runId から再導出
+    if (typeof data.terrainSeed === 'number') w.terrainSeed = data.terrainSeed;
     // soil が古いセーブにない場合のデフォルト
     if (typeof w.resources.soil !== 'number') w.resources.soil = 0;
     return true;
