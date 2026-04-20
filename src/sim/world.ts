@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -126,7 +126,7 @@ export interface WorldState {
   // 水:   水源 + 水路で補給、畑にも必要（将来）
   // 木材: 伐採で得る、建物の材料
   // 石材: 石切で得る、建物の材料
-  resources: { food: number; water: number; wood: number; stone: number; plank: number };
+  resources: { food: number; water: number; wood: number; stone: number; plank: number; soil: number };
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
@@ -184,6 +184,10 @@ export interface WorldState {
   wolfSpawnCooldown: number;
   // 撃破したオオカミ数（統計）
   wolvesKilled: number;
+  // --- Σ-2 タイル式ハイトマップ -------------------------------------------
+  // 32px セルの 2D タイル配列 [row][col]。100×57 = 5700 タイル。
+  // getElevation(x,y) はここから bi-linear 補間で返す。persist 対象（RLE 圧縮）。
+  terrain: TerrainTile[][];
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -310,7 +314,7 @@ export interface DifficultyMods {
   fatigueMul: number;      // 疲労上昇速度乗算
   obstacleCount: number;   // 初期障害物数
   eventIntervalMul: number; // 音頭/火事のインターバル乗算（大きいほど間が空く）
-  initialResources: { food: number; water: number; wood: number; stone: number; plank: number };
+  initialResources: { food: number; water: number; wood: number; stone: number; plank: number; soil: number };
 }
 export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
   beginner: {
@@ -319,7 +323,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 0.75,
     obstacleCount: 50,
     eventIntervalMul: 1.5,
-    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2 },
+    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, soil: 30 },
   },
   standard: {
     hazardMul: 1.0,
@@ -327,7 +331,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.0,
     obstacleCount: 90,
     eventIntervalMul: 1.0,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, soil: 0 },
   },
   hell: {
     hazardMul: 1.8,
@@ -335,7 +339,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.3,
     obstacleCount: 140,
     eventIntervalMul: 0.55,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, soil: 0 },
   },
 };
 export function currentMods(w: WorldState): DifficultyMods {
@@ -608,28 +612,102 @@ export function isFarmFeature(f: Feature): boolean {
 }
 
 // =========================================================================
-// 高低差地形（Ω-3-b）
-// procedural な標高マップ。0〜100 を返す。
-//   北側（y<400）→ 高地 60-80
-//   中央拠点付近 → 中位 40-50
-//   川付近（y>DRY_Y_LIMIT-200）→ 低地 0-15
-//   西の端 → ゆるい斜面 +10
-// 水は必ず高→低へ流れる。洪水は標高差が 15 以上ある高台には届かない。
+// Σ-2 タイル式ハイトマップ
+//
+// 32px セルの 2D 配列を WorldState.terrain に保持。
+// getElevation(x,y) は 4 近傍タイル間の bi-linear 補間を返す。
+// Σ-1 の z 物理コードはシグネチャが同じなので無変更で動く。
+//
+// タイル座標 (col, row)：center = ((col+0.5)*32, (row+0.5)*32)
+// 補間用分数タイル座標 tc = x/32-0.5, tr = y/32-0.5
 // =========================================================================
-export function getElevation(x: number, y: number): number {
+export const TERRAIN_TILE_SIZE = 32;
+export const TERRAIN_COLS = Math.ceil(CONFIG.WORLD_W / TERRAIN_TILE_SIZE);  // 100
+export const TERRAIN_ROWS = Math.ceil(CONFIG.WORLD_H / TERRAIN_TILE_SIZE);  // 57
+
+// モジュールレベルで保持するアクティブな地形参照。
+// createWorld / ensurePlots で activateTerrain を呼んで更新する。
+let _activeTerrain: TerrainTile[][] | null = null;
+
+export function activateTerrain(terrain: TerrainTile[][]): void {
+  _activeTerrain = terrain;
+}
+
+// 既存の procedural 算出式（initTerrain の充填＆ v10 以前の load マイグレーション用）
+export function proceduralElevation(x: number, y: number): number {
   const dryLimit = CONFIG.DRY_Y_LIMIT;
-  // 基礎：南（川側）低、北（上部）高
   const southness = Math.max(0, Math.min(1, y / dryLimit));
-  let base = 70 - southness * 55;  // y=0 → 70, y=dryLimit → 15
-  // 川ゾーン（y > dryLimit - 150）は強制低地
+  let base = 70 - southness * 55;
   if (y > dryLimit - 150) base = Math.max(0, base - 20);
   if (y > dryLimit) base = 0;
-  // 西の端は丘（x<600 の帯を +15）
   if (x < 600) base += (600 - x) / 600 * 15;
-  // なだらかな起伏（sin ノイズでリアリティ、振幅 ±4）
   const noise = Math.sin(x * 0.003) * 2 + Math.cos(y * 0.004 + x * 0.002) * 2;
   return Math.max(0, Math.min(100, base + noise));
 }
+
+// elev から材質を決定（初期充填で使う）
+function elevToMaterial(elev: number, isRiver: boolean): TerrainMaterial {
+  if (isRiver) return 'water';
+  if (elev > 60) return 'rock';
+  if (elev > 25) return 'grass';
+  if (elev > 10) return 'soil';
+  return 'sand';
+}
+
+// procedural 値でタイル配列を初期化する
+export function initTerrain(bounds: { w: number; h: number }): TerrainTile[][] {
+  const grid: TerrainTile[][] = [];
+  for (let row = 0; row < TERRAIN_ROWS; row++) {
+    const rowArr: TerrainTile[] = [];
+    for (let col = 0; col < TERRAIN_COLS; col++) {
+      const cx = (col + 0.5) * TERRAIN_TILE_SIZE;
+      const cy = (row + 0.5) * TERRAIN_TILE_SIZE;
+      const elev = proceduralElevation(cx, cy);
+      const isRiver = cy > CONFIG.DRY_Y_LIMIT;
+      rowArr.push({
+        elev,
+        material: elevToMaterial(elev, isRiver),
+        stability: 1.0,
+        waterLevel: isRiver ? 1.0 : 0,
+        buryTimer: 0,
+      });
+    }
+    grid.push(rowArr);
+  }
+  void bounds;
+  return grid;
+}
+
+// bi-linear 補間で任意点の標高を返す。Σ-1 z 物理と既存コード全域から呼ばれる。
+export function getElevation(x: number, y: number): number {
+  const terrain = _activeTerrain;
+  if (!terrain) return proceduralElevation(x, y);
+
+  const tc = x / TERRAIN_TILE_SIZE - 0.5;
+  const tr = y / TERRAIN_TILE_SIZE - 0.5;
+  const c0 = Math.floor(tc);
+  const r0 = Math.floor(tr);
+  const tx = tc - c0;
+  const ty = tr - r0;
+  const maxC = TERRAIN_COLS - 1;
+  const maxR = TERRAIN_ROWS - 1;
+
+  const e00 = terrain[Math.max(0, Math.min(maxR, r0))]?.[Math.max(0, Math.min(maxC, c0))]?.elev ?? 0;
+  const e10 = terrain[Math.max(0, Math.min(maxR, r0))]?.[Math.max(0, Math.min(maxC, c0 + 1))]?.elev ?? 0;
+  const e01 = terrain[Math.max(0, Math.min(maxR, r0 + 1))]?.[Math.max(0, Math.min(maxC, c0))]?.elev ?? 0;
+  const e11 = terrain[Math.max(0, Math.min(maxR, r0 + 1))]?.[Math.max(0, Math.min(maxC, c0 + 1))]?.elev ?? 0;
+
+  return e00 * (1 - tx) * (1 - ty)
+       + e10 * tx * (1 - ty)
+       + e01 * (1 - tx) * ty
+       + e11 * tx * ty;
+}
+
+// タイル座標からインデックスを安全に返す。範囲外は null。
+function getTile(terrain: TerrainTile[][], tx: number, ty: number): TerrainTile | null {
+  return terrain[ty]?.[tx] ?? null;
+}
+void getTile; // 後続フェーズ（Σ-2-b/c）で使用
 
 // =========================================================================
 // オオカミ襲撃（Ω-5）
@@ -843,6 +921,8 @@ function createDex(): Record<DeathCauseId, DexEntry> {
 
 export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
   const bounds = { w: CONFIG.WORLD_W, h: CONFIG.WORLD_H };
+  const terrain = initTerrain(bounds);
+  activateTerrain(terrain);
   return {
     runId: `run-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000).toString(36)}`,
     runStartedAtMs: Date.now(),
@@ -907,6 +987,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     wolves: [],
     wolfSpawnCooldown: 0,
     wolvesKilled: 0,
+    terrain,
   };
 }
 
@@ -927,6 +1008,11 @@ export function ensurePlots(w: WorldState) {
   if (!w.wolves) w.wolves = [];
   if (w.wolfSpawnCooldown === undefined) w.wolfSpawnCooldown = 0;
   if (w.wolvesKilled === undefined) w.wolvesKilled = 0;
+  // Σ-2: ロード後に地形タイルを再アクティブ化（v10 以前のセーブは procedural で再生成）
+  if (!w.terrain || w.terrain.length === 0) w.terrain = initTerrain(w.bounds);
+  // buryTimer は transient なのでロード後リセット
+  for (const row of w.terrain) for (const tile of row) tile.buryTimer = 0;
+  activateTerrain(w.terrain);
   // オオカミID連番をリセット（ラン毎に 1 から始め直す）
   resetWolfIdSeq(1);
   // モジュールレベルキャッシュをクリア（セーブロード後に旧参照が残らないよう）

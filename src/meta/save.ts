@@ -1,5 +1,6 @@
-import type { Difficulty } from '../types';
+import type { Difficulty, TerrainMaterial, TerrainTile } from '../types';
 import type { WorldState } from '../sim/world';
+import { activateTerrain, TERRAIN_COLS, TERRAIN_ROWS } from '../sim/world';
 import { peekNextId, resetIdCounter } from '../sim/chibiwafu';
 
 // 3 スロット制のローグライク向けセーブ。スロット毎に独立した run / difficulty を持つ。
@@ -7,11 +8,95 @@ export type SlotId = 1 | 2 | 3;
 
 const OLD_SINGLE_KEY = 'kszkbk:save:v1';
 const slotKey = (slot: SlotId) => `kszkbk:save:slot${slot}`;
-const CURRENT_VERSION = 10;
+const CURRENT_VERSION = 11;
 
 // v1-v8 の履歴は README 省略。v9：スロット制、runId/difficulty 追加
 // v10：weather / weatherForecast 追加
-type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+// v11：Σ-2 タイル式ハイトマップ（terrain RLE + terraformJobs + soil リソース）
+type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+
+// =========================================================================
+// Σ-2 地形 RLE 圧縮ユーティリティ
+// =========================================================================
+const MAT_CODES: TerrainMaterial[] = ['grass', 'soil', 'sand', 'rock', 'water'];
+
+function rleEncode(arr: number[]): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let i = 0;
+  while (i < arr.length) {
+    const v = arr[i]!;
+    let count = 1;
+    while (i + count < arr.length && arr[i + count] === v) count++;
+    out.push([v, count]);
+    i += count;
+  }
+  return out;
+}
+
+function rleDecode(rle: Array<[number, number]>): number[] {
+  const out: number[] = [];
+  for (const [v, c] of rle) {
+    for (let i = 0; i < c; i++) out.push(v);
+  }
+  return out;
+}
+
+interface TerrainSave {
+  cols: number;
+  rows: number;
+  elevRle: Array<[number, number]>;  // round(elev)
+  matRle: Array<[number, number]>;   // MAT_CODES index
+  stabRle: Array<[number, number]>;  // round(stability*100)
+  waterRle: Array<[number, number]>; // 0 or 10 (waterLevel*10 rounded)
+}
+
+function serializeTerrain(terrain: TerrainTile[][]): TerrainSave {
+  const rows = terrain.length;
+  const cols = terrain[0]?.length ?? 0;
+  const elevFlat: number[] = [];
+  const matFlat: number[] = [];
+  const stabFlat: number[] = [];
+  const waterFlat: number[] = [];
+  for (const row of terrain) {
+    for (const tile of row) {
+      elevFlat.push(Math.round(tile.elev));
+      matFlat.push(MAT_CODES.indexOf(tile.material));
+      stabFlat.push(Math.round(tile.stability * 100));
+      waterFlat.push(tile.waterLevel >= 0.5 ? 10 : 0);
+    }
+  }
+  return {
+    cols,
+    rows,
+    elevRle: rleEncode(elevFlat),
+    matRle: rleEncode(matFlat),
+    stabRle: rleEncode(stabFlat),
+    waterRle: rleEncode(waterFlat),
+  };
+}
+
+function deserializeTerrain(s: TerrainSave): TerrainTile[][] {
+  const elevFlat = rleDecode(s.elevRle);
+  const matFlat = rleDecode(s.matRle);
+  const stabFlat = rleDecode(s.stabRle);
+  const waterFlat = rleDecode(s.waterRle);
+  const terrain: TerrainTile[][] = [];
+  for (let row = 0; row < s.rows; row++) {
+    const rowArr: TerrainTile[] = [];
+    for (let col = 0; col < s.cols; col++) {
+      const idx = row * s.cols + col;
+      rowArr.push({
+        elev: elevFlat[idx] ?? 0,
+        material: MAT_CODES[matFlat[idx] ?? 0] ?? 'grass',
+        stability: (stabFlat[idx] ?? 100) / 100,
+        waterLevel: (waterFlat[idx] ?? 0) / 10,
+        buryTimer: 0,
+      });
+    }
+    terrain.push(rowArr);
+  }
+  return terrain;
+}
 
 interface SaveData {
   version: SaveVersion;
@@ -42,6 +127,8 @@ interface SaveData {
   weatherForecast?: WorldState['weatherForecast'];
   lastWeatherDayCount?: number;
   wolvesKilled?: number;
+  // v11+: Σ-2-a 地形タイル配列
+  terrain?: TerrainSave;
 }
 
 // スロット概要（スタート画面で 3 枚のカードに表示）
@@ -122,6 +209,7 @@ export function save(w: WorldState, slot: SlotId) {
     weatherForecast: w.weatherForecast,
     lastWeatherDayCount: w.lastWeatherDayCount,
     wolvesKilled: w.wolvesKilled,
+    terrain: serializeTerrain(w.terrain),
   };
   try {
     localStorage.setItem(slotKey(slot), JSON.stringify(data));
@@ -136,7 +224,7 @@ export function load(w: WorldState, slot: SlotId): boolean {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw) as SaveData;
-    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(data.version)) return false;
+    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(data.version)) return false;
     if (data.runId) w.runId = data.runId;
     if (typeof data.runStartedAtMs === 'number') w.runStartedAtMs = data.runStartedAtMs;
     if (data.difficulty) w.difficulty = data.difficulty;
@@ -166,6 +254,13 @@ export function load(w: WorldState, slot: SlotId): boolean {
     if (Array.isArray(data.weatherForecast) && data.weatherForecast.length > 0) w.weatherForecast = data.weatherForecast;
     if (typeof data.lastWeatherDayCount === 'number') w.lastWeatherDayCount = data.lastWeatherDayCount;
     if (typeof data.wolvesKilled === 'number') w.wolvesKilled = data.wolvesKilled;
+    // v11+: 地形。旧セーブは ensurePlots で procedural 再生成されるので null のままでよい
+    if (data.terrain && data.terrain.cols === TERRAIN_COLS && data.terrain.rows === TERRAIN_ROWS) {
+      w.terrain = deserializeTerrain(data.terrain);
+      activateTerrain(w.terrain);
+    }
+    // soil が古いセーブにない場合のデフォルト
+    if (typeof w.resources.soil !== 'number') w.resources.soil = 0;
     return true;
   } catch {
     return false;
