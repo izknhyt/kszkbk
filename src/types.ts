@@ -147,7 +147,10 @@ export type DeathCauseId =
   // --- Σ-1 z物理 追加 ----------------------------------------------------------
   | 'cliff_fall'             // 崖から落ちて地面に激突
   | 'slope_fall'             // 坂で足を滑らせて滑落死
-  | 'river_swept';           // 激流に流されて溺死
+  | 'river_swept'            // 激流に流されて溺死
+  // --- Σ-2-c 地形崩落 追加 -------------------------------------------------
+  | 'landslide_crush'        // 土砂崩れで転倒打撲死
+  | 'buried_alive';          // 土砂崩れで生き埋め窒息死
 
 export interface DeathCause {
   id: DeathCauseId;

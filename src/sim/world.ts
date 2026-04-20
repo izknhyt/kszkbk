@@ -799,6 +799,111 @@ export function updateTerraformJobs(w: WorldState, dt: number): void {
 }
 
 // =========================================================================
+// Σ-2-c 土砂崩れ災害
+// stability が低く隣接との標高差が大きいタイルが確率的に崩落する。
+// 崩落 = 高タイル elev -10 / 低タイル elev +8 / 範囲ちびわふにダメージ。
+// =========================================================================
+
+const LANDSLIDE_STABILITY_THRESHOLD = 0.4;
+const LANDSLIDE_ELEV_DIFF_MIN = 20;      // 崩落が起きる最低高低差
+const LANDSLIDE_INSTANT_KILL_DIFF = 30;  // この差以上なら即死級
+const LANDSLIDE_RATE_PER_SEC = 0.005;    // 不安定タイル 1 個あたりの崩落確率/sec
+const LANDSLIDE_DAMAGE_RADIUS_PX = 48;
+const LANDSLIDE_HP_DAMAGE = 40;
+const LANDSLIDE_BURY_DURATION_SEC = 5;
+const STABILITY_RECOVER_PER_SEC = 0.02;
+
+export function updateTerrainStability(w: WorldState, dt: number): void {
+  const terrain = w.terrain;
+  if (!terrain || terrain.length === 0) return;
+
+  // storm 時は stability 回復なし、heatwave は 1.5 倍速
+  const recoverMul = w.weather.kind === 'storm' ? 0 : w.weather.kind === 'heatwave' ? 1.5 : 1.0;
+
+  for (let row = 0; row < TERRAIN_ROWS; row++) {
+    for (let col = 0; col < TERRAIN_COLS; col++) {
+      const tile = terrain[row]![col]!;
+
+      // buryTimer カウントダウン（transient）
+      if (tile.buryTimer > 0) tile.buryTimer = Math.max(0, tile.buryTimer - dt);
+
+      // stability 回復
+      if (tile.stability < 1.0 && recoverMul > 0) {
+        tile.stability = Math.min(1.0, tile.stability + STABILITY_RECOVER_PER_SEC * recoverMul * dt);
+      }
+
+      // 崩落判定：stability < 閾値 かつ 隣接との差が大きい
+      if (tile.stability >= LANDSLIDE_STABILITY_THRESHOLD) continue;
+      if (Math.random() > LANDSLIDE_RATE_PER_SEC * dt) continue;
+
+      // 4 方向隣接で最も低いタイルを探す
+      const dirs = [[-1,0],[1,0],[0,-1],[0,1]] as const;
+      let lowest: TerrainTile | null = null;
+      let lowestDiff = 0;
+      let lowestDc = 0;
+      let lowestDr = 0;
+      for (const [dc, dr] of dirs) {
+        const nb = getTile(terrain, col + dc, row + dr);
+        if (!nb) continue;
+        const diff = tile.elev - nb.elev;
+        if (diff >= LANDSLIDE_ELEV_DIFF_MIN && diff > lowestDiff) {
+          lowest = nb;
+          lowestDiff = diff;
+          lowestDc = dc;
+          lowestDr = dr;
+        }
+      }
+      if (!lowest) continue;
+
+      // 崩落実行
+      tile.elev = Math.max(0, tile.elev - 10);
+      tile.stability = 0.3;
+      lowest.elev = Math.min(100, lowest.elev + 8);
+      lowest.stability = Math.min(lowest.stability, 0.5);
+      tile.material = elevToMaterial(tile.elev, tile.waterLevel >= 0.5);
+      lowest.material = elevToMaterial(lowest.elev, lowest.waterLevel >= 0.5);
+
+      // 低タイルに buryTimer をセット（生き埋め判定用）
+      const buriedTile = getTile(terrain, col + lowestDc, row + lowestDr);
+      if (buriedTile) buriedTile.buryTimer = LANDSLIDE_BURY_DURATION_SEC;
+
+      // 崩落エリアのちびわふにダメージ
+      const epicX = (col + 0.5) * TERRAIN_TILE_SIZE;
+      const epicY = (row + 0.5) * TERRAIN_TILE_SIZE;
+      for (const c of w.chibis) {
+        if (!isAlive(c) || c.flight) continue;
+        if (Math.hypot(c.pos.x - epicX, c.pos.y - epicY) > LANDSLIDE_DAMAGE_RADIUS_PX) continue;
+        if (lowestDiff >= LANDSLIDE_INSTANT_KILL_DIFF) {
+          spawnBubble(w.bubbles, c.pos, 'つぶされるわふっ！！', 'speech', 1.8);
+          pushLife(c, Math.floor(c.ageSec), '土砂崩れで押し潰された');
+          kill(w, c, 'landslide_crush');
+        } else {
+          const died = damageChibi(w, c, LANDSLIDE_HP_DAMAGE, 'landslide_crush');
+          if (!died) {
+            spawnBubble(w.bubbles, c.pos, 'どどどわふっ！', 'speech', 1.5);
+            setState(c, 'hurt', 1.5);
+            pushLife(c, Math.floor(c.ageSec), `土砂崩れに巻き込まれた（HP-${LANDSLIDE_HP_DAMAGE}）`);
+          }
+        }
+      }
+      spawnBubble(w.bubbles, { x: epicX, y: epicY }, '⛰ドドドッ', 'speech', 2.0);
+    }
+  }
+
+  // buried_alive 判定：buryTimer > 0 のタイル上にいるちびわふ
+  for (const c of w.chibis) {
+    if (!isAlive(c) || c.flight) continue;
+    const { tx, ty } = worldToTile(c.pos.x, c.pos.y);
+    const tile = getTile(terrain, tx, ty);
+    if (!tile || tile.buryTimer <= 0) continue;
+    if (Math.random() > dt * 0.15) continue;
+    spawnBubble(w.bubbles, c.pos, 'むぐ…わふ……', 'speech', 1.8);
+    pushLife(c, Math.floor(c.ageSec), '土砂に埋まって窒息した');
+    kill(w, c, 'buried_alive');
+  }
+}
+
+// =========================================================================
 // オオカミ襲撃（Ω-5）
 // 夜間のみ出現。map 端から湧き、野宿ちびわふを優先的に狩る。
 // 朝になると撤退。プレイヤーは左クリックで殴って追い払える。
@@ -3012,6 +3117,7 @@ export function tickWorld(w: WorldState, dt: number) {
   updateFloodZones(w, dt);
   updateWolves(w, dt);
   updateTerraformJobs(w, dt);
+  updateTerrainStability(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
   if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);
