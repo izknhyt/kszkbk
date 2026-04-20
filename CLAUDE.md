@@ -100,7 +100,9 @@ public/
 | 疲労 | ×0.75 | ×1.0 | ×1.3 |
 | 障害物数 | 50 | 90 | 140 |
 | イベント間隔 | ×1.5 | ×1.0 | ×0.55 |
-| 初期資源 | 🍞20 🪵15 🪨10 | 0 | 0 |
+| 初期資源 | 🍞40 🪵30 🪨20 🪵plank5 🌱soil80 他 | 🍞20 🪵15 🪨10 soil40 他半分 | 🪵5 🪨5 のみ |
+
+> **Σ-2.5-c 調整**：初期資源を実プレイ向けに底上げ。RAISE_COST_SOIL 20→10、LOWER_SOIL_GAIN 8→14、LOWER_STONE_GAIN 2→5、伐採/採石 HP 消費 0.5→1.0/sec。
 
 ## マップ & カメラ
 
@@ -235,7 +237,7 @@ https://claude.ai/code/session_XXXXXX
 | **Σ-1** | **2.5D z 物理**：`flight` に `vz/posZ` 追加、崖落下ダメージ、坂勾配で移動ペナルティ＋滑落死、激流もがき（水路 flow で vx/vy 継続加算） | 1 週 | ✅ 完了 |
 | **Σ-2** | **タイル式ハイトマップ化**：`getElevation(x,y)` 関数 → 32px セルの 2D 配列データに移行、`{elev, material, stability, water}`、地形編集 API、`raiseTile/loweTile`、stability 計算、土砂崩れ災害、`landslide_crush/buried_alive` 死因追加 | 1 週 | ✅ 完了 |
 | **Σ-3** | **3 地形 procedural 生成**：beginner=平野、standard=半島、hell=くそざこ島。ハイトマップ＋海マスクをシードで生成。既存 `DRY_Y_LIMIT` 一律泥川の前提を破棄 | 3 日 | ✅ 完了 |
-| **Σ-2.5** | **地形可視化 + 素材バランス**（Σ-3 後追い）：stage.ts に標高色分け + 崖線 + terraform ジョブ UI + stability 警告パルスを追加。初期資源と建築コストを実プレイ向けに再調整。Σ-3 まででデータは生成されるが 2D 描画に出ないので、Σ-4 Three.js を待たず 2D Pixi のまま見せて遊べる状態にする | 2-3 日 | 未着手（次） |
+| **Σ-2.5** | **地形可視化 + 素材バランス**（Σ-3 後追い）：stage.ts に標高色分け + 崖線 + terraform ジョブ UI + stability 警告パルスを追加。初期資源と建築コストを実プレイ向けに再調整。Σ-3 まででデータは生成されるが 2D 描画に出ないので、Σ-4 Three.js を待たず 2D Pixi のまま見せて遊べる状態にする | 2-3 日 | ✅ 完了 |
 | **Σ-4-proto** | **Three.js 検証プロト**（捨てプロト、1 週）。5 項目通れば本実装着手：① PlaneGeometry displace 60fps、② InstancedMesh 200 sprite 1 draw call、③ GPU picking、④ camera.project DOM 同期、⑤ 既存 PNG billboard の見え方 | 1 週 | 未着手 |
 | **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag で `stage.ts` と並行、parity 達成後に Pixi 削除。ビルボード＋ Toon 地形＋ splatmap＋ blob shadow | 2 週 | 未着手 |
 
