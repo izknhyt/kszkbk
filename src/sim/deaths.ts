@@ -24,10 +24,10 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
   },
   stonebread: {
     id: 'stonebread',
-    title: '石パンで歯折れ',
+    title: '硬い木の実で歯折れ',
     rare: false,
     points: 7,
-    template: (n) => `${n}は石パンに噛みつき、歯と意識を同時に失った。`,
+    template: (n) => `${n}は硬い木の実に噛みつき、歯と意識を同時に失った。`,
   },
   bridge: {
     id: 'bridge',
@@ -131,7 +131,7 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     rare: false,
     uncommon: true,
     points: 18,
-    template: (n) => `${n}は石パンを三口で飲み込もうとして喉が鳴らなくなった。`,
+    template: (n) => `${n}はどんぐりを三口で飲み込もうとして喉が鳴らなくなった。`,
   },
   shinpai_kashou: {
     id: 'shinpai_kashou',
@@ -309,6 +309,21 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     uncommon: true,
     points: 28,
     template: (n) => `${n}は夜の闇から現れたオオカミに一噛みされ、まもりんだけが残った。`,
+  },
+  electrocution: {
+    id: 'electrocution',
+    title: '感電死',
+    rare: false,
+    uncommon: true,
+    points: 32,
+    template: (n) => `${n}は光る電線を触り、ピカッと一瞬だけ明るくなって倒れた。`,
+  },
+  thunder_blast: {
+    id: 'thunder_blast',
+    title: '落雷直撃',
+    rare: true,
+    points: 48,
+    template: (n) => `${n}はペダル発電所の屋根に落ちた雷をもろに受け、黒焦げになった。`,
   },
 } as const;
 

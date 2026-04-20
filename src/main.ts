@@ -193,6 +193,8 @@ async function start() {
   let lastVillageLv = world.villageLv;
   let lastWolfCount = 0;
   let lastWolfDeaths = 0;
+  let lastThunderTick = -1;
+  let lastElectroDeaths = 0;
   const dtFixed = CONFIG.TICK_DT;
   let acc = 0;
   let prev = performance.now();
@@ -202,21 +204,29 @@ async function start() {
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
-  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine';
+  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln' | 'pasture' | 'loom';
   let buildMode: BuildKind | null = null;
   const plotBuildCosts: Record<BuildKind, { wood: number; stone: number; plank?: number }> = {
-    farm:      { wood: 2, stone: 0 },
-    channel:   { wood: 0, stone: 1 },
-    path:      { wood: 0, stone: 1 },
-    house:     { wood: 6, stone: 3 },
-    well:      { wood: 1, stone: 8 },
-    firewatch: { wood: 10, stone: 2 },
-    sawmill:   { wood: 8, stone: 4 },
-    shrine:    { wood: 3, stone: 5, plank: 2 },
+    farm:       { wood: 2, stone: 0 },
+    channel:    { wood: 0, stone: 1 },
+    path:       { wood: 0, stone: 1 },
+    house:      { wood: 6, stone: 3 },
+    well:       { wood: 1, stone: 8 },
+    firewatch:  { wood: 10, stone: 2 },
+    sawmill:    { wood: 8, stone: 4 },
+    shrine:     { wood: 3, stone: 5, plank: 2 },
+    generator:  { wood: 6, stone: 4, plank: 3 },
+    streetlamp: { wood: 2, stone: 1, plank: 1 },
+    powerline:  { wood: 1, stone: 0, plank: 1 },
+    kiln:       { wood: 4, stone: 8 },
+    pasture:    { wood: 3, stone: 2 },
+    loom:       { wood: 6, stone: 0, plank: 2 },
   };
   const buildModeLabel: Record<BuildKind, string> = {
     farm: '畑', channel: '水路', path: '道', house: '家',
     well: '井戸', firewatch: '火の見やぐら', sawmill: '製材所', shrine: '神社',
+    generator: 'ペダル発電所', streetlamp: '街灯', powerline: '電線', kiln: '精錬所',
+    pasture: '牧場', loom: '織機',
   };
   function setBuildMode(m: typeof buildMode) {
     buildMode = m;
@@ -280,6 +290,8 @@ async function start() {
     const emojiMap: Record<BuildKind, string> = {
       farm: '🌾 畑', channel: '💧 水路', path: '🛤 道', house: '🏠 家',
       well: '⛲ 井戸', firewatch: '🔥 火の見やぐら', sawmill: '🪚 製材所', shrine: '⛩ 神社',
+      generator: '⚡ ペダル発電所', streetlamp: '💡 街灯', powerline: '🪜 電線', kiln: '🧱 精錬所',
+      pasture: '🐑 牧場', loom: '🧶 織機',
     };
     flashToast(`${emojiMap[buildMode]} を建てた`, 'info');
     // 建設モードは継続
@@ -530,6 +542,12 @@ async function start() {
         : f.kind === 'firewatch' ? '#b0553a'
         : f.kind === 'sawmill' ? '#8d6238'
         : f.kind === 'shrine' ? '#c44a4a'
+        : f.kind === 'generator' ? '#9a8a5a'
+        : f.kind === 'streetlamp' ? (f.saturated ? '#ffe070' : '#6a604a')
+        : f.kind === 'powerline' ? '#6a5848'
+        : f.kind === 'kiln' ? '#b86030'
+        : f.kind === 'pasture' ? '#7ab060'
+        : f.kind === 'loom' ? '#a07858'
         : '#8b7048';
       mctx.fillRect(f.pos.x * sx - 2, f.pos.y * sy - 2, 4, 4);
     }
@@ -630,6 +648,19 @@ async function start() {
     if (wolfDeaths > lastWolfDeaths) {
       flashToast(`🐺 噛まれて ${wolfDeaths - lastWolfDeaths} 人死亡…`, 'info');
       lastWolfDeaths = wolfDeaths;
+    }
+
+    // 落雷：発電所が爆破されたら toast。lastThunderStrikeAt.tick を監視
+    const thunderTick = world.lastThunderStrikeAt?.tick ?? -1;
+    if (thunderTick > lastThunderTick) {
+      flashToast('⚡ 発電所に落雷直撃！', 'info');
+      lastThunderTick = thunderTick;
+    }
+    // 感電死の累計
+    const electroDeaths = world.dex.electrocution?.count ?? 0;
+    if (electroDeaths > lastElectroDeaths) {
+      flashToast(`⚡ 感電死 ${electroDeaths - lastElectroDeaths} 人…`, 'info');
+      lastElectroDeaths = electroDeaths;
     }
 
     // detect rank promotion

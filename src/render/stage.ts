@@ -1,13 +1,12 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, TextStyle, Texture } from 'pixi.js';
 import type { WorldState } from '../sim/world';
-import { getElevation } from '../sim/world';
+import { getElevation, POWERLINE_CONNECT_RADIUS } from '../sim/world';
 import type { Chibiwafu, DayPhase, HitTarget, PlacedBuilding, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
 import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
 import type { Bubble } from '../sim/bubbles';
 import { TRAIT_DEFS } from '../sim/traits';
 import { CONFIG } from '../config';
-import { landmarkActive, type Landmark, type LandmarkKind } from '../sim/landmarks';
 import { frameFor, loadSpriteLibrary, type SpriteLibrary } from './sprites';
 
 const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number; accents: number }> = {
@@ -68,18 +67,9 @@ interface BubbleView {
 interface EnvironmentArt {
   background: Texture | null;
   buildingFrames: Partial<Record<PlacedBuilding['defId'], Texture>>;
-  landmarkFrames: Partial<Record<LandmarkKind, Texture>>;
 }
 
 const BUILDING_FRAME_ORDER: PlacedBuilding['defId'][] = ['noukou', 'kouba', 'hakaba', 'taiko', 'ubuya'];
-const LANDMARK_FRAME_ORDER: LandmarkKind[] = [
-  'stonebread_rock',
-  'philosophy_stone',
-  'mudwater_pool',
-  'beer_barrel',
-  'flower_patch',
-  'kusozako_totem',
-];
 
 export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const app = new Application();
@@ -110,8 +100,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   app.stage.addChild(cameraLayer);
 
   const bgLayer = new Container();
-  const plotLayer = new Container();  // 開拓プロット（地面レイヤの上、ランドマーク下）
-  const landmarkLayer = new Container();
+  const plotLayer = new Container();  // 開拓プロット（地面レイヤの上）
   const buildingLayer = new Container();
   const eventUnderLayer = new Container(); // 下レイヤ（ring／disk）
   const corpseLayer = new Container();
@@ -121,7 +110,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const fxLayer = new Container();
   const eventOverLayer = new Container(); // 上レイヤ（火炎／粉塵）
   cameraLayer.addChild(
-    bgLayer, plotLayer, landmarkLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, wolfLayer, fxLayer, eventOverLayer,
+    bgLayer, plotLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, wolfLayer, fxLayer, eventOverLayer,
   );
 
   const lib = await loadSpriteLibrary('/chibiwafu.png', '/chibiwafu');
@@ -367,20 +356,14 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       for (const fz of world.floodZones) {
         plotLayer.addChild(drawFloodZone(fz));
       }
+      // 電力グラフのワイヤ（feature 本体の下）
+      const wires = drawPowerWires(world);
+      if (wires) plotLayer.addChild(wires);
       for (const f of world.features) {
         plotLayer.addChild(drawFeature(f));
       }
       for (const obs of world.obstacles) {
         plotLayer.addChild(drawObstacle(obs));
-      }
-    }
-
-    // landmarks：季節変化時のみ再構築（静的 POI は毎フレーム再生成不要）
-    if (drawFrameCount % 3 === 0) {
-      destroyAllChildren(landmarkLayer);
-      for (const lm of world.landmarks) {
-        if (!landmarkActive(lm, world.season)) continue;
-        landmarkLayer.addChild(drawLandmark(lm, envArt));
       }
     }
 
@@ -675,7 +658,6 @@ async function loadEnvironmentArt(): Promise<EnvironmentArt> {
   const art: EnvironmentArt = {
     background: null,
     buildingFrames: {},
-    landmarkFrames: {},
   };
 
   // Ω-2 時点：3200×1800 の広大マップにラスタ画像は合わないため procedural 固定。
@@ -694,25 +676,6 @@ async function loadEnvironmentArt(): Promise<EnvironmentArt> {
     });
   } catch (err) {
     console.warn('[stage] building art load failed, keeping procedural buildings', err);
-  }
-
-  try {
-    const propsSheet = await loadImage('/mockup/props.png');
-    const base = textureFromProcessedCanvas(propsSheet);
-    const cols = 3;
-    const rows = 3;
-    const cellW = Math.floor(propsSheet.width / cols);
-    const cellH = Math.floor(propsSheet.height / rows);
-    LANDMARK_FRAME_ORDER.forEach((kind, index) => {
-      const row = Math.floor(index / cols);
-      const col = index % cols;
-      art.landmarkFrames[kind] = new Texture({
-        source: base.source,
-        frame: new Rectangle(col * cellW, row * cellH, cellW, cellH),
-      });
-    });
-  } catch (err) {
-    console.warn('[stage] landmark art load failed, keeping procedural landmarks', err);
   }
 
   return art;
@@ -1265,13 +1228,43 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
   layer.addChild(vignette);
 }
 
+// 電力グラフのワイヤ描画。feature 本体の下レイヤに、
+// powerline/generator/streetlamp 間で接続距離以内のペアに直線を引く。
+// 稼働中の街灯に通じている辺は明るい黄色、そうでなければ灰色。
+function drawPowerWires(world: WorldState): Container | null {
+  const nodes = world.features.filter(
+    (f) => f.kind === 'powerline' || f.kind === 'generator' || f.kind === 'streetlamp',
+  );
+  if (nodes.length < 2) return null;
+  const c = new Container();
+  const g = new Graphics();
+  const R2 = POWERLINE_CONNECT_RADIUS * POWERLINE_CONNECT_RADIUS;
+  const anyLitLamp = world.features.some((f) => f.kind === 'streetlamp' && f.saturated);
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i]!;
+      const b = nodes[j]!;
+      const dx = a.pos.x - b.pos.x;
+      const dy = a.pos.y - b.pos.y;
+      if (dx * dx + dy * dy > R2) continue;
+      g.moveTo(a.pos.x, a.pos.y - 8).lineTo(b.pos.x, b.pos.y - 8);
+    }
+  }
+  g.stroke({ color: anyLitLamp ? 0xffd870 : 0x6a5848, width: 1.4, alpha: anyLitLamp ? 0.55 : 0.45 });
+  c.addChild(g);
+  return c;
+}
+
 // 開拓 feature の仮描画。kind 別に円形アイコン＋devLevel。
 function drawFeature(f: import('../types').Feature): Container {
   const c = new Container();
   const g = new Graphics();
   const radius = f.kind === 'water' ? 26 : f.kind === 'farm' ? 22 : f.kind === 'channel' ? 18
     : f.kind === 'house' ? 24 : f.kind === 'well' ? 20 : f.kind === 'firewatch' ? 26
-    : f.kind === 'sawmill' ? 24 : f.kind === 'shrine' ? 26 : 16;
+    : f.kind === 'sawmill' ? 24 : f.kind === 'shrine' ? 26
+    : f.kind === 'generator' ? 22 : f.kind === 'streetlamp' ? 14
+    : f.kind === 'powerline' ? 10 : f.kind === 'kiln' ? 24
+    : f.kind === 'pasture' ? 26 : f.kind === 'loom' ? 22 : 16;
 
   // 水路の通水状態に応じて色を変える
   // 通常青 → 飽和時オレンジ赤（氾濫警告）
@@ -1301,6 +1294,12 @@ function drawFeature(f: import('../types').Feature): Container {
     firewatch: 0xb0553a,
     sawmill: 0x8d6238,
     shrine: 0xc44a4a,
+    generator: 0x7a7088,
+    streetlamp: 0x5a5240,
+    powerline: 0x6a5848,
+    kiln: 0xb86030,
+    pasture: 0x7ab060,
+    loom: 0xa07858,
   };
   // 井戸：丸い石枠 + 中央に水、上に屋根
   if (f.kind === 'well') {
@@ -1339,6 +1338,76 @@ function drawFeature(f: import('../types').Feature): Container {
     c.position.set(f.pos.x, f.pos.y);
     return c;
   }
+  // 牧場：草地（緑の楕円）+ 柵 + もふもふ羊（白丸）。
+  if (f.kind === 'pasture') {
+    // 草地
+    g.ellipse(0, 0, radius, radius - 6).fill({ color: kindColor.pasture, alpha: 0.5 });
+    // 柵（4辺の短い線）
+    const pw = radius - 2;
+    g.rect(-pw, -pw + 4, pw * 2, 3).fill({ color: 0x6a4a20 });
+    g.rect(-pw, pw - 6, pw * 2, 3).fill({ color: 0x6a4a20 });
+    g.rect(-pw, -pw + 4, 3, pw * 2 - 7).fill({ color: 0x6a4a20 });
+    g.rect(pw - 3, -pw + 4, 3, pw * 2 - 7).fill({ color: 0x6a4a20 });
+    // 羊 3 匹（白い丸 + 顔の点）
+    const sheep = [{ x: -8, y: -4 }, { x: 6, y: 2 }, { x: -2, y: 8 }];
+    for (const s of sheep) {
+      g.circle(s.x, s.y, 5).fill({ color: 0xf0ece4 }).stroke({ color: 0x8a7868, width: 0.8 });
+      g.circle(s.x + 3, s.y - 2, 2.5).fill({ color: 0xe0d8cc }); // 頭
+      g.circle(s.x + 4, s.y - 1.5, 0.8).fill({ color: 0x3a3020 }); // 目
+    }
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 織機：茶色の木枠 + タテ糸 + ちびわふが操作中に布が現れる。
+  if (f.kind === 'loom') {
+    // 外枠（木の矩形フレーム）
+    g.rect(-radius + 2, -radius + 4, (radius - 2) * 2, radius + 8)
+      .fill({ color: kindColor.loom, alpha: 0.85 }).stroke({ color: 0x3a1a05, width: 2 });
+    // タテ糸（縦線 5 本）
+    const threadX = [-10, -5, 0, 5, 10];
+    for (const tx of threadX) {
+      g.moveTo(tx, -radius + 8).lineTo(tx, radius + 2)
+        .stroke({ color: 0xd8c8a0, width: 1, alpha: 0.8 });
+    }
+    // ヨコ糸（稼働中は追加）
+    if (f.workSec > 0) {
+      for (let row = 0; row < 4; row++) {
+        const ry = -radius + 10 + row * 5;
+        g.moveTo(-10, ry).lineTo(10, ry)
+          .stroke({ color: 0xe8a058, width: 1.5, alpha: 0.9 });
+      }
+    }
+    // シャトル（横に走る小さな棒）
+    g.rect(-8, 0, 16, 3).fill({ color: 0x8a4a20 }).stroke({ color: 0x3a1a05, width: 0.8 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 精錬所（窯）：レンガ色の丸い窯 + 煙突 + 炎口。稼働中（workSec>0）は炎マーク。
+  if (f.kind === 'kiln') {
+    // 窯の胴体（楕円ぽく見せる）
+    g.ellipse(0, 2, radius - 2, radius - 6).fill({ color: kindColor.kiln }).stroke({ color: 0x4a1a05, width: 2 });
+    // レンガ模様（横線 3 本）
+    for (let row = -1; row <= 1; row++) {
+      g.moveTo(-(radius - 6), row * 4).lineTo(radius - 6, row * 4)
+        .stroke({ color: 0x4a1a05, width: 0.8, alpha: 0.5 });
+    }
+    // 煙突（上部）
+    g.rect(-4, -radius - 4, 8, radius - 4).fill({ color: 0x4a3020 }).stroke({ color: 0x2a1005, width: 1.2 });
+    // 煙突蓋
+    g.rect(-6, -radius - 6, 12, 3).fill({ color: 0x3a2010 }).stroke({ color: 0x1a1005, width: 1 });
+    // 炉口（正面の丸窓）
+    g.circle(0, 6, 5).fill({ color: f.workSec > 0 ? 0xff8820 : 0x3a1a05 });
+    // 稼働中：炎ちら（橙色の揺らぎ）
+    if (f.workSec > 0) {
+      g.moveTo(-3, 6).lineTo(0, -radius + 8).lineTo(3, 6)
+        .fill({ color: 0xff6010, alpha: 0.7 });
+    }
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
   // 製材所：茶色の小屋 + 丸太 + ノコギリ
   if (f.kind === 'sawmill') {
     // 小屋
@@ -1353,6 +1422,65 @@ function drawFeature(f: import('../types').Feature): Container {
     g.circle(-radius + 18, radius - 2, 4).fill({ color: 0xbe8554 }).stroke({ color: 0x3a2a10, width: 1 });
     // ノコギリ光（白い線）
     g.moveTo(-4, -2).lineTo(6, -2).stroke({ color: 0xeeeeee, width: 2 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 発電所：小屋 + ペダル車輪（flow=稼働ワーカー数で回転、ここでは光の点滅で表現）
+  if (f.kind === 'generator') {
+    // 小屋外壁
+    g.rect(-radius + 2, -radius + 6, (radius - 2) * 2, radius + 6)
+      .fill({ color: 0x8a7a5a }).stroke({ color: 0x2a1a05, width: 1.5 });
+    // 屋根（切妻）
+    g.moveTo(-radius, -radius + 6).lineTo(0, -radius - 4).lineTo(radius, -radius + 6)
+      .closePath().fill({ color: 0x3a3228 }).stroke({ color: 0x1a1005, width: 1.5 });
+    // ペダル車輪（大きな歯車）
+    const wheelY = 2;
+    g.circle(0, wheelY, 9).fill({ color: kindColor.generator }).stroke({ color: 0x1a1010, width: 1.5 });
+    // スポーク（十字）
+    g.moveTo(-9, wheelY).lineTo(9, wheelY).stroke({ color: 0xc0b8a0, width: 1.5 });
+    g.moveTo(0, wheelY - 9).lineTo(0, wheelY + 9).stroke({ color: 0xc0b8a0, width: 1.5 });
+    // 稼働中は稲妻（flow>0 で黄色マーク）
+    if ((f.flow ?? 0) > 0) {
+      g.moveTo(-3, -radius + 12).lineTo(2, -radius + 16).lineTo(-1, -radius + 16).lineTo(3, -radius + 20)
+        .stroke({ color: 0xffe070, width: 2 });
+    }
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 電線（電柱）：縦棒 + 上部横梁 + 碍子 2 個。
+  if (f.kind === 'powerline') {
+    // 支柱
+    g.rect(-1, -radius + 2, 2, radius + 4).fill({ color: kindColor.powerline }).stroke({ color: 0x1a1005, width: 0.8 });
+    // 横梁
+    g.rect(-radius + 2, -radius + 2, (radius - 2) * 2, 2).fill({ color: kindColor.powerline }).stroke({ color: 0x1a1005, width: 0.8 });
+    // 碍子（白ドット 2 個）
+    g.circle(-radius + 3, -radius + 4, 1.6).fill({ color: 0xe0dac0 });
+    g.circle(radius - 3, -radius + 4, 1.6).fill({ color: 0xe0dac0 });
+    // 台座
+    g.rect(-3, radius - 2, 6, 3).fill({ color: 0x3a3228 }).stroke({ color: 0x1a1005, width: 0.8 });
+    c.addChild(g);
+    c.position.set(f.pos.x, f.pos.y);
+    return c;
+  }
+  // 街灯：支柱 + 電球。saturated=true で光輪を足す。
+  if (f.kind === 'streetlamp') {
+    // 稼働中：大きな光輪（半透明黄色）
+    if (f.saturated) {
+      g.circle(0, -radius + 2, radius * 1.2).fill({ color: 0xffd870, alpha: 0.18 });
+      g.circle(0, -radius + 2, radius * 0.6).fill({ color: 0xfff0a0, alpha: 0.35 });
+    }
+    // 支柱
+    g.rect(-1.5, -radius + 6, 3, radius + 4).fill({ color: 0x3a3228 }).stroke({ color: 0x1a1005, width: 1 });
+    // 台座
+    g.rect(-5, radius - 2, 10, 4).fill({ color: 0x3a3228 }).stroke({ color: 0x1a1005, width: 1 });
+    // 笠（上の蓋）
+    g.moveTo(-6, -radius + 4).lineTo(0, -radius).lineTo(6, -radius + 4).closePath()
+      .fill({ color: 0x2a2218 }).stroke({ color: 0x1a1005, width: 1 });
+    // 電球（稼働で明るい黄、停止で暗い）
+    const bulbColor = f.saturated ? 0xffeea8 : kindColor.streetlamp;
+    g.circle(0, -radius + 6, 3.2).fill({ color: bulbColor }).stroke({ color: 0x1a1005, width: 0.8 });
     c.addChild(g);
     c.position.set(f.pos.x, f.pos.y);
     return c;
@@ -1439,77 +1567,6 @@ function drawObstacle(o: import('../types').Obstacle): Container {
   bar.rect(-bw / 2, -size - 5, bw * pct, 2).fill({ color: 0xff7a3a });
   c.addChild(bar);
   c.position.set(o.pos.x, o.pos.y);
-  return c;
-}
-
-function drawLandmark(lm: Landmark, envArt: EnvironmentArt): Container {
-  const c = new Container();
-  c.position.set(lm.pos.x, lm.pos.y);
-  c.addChild(drawGroundShadow(18, 6, 9, 0.14));
-  const artTexture = envArt.landmarkFrames[lm.kind];
-  if (artTexture) {
-    const sprite = new Sprite(artTexture);
-    sprite.anchor.set(0.5, 0.7);
-    sprite.scale.set(52 / Math.max(artTexture.width, 1));
-    c.addChild(sprite);
-  } else {
-    const g = new Graphics();
-    switch (lm.kind) {
-      case 'stonebread_rock': {
-        g.ellipse(0, 0, 24, 14).fill({ color: 0x8c8378 }).stroke({ color: 0x3a2a1a, width: 2 });
-        g.ellipse(-8, -8, 11, 7).fill({ color: 0x6d6050 }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.roundRect(-10, -18, 20, 7, 3).fill({ color: 0xd0a36a }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.rect(-8, -18, 16, 2).fill({ color: 0x8f5a2e, alpha: 0.7 });
-        break;
-      }
-      case 'philosophy_stone': {
-        g.roundRect(-9, -26, 18, 30, 5).fill({ color: 0x6e6b79 }).stroke({ color: 0x3a2a1a, width: 2 });
-        g.rect(-5, -18, 10, 3).fill({ color: 0x353744 });
-        g.circle(0, -7, 2).fill({ color: 0xf0e8d2 });
-        break;
-      }
-      case 'mudwater_pool': {
-        g.ellipse(0, 0, 30, 12).fill({ color: 0x5c4422, alpha: 0.9 }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.ellipse(-7, -3, 9, 3).fill({ color: 0x8a6a42, alpha: 0.5 });
-        g.circle(9, -2, 2).fill({ color: 0xdcbf87, alpha: 0.55 });
-        break;
-      }
-      case 'beer_barrel': {
-        g.rect(-10, -14, 20, 22).fill({ color: 0x8a5a2b }).stroke({ color: 0x3a2a1a, width: 2 });
-        g.rect(-10, -10, 20, 2).fill({ color: 0x3a2a1a });
-        g.rect(-10, 2, 20, 2).fill({ color: 0x3a2a1a });
-        g.ellipse(0, -14, 10, 3).fill({ color: 0x4a3422 });
-        g.circle(12, -4, 3).fill({ color: 0xf2e2ad });
-        break;
-      }
-      case 'flower_patch': {
-        for (let i = 0; i < 5; i++) {
-          const a = (i / 5) * Math.PI * 2;
-          const x = Math.cos(a) * 8;
-          const y = Math.sin(a) * 6;
-          g.circle(x, y, 3).fill({ color: 0xf5b6c0 });
-          g.circle(x, y, 1).fill({ color: 0xffd35a });
-        }
-        g.circle(0, 0, 2).fill({ color: 0x9abf61 });
-        break;
-      }
-      case 'kusozako_totem': {
-        g.rect(-2, -30, 4, 34).fill({ color: 0x6b4a2b }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.rect(-8, -30, 16, 6).fill({ color: 0xe8735a }).stroke({ color: 0x3a2a1a, width: 1 });
-        g.rect(-6, -18, 12, 4).fill({ color: 0xffd35a }).stroke({ color: 0x3a2a1a, width: 1 });
-        break;
-      }
-    }
-    c.addChild(g);
-  }
-  const label = new Text({
-    text: lm.label,
-    style: new TextStyle({ fontFamily: 'sans-serif', fontSize: 9, fill: 0x3a2a1a, fontStyle: 'italic' }),
-  });
-  label.anchor.set(0.5, 0);
-  label.position.set(0, 12);
-  label.alpha = 0.6;
-  c.addChild(label);
   return c;
 }
 

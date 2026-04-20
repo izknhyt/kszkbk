@@ -11,7 +11,7 @@ export type ChibiState =
   // --- P5: 生活ステート ---------------------------------------------------
   | 'chatting'   // すれ違い立ち話（移動停止）
   | 'staring'    // 浮世離れが空を見上げる
-  | 'eating';    // 石パン岩／泥水池で飲食
+  | 'eating';    // 飲食ステート
 
 export interface Vec2 {
   x: number;
@@ -42,8 +42,6 @@ export interface Chibiwafu {
   lifeLog: LifeEvent[];
   // 立ち話再発生までのクールダウン秒
   chatCooldown: number;
-  // 目的地の種類（ランドマーク由来の場合、ランドマークID）
-  targetLandmarkId: string | null;
   // --- HP（神様に殴られる／振り回される／投げられる時だけ減る）-------
   // 0 になったら死亡（kamisama_punch か kamisama_shake か kamisama_throw）。
   // 通常の事故死（ハザード・音頭・棒会議など）は HP を経由しない即死。
@@ -119,7 +117,9 @@ export type DeathCauseId =
   | 'hunger_death'            // 空腹で餓死
   | 'fatigue_death'           // 疲労で衰弱死
   | 'flood_drown'            // 洪水に流されて溺死
-  | 'wolf_bite';             // オオカミに噛み殺された
+  | 'wolf_bite'              // オオカミに噛み殺された
+  | 'electrocution'          // 雷・電線・発電所の事故で感電死
+  | 'thunder_blast';         // 発電所への落雷で爆発死（周囲巻き込み）
 
 export interface DeathCause {
   id: DeathCauseId;
@@ -158,7 +158,7 @@ export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
 
 // フリー配置の開拓要素（水源・水路・畑・道）。
 // タイル/グリッド無しで任意の座標に置ける。水の伝播は距離ベースで判定。
-export type FeatureKind = 'water' | 'channel' | 'path' | 'farm' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine';
+export type FeatureKind = 'water' | 'channel' | 'path' | 'farm' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln' | 'pasture' | 'loom';
 
 export interface Feature {
   id: string;
