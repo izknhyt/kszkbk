@@ -1,4 +1,6 @@
 import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
+import { seedFromRunId } from './terrain/noise';
+import { generateTerrain } from './terrain/generators';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -190,6 +192,9 @@ export interface WorldState {
   terrain: TerrainTile[][];
   // Σ-2-b: ちびわふが盛り土・切り土を行うジョブキュー（persist 対象）
   terraformJobs: TerraformJob[];
+  // --- Σ-3 地形シード ---------------------------------------------------
+  // runId から派生。difficulty ごとに異なる地形プリセットを同一シードで再現可能。
+  terrainSeed: number;
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -656,8 +661,18 @@ function elevToMaterial(elev: number, isRiver: boolean): TerrainMaterial {
   return 'sand';
 }
 
-// procedural 値でタイル配列を初期化する
-export function initTerrain(bounds: { w: number; h: number }): TerrainTile[][] {
+// タイルを初期化する。
+// difficulty + seed が渡された場合は Σ-3 ジェネレータを使用。
+// 引数なし（fallback）は proceduralElevation で旧来動作（v11 以前セーブ互換）。
+export function initTerrain(
+  bounds: { w: number; h: number },
+  difficulty?: Difficulty,
+  seed?: number,
+): TerrainTile[][] {
+  if (difficulty !== undefined && seed !== undefined) {
+    return generateTerrain(difficulty, seed, bounds);
+  }
+  // fallback: v11 以前 procedural
   const grid: TerrainTile[][] = [];
   for (let row = 0; row < TERRAIN_ROWS; row++) {
     const rowArr: TerrainTile[] = [];
@@ -1120,10 +1135,12 @@ function createDex(): Record<DeathCauseId, DexEntry> {
 
 export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
   const bounds = { w: CONFIG.WORLD_W, h: CONFIG.WORLD_H };
-  const terrain = initTerrain(bounds);
+  const runId = `run-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000).toString(36)}`;
+  const terrainSeed = seedFromRunId(runId);
+  const terrain = initTerrain(bounds, difficulty, terrainSeed);
   activateTerrain(terrain);
   return {
-    runId: `run-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000).toString(36)}`,
+    runId,
     runStartedAtMs: Date.now(),
     difficulty,
     tick: 0,
@@ -1187,6 +1204,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     wolfSpawnCooldown: 0,
     wolvesKilled: 0,
     terrain,
+    terrainSeed,
     terraformJobs: [],
   };
 }
@@ -1208,8 +1226,11 @@ export function ensurePlots(w: WorldState) {
   if (!w.wolves) w.wolves = [];
   if (w.wolfSpawnCooldown === undefined) w.wolfSpawnCooldown = 0;
   if (w.wolvesKilled === undefined) w.wolvesKilled = 0;
-  // Σ-2: ロード後に地形タイルを再アクティブ化（v10 以前のセーブは procedural で再生成）
-  if (!w.terrain || w.terrain.length === 0) w.terrain = initTerrain(w.bounds);
+  // Σ-2/3: ロード後に地形タイルを再アクティブ化（v11 以前のセーブは seed で再生成）
+  if (!w.terrain || w.terrain.length === 0) {
+    if (!w.terrainSeed) w.terrainSeed = seedFromRunId(w.runId);
+    w.terrain = initTerrain(w.bounds, w.difficulty, w.terrainSeed);
+  }
   if (!w.terraformJobs) w.terraformJobs = [];
   // buryTimer は transient なのでロード後リセット
   for (const row of w.terrain) for (const tile of row) tile.buryTimer = 0;
