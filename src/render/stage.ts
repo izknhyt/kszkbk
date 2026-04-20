@@ -363,7 +363,65 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       gfx.rect(col * TERRAIN_TILE_SIZE, row * TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE)
          .fill({ color: 0x88ccff, alpha });
     }
-    void terrain; void jobs;
+
+    // 崖線：隣接タイルの標高差 ≥15 の境界に暗い線（cliff_fall 発火ラインの可視化）
+    for (let row = 0; row < terrain.length; row++) {
+      const rowArr = terrain[row]!;
+      for (let col = 0; col < rowArr.length; col++) {
+        const tile = rowArr[col]!;
+        const x = col * TERRAIN_TILE_SIZE;
+        const y = row * TERRAIN_TILE_SIZE;
+        const right = rowArr[col + 1];
+        if (right && Math.abs(tile.elev - right.elev) >= 15) {
+          gfx.rect(x + TERRAIN_TILE_SIZE - 1, y, 2, TERRAIN_TILE_SIZE).fill({ color: 0x2a1a10, alpha: 0.75 });
+        }
+        const below = terrain[row + 1]?.[col];
+        if (below && Math.abs(tile.elev - below.elev) >= 15) {
+          gfx.rect(x, y + TERRAIN_TILE_SIZE - 1, TERRAIN_TILE_SIZE, 2).fill({ color: 0x2a1a10, alpha: 0.75 });
+        }
+      }
+    }
+
+    // stability 警告パルス（< 0.5 = 橙パルス、< 0.3 = 赤強パルス）
+    const pulseS = Math.sin(timeSec * 3) * 0.5 + 0.5;   // 0-1 遅め
+    const pulseF = Math.sin(timeSec * 5) * 0.5 + 0.5;   // 0-1 速め
+    for (let row = 0; row < terrain.length; row++) {
+      const rowArr = terrain[row]!;
+      for (let col = 0; col < rowArr.length; col++) {
+        const tile = rowArr[col]!;
+        if (tile.stability >= 0.5) continue;
+        const x = col * TERRAIN_TILE_SIZE;
+        const y = row * TERRAIN_TILE_SIZE;
+        if (tile.stability < 0.3) {
+          gfx.rect(x, y, TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE).fill({ color: 0xff2020, alpha: 0.3 + pulseF * 0.2 });
+        } else {
+          gfx.rect(x, y, TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE).fill({ color: 0xff6030, alpha: 0.18 + pulseS * 0.15 });
+        }
+      }
+    }
+
+    // terraform ジョブオーバーレイ（半透明色 + 進捗リング）
+    for (const job of jobs) {
+      const x = job.tx * TERRAIN_TILE_SIZE;
+      const y = job.ty * TERRAIN_TILE_SIZE;
+      gfx.rect(x, y, TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE)
+         .fill({ color: job.target === 'raise' ? 0xc89650 : 0x1e1e1e, alpha: 0.4 });
+      if (job.progress > 0.02) {
+        const cx = x + TERRAIN_TILE_SIZE / 2;
+        const cy = y + TERRAIN_TILE_SIZE / 2;
+        const r = 10;
+        const startA = -Math.PI / 2;
+        const endA = startA + job.progress * Math.PI * 2;
+        const steps = Math.max(4, Math.floor(job.progress * 20));
+        for (let s = 0; s < steps; s++) {
+          const a0 = startA + (s / steps) * (endA - startA);
+          const a1 = startA + ((s + 1) / steps) * (endA - startA);
+          gfx.moveTo(cx + r * Math.cos(a0), cy + r * Math.sin(a0))
+             .lineTo(cx + r * Math.cos(a1), cy + r * Math.sin(a1));
+        }
+        gfx.stroke({ color: 0xffa040, width: 2.5 });
+      }
+    }
   }
 
   function drawTerrainLayer(world: WorldState): void {
