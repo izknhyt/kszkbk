@@ -310,6 +310,49 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 28,
     template: (n) => `${n}は夜の闇から現れたオオカミに一噛みされ、まもりんだけが残った。`,
   },
+
+  // --- Σ-1 z物理 追加 -----------------------------------------------------------
+  cliff_fall: {
+    id: 'cliff_fall',
+    title: '崖からの墜落',
+    rare: false,
+    uncommon: true,
+    points: 24,
+    template: (n) => `${n}は崖の端で「すべらないわふ」と自信満々に一歩踏み出し、次の瞬間には眼下の岩場に転がっていた。`,
+  },
+  slope_fall: {
+    id: 'slope_fall',
+    title: '坂道滑落死',
+    rare: false,
+    uncommon: true,
+    points: 21,
+    template: (n) => `${n}は急な坂道をドタドタ駆け下りて止まれず、谷底まで転がり続けた。`,
+  },
+  river_swept: {
+    id: 'river_swept',
+    title: '激流に飲み込まれ溺死',
+    rare: false,
+    uncommon: true,
+    points: 23,
+    template: (n) => `${n}は増水した水路で流されまいと必死にもがいたが、流れに逆らえずそのまま沈んだ。`,
+  },
+  // --- Σ-2-c 地形崩落 追加 --------------------------------------------------
+  landslide_crush: {
+    id: 'landslide_crush',
+    title: '土砂崩れで圧死',
+    rare: false,
+    uncommon: true,
+    points: 26,
+    template: (n) => `${n}は「なんか地面がぐらぐらするわふ」と言った直後、土の塊に押し潰されて動かなくなった。`,
+  },
+  buried_alive: {
+    id: 'buried_alive',
+    title: '生き埋め窒息死',
+    rare: false,
+    uncommon: true,
+    points: 28,
+    template: (n) => `${n}は崩れてきた土の中から「むぐ……わ……ふ……」という声だけを残し、そのまま出てこなかった。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;

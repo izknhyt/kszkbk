@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -126,7 +126,7 @@ export interface WorldState {
   // 水:   水源 + 水路で補給、畑にも必要（将来）
   // 木材: 伐採で得る、建物の材料
   // 石材: 石切で得る、建物の材料
-  resources: { food: number; water: number; wood: number; stone: number; plank: number };
+  resources: { food: number; water: number; wood: number; stone: number; plank: number; soil: number };
   totalDeaths: number;
   totalBirths: number;
   stompCount: number;
@@ -184,6 +184,12 @@ export interface WorldState {
   wolfSpawnCooldown: number;
   // 撃破したオオカミ数（統計）
   wolvesKilled: number;
+  // --- Σ-2 タイル式ハイトマップ -------------------------------------------
+  // 32px セルの 2D タイル配列 [row][col]。100×57 = 5700 タイル。
+  // getElevation(x,y) はここから bi-linear 補間で返す。persist 対象（RLE 圧縮）。
+  terrain: TerrainTile[][];
+  // Σ-2-b: ちびわふが盛り土・切り土を行うジョブキュー（persist 対象）
+  terraformJobs: TerraformJob[];
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -310,7 +316,7 @@ export interface DifficultyMods {
   fatigueMul: number;      // 疲労上昇速度乗算
   obstacleCount: number;   // 初期障害物数
   eventIntervalMul: number; // 音頭/火事のインターバル乗算（大きいほど間が空く）
-  initialResources: { food: number; water: number; wood: number; stone: number; plank: number };
+  initialResources: { food: number; water: number; wood: number; stone: number; plank: number; soil: number };
 }
 export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
   beginner: {
@@ -319,7 +325,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 0.75,
     obstacleCount: 50,
     eventIntervalMul: 1.5,
-    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2 },
+    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, soil: 30 },
   },
   standard: {
     hazardMul: 1.0,
@@ -327,7 +333,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.0,
     obstacleCount: 90,
     eventIntervalMul: 1.0,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, soil: 0 },
   },
   hell: {
     hazardMul: 1.8,
@@ -335,7 +341,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.3,
     obstacleCount: 140,
     eventIntervalMul: 0.55,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0 },
+    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, soil: 0 },
   },
 };
 export function currentMods(w: WorldState): DifficultyMods {
@@ -608,27 +614,298 @@ export function isFarmFeature(f: Feature): boolean {
 }
 
 // =========================================================================
-// 高低差地形（Ω-3-b）
-// procedural な標高マップ。0〜100 を返す。
-//   北側（y<400）→ 高地 60-80
-//   中央拠点付近 → 中位 40-50
-//   川付近（y>DRY_Y_LIMIT-200）→ 低地 0-15
-//   西の端 → ゆるい斜面 +10
-// 水は必ず高→低へ流れる。洪水は標高差が 15 以上ある高台には届かない。
+// Σ-2 タイル式ハイトマップ
+//
+// 32px セルの 2D 配列を WorldState.terrain に保持。
+// getElevation(x,y) は 4 近傍タイル間の bi-linear 補間を返す。
+// Σ-1 の z 物理コードはシグネチャが同じなので無変更で動く。
+//
+// タイル座標 (col, row)：center = ((col+0.5)*32, (row+0.5)*32)
+// 補間用分数タイル座標 tc = x/32-0.5, tr = y/32-0.5
 // =========================================================================
-export function getElevation(x: number, y: number): number {
+export const TERRAIN_TILE_SIZE = 32;
+export const TERRAIN_COLS = Math.ceil(CONFIG.WORLD_W / TERRAIN_TILE_SIZE);  // 100
+export const TERRAIN_ROWS = Math.ceil(CONFIG.WORLD_H / TERRAIN_TILE_SIZE);  // 57
+
+// モジュールレベルで保持するアクティブな地形参照。
+// createWorld / ensurePlots で activateTerrain を呼んで更新する。
+let _activeTerrain: TerrainTile[][] | null = null;
+
+export function activateTerrain(terrain: TerrainTile[][]): void {
+  _activeTerrain = terrain;
+}
+
+// 既存の procedural 算出式（initTerrain の充填＆ v10 以前の load マイグレーション用）
+export function proceduralElevation(x: number, y: number): number {
   const dryLimit = CONFIG.DRY_Y_LIMIT;
-  // 基礎：南（川側）低、北（上部）高
   const southness = Math.max(0, Math.min(1, y / dryLimit));
-  let base = 70 - southness * 55;  // y=0 → 70, y=dryLimit → 15
-  // 川ゾーン（y > dryLimit - 150）は強制低地
+  let base = 70 - southness * 55;
   if (y > dryLimit - 150) base = Math.max(0, base - 20);
   if (y > dryLimit) base = 0;
-  // 西の端は丘（x<600 の帯を +15）
   if (x < 600) base += (600 - x) / 600 * 15;
-  // なだらかな起伏（sin ノイズでリアリティ、振幅 ±4）
   const noise = Math.sin(x * 0.003) * 2 + Math.cos(y * 0.004 + x * 0.002) * 2;
   return Math.max(0, Math.min(100, base + noise));
+}
+
+// elev から材質を決定（初期充填で使う）
+function elevToMaterial(elev: number, isRiver: boolean): TerrainMaterial {
+  if (isRiver) return 'water';
+  if (elev > 60) return 'rock';
+  if (elev > 25) return 'grass';
+  if (elev > 10) return 'soil';
+  return 'sand';
+}
+
+// procedural 値でタイル配列を初期化する
+export function initTerrain(bounds: { w: number; h: number }): TerrainTile[][] {
+  const grid: TerrainTile[][] = [];
+  for (let row = 0; row < TERRAIN_ROWS; row++) {
+    const rowArr: TerrainTile[] = [];
+    for (let col = 0; col < TERRAIN_COLS; col++) {
+      const cx = (col + 0.5) * TERRAIN_TILE_SIZE;
+      const cy = (row + 0.5) * TERRAIN_TILE_SIZE;
+      const elev = proceduralElevation(cx, cy);
+      const isRiver = cy > CONFIG.DRY_Y_LIMIT;
+      rowArr.push({
+        elev,
+        material: elevToMaterial(elev, isRiver),
+        stability: 1.0,
+        waterLevel: isRiver ? 1.0 : 0,
+        buryTimer: 0,
+      });
+    }
+    grid.push(rowArr);
+  }
+  void bounds;
+  return grid;
+}
+
+// bi-linear 補間で任意点の標高を返す。Σ-1 z 物理と既存コード全域から呼ばれる。
+export function getElevation(x: number, y: number): number {
+  const terrain = _activeTerrain;
+  if (!terrain) return proceduralElevation(x, y);
+
+  const tc = x / TERRAIN_TILE_SIZE - 0.5;
+  const tr = y / TERRAIN_TILE_SIZE - 0.5;
+  const c0 = Math.floor(tc);
+  const r0 = Math.floor(tr);
+  const tx = tc - c0;
+  const ty = tr - r0;
+  const maxC = TERRAIN_COLS - 1;
+  const maxR = TERRAIN_ROWS - 1;
+
+  const e00 = terrain[Math.max(0, Math.min(maxR, r0))]?.[Math.max(0, Math.min(maxC, c0))]?.elev ?? 0;
+  const e10 = terrain[Math.max(0, Math.min(maxR, r0))]?.[Math.max(0, Math.min(maxC, c0 + 1))]?.elev ?? 0;
+  const e01 = terrain[Math.max(0, Math.min(maxR, r0 + 1))]?.[Math.max(0, Math.min(maxC, c0))]?.elev ?? 0;
+  const e11 = terrain[Math.max(0, Math.min(maxR, r0 + 1))]?.[Math.max(0, Math.min(maxC, c0 + 1))]?.elev ?? 0;
+
+  return e00 * (1 - tx) * (1 - ty)
+       + e10 * tx * (1 - ty)
+       + e01 * (1 - tx) * ty
+       + e11 * tx * ty;
+}
+
+// タイル座標からインデックスを安全に返す。範囲外は null。
+function getTile(terrain: TerrainTile[][], tx: number, ty: number): TerrainTile | null {
+  return terrain[ty]?.[tx] ?? null;
+}
+
+// =========================================================================
+// Σ-2-b 地形編集 API
+// =========================================================================
+
+// 世界座標 (x,y) → タイルインデックス (col, row)
+export function worldToTile(x: number, y: number): { tx: number; ty: number } {
+  return {
+    tx: Math.floor(x / TERRAIN_TILE_SIZE),
+    ty: Math.floor(y / TERRAIN_TILE_SIZE),
+  };
+}
+
+const RAISE_COST_SOIL = 20;
+const RAISE_ELEV_AMOUNT = 5;
+const LOWER_SOIL_GAIN = 8;
+const LOWER_STONE_GAIN = 2;  // rock タイルから
+
+// 盛り土ジョブをキューに追加。soil 消費は即時（ジョブ登録時点で予約）。
+export function enqueueTerraformRaise(w: WorldState, tx: number, ty: number): boolean {
+  if (tx < 0 || tx >= TERRAIN_COLS || ty < 0 || ty >= TERRAIN_ROWS) return false;
+  if (w.resources.soil < RAISE_COST_SOIL) return false;
+  // 同タイルへの重複ジョブは上書き（既存 raise なら先払い分を refund してから再消費）
+  const existing = w.terraformJobs.findIndex((j) => j.tx === tx && j.ty === ty);
+  if (existing >= 0) {
+    if (w.terraformJobs[existing]!.target === 'raise') {
+      w.resources.soil += RAISE_COST_SOIL;
+    }
+    w.terraformJobs.splice(existing, 1);
+  }
+  w.resources.soil -= RAISE_COST_SOIL;
+  w.terraformJobs.push({ id: `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`, tx, ty, target: 'raise', progress: 0 });
+  return true;
+}
+
+export function enqueueTerraformLower(w: WorldState, tx: number, ty: number): boolean {
+  if (tx < 0 || tx >= TERRAIN_COLS || ty < 0 || ty >= TERRAIN_ROWS) return false;
+  const existing = w.terraformJobs.findIndex((j) => j.tx === tx && j.ty === ty);
+  if (existing >= 0) w.terraformJobs.splice(existing, 1);
+  w.terraformJobs.push({ id: `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`, tx, ty, target: 'lower', progress: 0 });
+  return true;
+}
+
+// タイルの elev を変更し stability を減衰
+export function raiseTile(terrain: TerrainTile[][], tx: number, ty: number, amount: number): void {
+  const tile = getTile(terrain, tx, ty);
+  if (!tile) return;
+  tile.elev = Math.min(100, tile.elev + amount);
+  tile.stability = Math.min(tile.stability, 0.6);
+  tile.material = elevToMaterial(tile.elev, tile.waterLevel >= 0.5);
+}
+
+export function lowerTile(terrain: TerrainTile[][], tx: number, ty: number, amount: number): void {
+  const tile = getTile(terrain, tx, ty);
+  if (!tile) return;
+  tile.elev = Math.max(0, tile.elev - amount);
+  tile.stability = Math.min(tile.stability, 0.75);
+  tile.material = elevToMaterial(tile.elev, tile.waterLevel >= 0.5);
+}
+
+// ちびわふ労働：ジョブ近傍 28px 以内の生存ちびわふが進捗を進める
+const TERRAFORM_WORKER_RADIUS = 28;
+const TERRAFORM_PROGRESS_PER_WORKER_SEC = 0.05;  // 1 worker で 20 秒完了
+
+export function updateTerraformJobs(w: WorldState, dt: number): void {
+  if (w.terraformJobs.length === 0) return;
+  for (let i = w.terraformJobs.length - 1; i >= 0; i--) {
+    const job = w.terraformJobs[i]!;
+    const cx = (job.tx + 0.5) * TERRAIN_TILE_SIZE;
+    const cy = (job.ty + 0.5) * TERRAIN_TILE_SIZE;
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight || c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - cx, c.pos.y - cy) <= TERRAFORM_WORKER_RADIUS) workers++;
+    }
+    if (workers > 0) {
+      job.progress += dt * TERRAFORM_PROGRESS_PER_WORKER_SEC * Math.min(4, workers);
+    }
+    if (job.progress >= 1.0) {
+      if (job.target === 'raise') {
+        raiseTile(w.terrain, job.tx, job.ty, RAISE_ELEV_AMOUNT);
+      } else {
+        const tile = getTile(w.terrain, job.tx, job.ty);
+        if (tile) {
+          w.resources.soil += LOWER_SOIL_GAIN;
+          if (tile.material === 'rock') w.resources.stone += LOWER_STONE_GAIN;
+        }
+        lowerTile(w.terrain, job.tx, job.ty, RAISE_ELEV_AMOUNT);
+      }
+      w.terraformJobs.splice(i, 1);
+    }
+  }
+}
+
+// =========================================================================
+// Σ-2-c 土砂崩れ災害
+// stability が低く隣接との標高差が大きいタイルが確率的に崩落する。
+// 崩落 = 高タイル elev -10 / 低タイル elev +8 / 範囲ちびわふにダメージ。
+// =========================================================================
+
+const LANDSLIDE_STABILITY_THRESHOLD = 0.4;
+const LANDSLIDE_ELEV_DIFF_MIN = 20;      // 崩落が起きる最低高低差
+const LANDSLIDE_INSTANT_KILL_DIFF = 30;  // この差以上なら即死級
+const LANDSLIDE_RATE_PER_SEC = 0.005;    // 不安定タイル 1 個あたりの崩落確率/sec
+const LANDSLIDE_DAMAGE_RADIUS_PX = 48;
+const LANDSLIDE_HP_DAMAGE = 40;
+const LANDSLIDE_BURY_DURATION_SEC = 5;
+const STABILITY_RECOVER_PER_SEC = 0.02;
+
+export function updateTerrainStability(w: WorldState, dt: number): void {
+  const terrain = w.terrain;
+  if (!terrain || terrain.length === 0) return;
+
+  // storm 時は stability 回復なし、heatwave は 1.5 倍速
+  const recoverMul = w.weather.kind === 'storm' ? 0 : w.weather.kind === 'heatwave' ? 1.5 : 1.0;
+
+  for (let row = 0; row < TERRAIN_ROWS; row++) {
+    for (let col = 0; col < TERRAIN_COLS; col++) {
+      const tile = terrain[row]![col]!;
+
+      // buryTimer カウントダウン（transient）
+      if (tile.buryTimer > 0) tile.buryTimer = Math.max(0, tile.buryTimer - dt);
+
+      // stability 回復
+      if (tile.stability < 1.0 && recoverMul > 0) {
+        tile.stability = Math.min(1.0, tile.stability + STABILITY_RECOVER_PER_SEC * recoverMul * dt);
+      }
+
+      // 崩落判定：stability < 閾値 かつ 隣接との差が大きい
+      if (tile.stability >= LANDSLIDE_STABILITY_THRESHOLD) continue;
+      if (Math.random() > LANDSLIDE_RATE_PER_SEC * dt) continue;
+
+      // 4 方向隣接で最も低いタイルを探す
+      const dirs = [[-1,0],[1,0],[0,-1],[0,1]] as const;
+      let lowest: TerrainTile | null = null;
+      let lowestDiff = 0;
+      let lowestDc = 0;
+      let lowestDr = 0;
+      for (const [dc, dr] of dirs) {
+        const nb = getTile(terrain, col + dc, row + dr);
+        if (!nb) continue;
+        const diff = tile.elev - nb.elev;
+        if (diff >= LANDSLIDE_ELEV_DIFF_MIN && diff > lowestDiff) {
+          lowest = nb;
+          lowestDiff = diff;
+          lowestDc = dc;
+          lowestDr = dr;
+        }
+      }
+      if (!lowest) continue;
+
+      // 崩落実行
+      tile.elev = Math.max(0, tile.elev - 10);
+      tile.stability = 0.3;
+      lowest.elev = Math.min(100, lowest.elev + 8);
+      lowest.stability = Math.min(lowest.stability, 0.5);
+      tile.material = elevToMaterial(tile.elev, tile.waterLevel >= 0.5);
+      lowest.material = elevToMaterial(lowest.elev, lowest.waterLevel >= 0.5);
+
+      // 低タイルに buryTimer をセット（生き埋め判定用）
+      const buriedTile = getTile(terrain, col + lowestDc, row + lowestDr);
+      if (buriedTile) buriedTile.buryTimer = LANDSLIDE_BURY_DURATION_SEC;
+
+      // 崩落エリアのちびわふにダメージ
+      const epicX = (col + 0.5) * TERRAIN_TILE_SIZE;
+      const epicY = (row + 0.5) * TERRAIN_TILE_SIZE;
+      for (const c of w.chibis) {
+        if (!isAlive(c) || c.flight) continue;
+        if (Math.hypot(c.pos.x - epicX, c.pos.y - epicY) > LANDSLIDE_DAMAGE_RADIUS_PX) continue;
+        if (lowestDiff >= LANDSLIDE_INSTANT_KILL_DIFF) {
+          spawnBubble(w.bubbles, c.pos, 'つぶされるわふっ！！', 'speech', 1.8);
+          pushLife(c, Math.floor(c.ageSec), '土砂崩れで押し潰された');
+          kill(w, c, 'landslide_crush');
+        } else {
+          const died = damageChibi(w, c, LANDSLIDE_HP_DAMAGE, 'landslide_crush');
+          if (!died) {
+            spawnBubble(w.bubbles, c.pos, 'どどどわふっ！', 'speech', 1.5);
+            setState(c, 'hurt', 1.5);
+            pushLife(c, Math.floor(c.ageSec), `土砂崩れに巻き込まれた（HP-${LANDSLIDE_HP_DAMAGE}）`);
+          }
+        }
+      }
+      spawnBubble(w.bubbles, { x: epicX, y: epicY }, '⛰ドドドッ', 'speech', 2.0);
+    }
+  }
+
+  // buried_alive 判定：buryTimer > 0 のタイル上にいるちびわふ
+  for (const c of w.chibis) {
+    if (!isAlive(c) || c.flight) continue;
+    const { tx, ty } = worldToTile(c.pos.x, c.pos.y);
+    const tile = getTile(terrain, tx, ty);
+    if (!tile || tile.buryTimer <= 0) continue;
+    if (Math.random() > dt * 0.15) continue;
+    spawnBubble(w.bubbles, c.pos, 'むぐ…わふ……', 'speech', 1.8);
+    pushLife(c, Math.floor(c.ageSec), '土砂に埋まって窒息した');
+    kill(w, c, 'buried_alive');
+  }
 }
 
 // =========================================================================
@@ -843,6 +1120,8 @@ function createDex(): Record<DeathCauseId, DexEntry> {
 
 export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
   const bounds = { w: CONFIG.WORLD_W, h: CONFIG.WORLD_H };
+  const terrain = initTerrain(bounds);
+  activateTerrain(terrain);
   return {
     runId: `run-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000).toString(36)}`,
     runStartedAtMs: Date.now(),
@@ -907,6 +1186,8 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     wolves: [],
     wolfSpawnCooldown: 0,
     wolvesKilled: 0,
+    terrain,
+    terraformJobs: [],
   };
 }
 
@@ -927,6 +1208,12 @@ export function ensurePlots(w: WorldState) {
   if (!w.wolves) w.wolves = [];
   if (w.wolfSpawnCooldown === undefined) w.wolfSpawnCooldown = 0;
   if (w.wolvesKilled === undefined) w.wolvesKilled = 0;
+  // Σ-2: ロード後に地形タイルを再アクティブ化（v10 以前のセーブは procedural で再生成）
+  if (!w.terrain || w.terrain.length === 0) w.terrain = initTerrain(w.bounds);
+  if (!w.terraformJobs) w.terraformJobs = [];
+  // buryTimer は transient なのでロード後リセット
+  for (const row of w.terrain) for (const tile of row) tile.buryTimer = 0;
+  activateTerrain(w.terrain);
   // オオカミID連番をリセット（ラン毎に 1 から始め直す）
   resetWolfIdSeq(1);
   // モジュールレベルキャッシュをクリア（セーブロード後に旧参照が残らないよう）
@@ -1178,6 +1465,9 @@ export function damageChibi(w: WorldState, c: Chibiwafu, amount: number, causeId
 
 // ちびわふ／NPC を "空中に投げ飛ばす" 物理的な飛行を起動する。
 // 指定した速度で飛び、毎 tick 当たり判定を行い、landTime 経過で着地処理。
+// Σ-1-a: z物理も同時に初期化。重力加速度 CLIFF_GRAVITY で posZ が地形高度以下になると崖落下着地。
+const CLIFF_GRAVITY = 200; // terrain-units/sec²
+
 export function launchFlight(
   entity: Chibiwafu | NpcState,
   vx: number,
@@ -1186,9 +1476,17 @@ export function launchFlight(
   landingDamage: number,
   landCauseId: DeathCauseId,
 ): void {
+  const startElev = getElevation(entity.pos.x, entity.pos.y);
+  // posZ 初期値：頂点から自由落下開始→ flightSec 後に地面に到達する高さ
+  // posZ(t) = startElev + posZOffset - 0.5*CLIFF_GRAVITY*t²
+  // 着地（posZ = startElev）: t = flightSec → posZOffset = 0.5*CLIFF_GRAVITY*flightSec²
+  const posZOffset = 0.5 * CLIFF_GRAVITY * flightSec * flightSec;
   const flight: FlightState = {
     vx,
     vy,
+    vz: 0,                       // 頂点スタート（初速なし、重力のみ）
+    posZ: startElev + posZOffset, // 平地着地ならちょうど flightSec で地面到達
+    startElev,
     leftSec: flightSec,
     totalSec: flightSec,
     hitKeys: [],
@@ -1212,6 +1510,9 @@ function flightStep(
   entity.pos.y += f.vy * dt;
   f.vy += 180 * dt;
   f.leftSec -= dt;
+  // Σ-1-a z物理：重力で posZ を下降、地形以下になると崖着地
+  f.vz -= CLIFF_GRAVITY * dt;
+  f.posZ += f.vz * dt;
   // 横方向は画面内にクランプ（反射はしない、端で止まる）
   if (entity.pos.x < 16) { entity.pos.x = 16; f.vx = Math.abs(f.vx) * 0.5; }
   if (entity.pos.x > w.bounds.w - 16) { entity.pos.x = w.bounds.w - 16; f.vx = -Math.abs(f.vx) * 0.5; }
@@ -1241,12 +1542,23 @@ function flightStep(
     damageNpc(w, n, 3 + Math.floor(Math.random() * 4));
   }
 
-  // 着地：leftSec 切れ or 画面下端へ接触
-  if (f.leftSec <= 0 || entity.pos.y >= w.bounds.h - 10) {
+  // 着地：leftSec 切れ or 画面下端 or z軸で地形以下（崖落下）
+  const groundZ = getElevation(entity.pos.x, entity.pos.y);
+  const zLanded = f.posZ <= groundZ;
+  if (f.leftSec <= 0 || entity.pos.y >= w.bounds.h - 10 || zLanded) {
+    // Σ-1-a 崖落下チェック：発射地点 vs 着地地点の高低差 >= 15 で即死級ダメージ
+    if (isChibi) {
+      const drop = f.startElev - groundZ;
+      if (drop >= 15) {
+        const cliffDmg = Math.floor(30 + drop * 1.5);
+        f.landingDamage = Math.max(f.landingDamage, cliffDmg);
+        f.landCauseId = 'cliff_fall';
+      }
+    }
     // 位置クランプ（水＝泥川ゾーンはそのまま、陸は地面に）
     entity.pos.y = Math.min(entity.pos.y, w.bounds.h - 16);
     entity.flight = null;
-    // 着地処理：水中 (y>414) なら溺死（ちびわふ）or 水HP削り（NPC）
+    // 着地処理：水中 (y > DRY_Y_LIMIT) なら溺死（ちびわふ）or 水HP削り（NPC）
     if (isChibi) {
       const c = entity as Chibiwafu;
       if (c.pos.y > CONFIG.DRY_Y_LIMIT) {
@@ -1256,12 +1568,14 @@ function flightStep(
         return;
       }
       setState(c, 'hurt', 1.4);
-      spawnBubble(w.bubbles, c.pos, 'どさっわふ', 'speech', 1.2);
+      const isCliff = f.landCauseId === 'cliff_fall';
+      spawnBubble(w.bubbles, c.pos, isCliff ? 'ぎゃーわふっ！！' : 'どさっわふ', 'speech', 1.2);
       const died = damageChibi(w, c, f.landingDamage, f.landCauseId as DeathCauseId);
+      const action = isCliff ? '崖から落下して激突' : '投げられて地面に激突';
       if (died) {
-        pushLife(c, Math.floor(c.ageSec), `投げられて地面に激突死（-${f.landingDamage}HP）`);
+        pushLife(c, Math.floor(c.ageSec), `${action}死（-${f.landingDamage}HP）`);
       } else {
-        pushLife(c, Math.floor(c.ageSec), `投げられて地面に激突（-${f.landingDamage}HP）`);
+        pushLife(c, Math.floor(c.ageSec), `${action}（-${f.landingDamage}HP）`);
       }
     } else {
       const n = entity as NpcState;
@@ -1915,6 +2229,83 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     if (announcementKey && Math.random() < 0.4) {
       const line = pickActionAnnounce(announcementKey);
       if (line) spawnBubble(w.bubbles, c.pos, line, 'speech', 1.3);
+    }
+
+    // Σ-1-b 坂勾配ペナルティ：進行方向 20px 先との標高差でチェック
+    // 勾配 > 0.3 → 速度半減 + fatigue、> 0.6 → courage 判定で滑落
+    if (c.target && !c.flight) {
+      const tdx = c.target.x - c.pos.x;
+      const tdy = c.target.y - c.pos.y;
+      const tLen = Math.max(1, Math.hypot(tdx, tdy));
+      const nx = tdx / tLen;
+      const ny = tdy / tLen;
+      const curElev = getElevation(c.pos.x, c.pos.y);
+      const fwdElev = getElevation(c.pos.x + nx * 20, c.pos.y + ny * 20);
+      const slope = Math.abs((fwdElev - curElev) / 20);
+
+      if (slope > 0.3) {
+        // 急坂：このティックの移動量の半分を戻す（実質 0.5× 速度）
+        c.pos.x -= nx * c.speed * dt * 0.5;
+        c.pos.y -= ny * c.speed * dt * 0.5;
+        c.fatigue = Math.min(100, c.fatigue + dt * 1.5);
+      }
+      if (slope > 0.6 && !c.flight && Math.random() < dt * 0.008) {
+        // 急坂から滑落：courage チェック、失敗したら下方向に launchFlight
+        if (Math.random() > c.params.courage / 100) {
+          const gx = getElevation(c.pos.x + 5, c.pos.y) - getElevation(c.pos.x - 5, c.pos.y);
+          const gy = getElevation(c.pos.x, c.pos.y + 5) - getElevation(c.pos.x, c.pos.y - 5);
+          const gLen = Math.max(0.001, Math.hypot(gx, gy));
+          const slideSpeed = 70 + Math.random() * 50;
+          spawnBubble(w.bubbles, c.pos, 'すべるわふーっ！', 'speech', 1.5);
+          pushLife(c, Math.floor(c.ageSec), '急坂で足を滑らせて滑落した');
+          setState(c, 'surprised', 0.9);
+          launchFlight(c, -gx / gLen * slideSpeed, -gy / gLen * slideSpeed, 0.7, 5, 'slope_fall');
+        }
+      }
+    }
+  }
+  // Σ-1-c 激流もがき：flow > 1.5 の water/channel 上にいると流される
+  // 川に流されながら courage+tough で必死に岸へ向かうが、失敗すると HP ドレイン →溺死
+  if (!c.flight && isAlive(c) && c.state !== 'sleep' && c.state !== 'eating') {
+    for (const feat of w.features) {
+      if (feat.kind !== 'water' && feat.kind !== 'channel') continue;
+      const fflow = feat.flow ?? 0;
+      if (fflow <= 1.5) continue;
+      if (Math.hypot(c.pos.x - feat.pos.x, c.pos.y - feat.pos.y) > 28) continue;
+
+      // 流れ方向：水路 feature 地点の標高勾配の下り方向
+      const gx = getElevation(feat.pos.x + 5, feat.pos.y) - getElevation(feat.pos.x - 5, feat.pos.y);
+      const gy = getElevation(feat.pos.x, feat.pos.y + 5) - getElevation(feat.pos.x, feat.pos.y - 5);
+      const gLen = Math.max(0.001, Math.hypot(gx, gy));
+      const strength = Math.min(1.5, (fflow - 1.5) / 2.0); // 流量超過分を 0〜1.5 にスケール
+
+      // 下流方向へ押し流す
+      c.pos.x += (-gx / gLen) * 20 * strength * dt;
+      c.pos.y += (-gy / gLen) * 20 * strength * dt;
+
+      // もがき抵抗：courage + tough の合計が高いほど耐える
+      const resistChance = (c.params.courage + c.params.tough) / 200;
+      if (Math.random() > resistChance) {
+        c.hp = Math.max(0, c.hp - 0.35 * (1 + strength) * dt);
+        if (c.hp <= 0) {
+          spawnBubble(w.bubbles, c.pos, 'たすけ…わふ……', 'speech', 2.0);
+          pushLife(c, Math.floor(c.ageSec), `増水した水路の激流に飲まれた（flow:${fflow.toFixed(1)}）`);
+          kill(w, c, 'river_swept');
+          return;
+        }
+      }
+
+      // 崖端判定：流れ方向 15px 先が 20+ 急落なら滝落下（cliff_fall）
+      const downX = -gx / gLen;
+      const downY = -gy / gLen;
+      const curElev = getElevation(c.pos.x, c.pos.y);
+      const aheadElev = getElevation(c.pos.x + downX * 15, c.pos.y + downY * 15);
+      if (curElev - aheadElev >= 20) {
+        spawnBubble(w.bubbles, c.pos, 'たきわふっ！！', 'speech', 1.5);
+        pushLife(c, Math.floor(c.ageSec), '激流に押されて崖から落下した');
+        launchFlight(c, downX * 80, downY * 80, 0.8, 0, 'cliff_fall');
+      }
+      break; // 1 feature で処理完了
     }
   }
   runHazards(w, c, dt, hazards);
@@ -2730,6 +3121,8 @@ export function tickWorld(w: WorldState, dt: number) {
   updateInfra(w, dt);
   updateFloodZones(w, dt);
   updateWolves(w, dt);
+  updateTerraformJobs(w, dt);
+  updateTerrainStability(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
   if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);

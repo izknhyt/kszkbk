@@ -76,6 +76,8 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   byId('stat-stone').textContent = String(Math.floor(w.resources.stone));
   const plankEl = document.getElementById('stat-plank');
   if (plankEl) plankEl.textContent = String(Math.floor(w.resources.plank ?? 0));
+  const soilEl = document.getElementById('stat-soil');
+  if (soilEl) soilEl.textContent = String(Math.floor(w.resources.soil ?? 0));
   // 天気 + 予報
   const weatherNow = document.getElementById('weather-now');
   if (weatherNow) weatherNow.textContent = `${WEATHER_ICON[w.weather.kind]} ${WEATHER_LABEL[w.weather.kind]}`;
