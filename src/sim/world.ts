@@ -1,7 +1,7 @@
 import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
 import { seedFromRunId } from './terrain/noise';
 import { generateTerrain } from './terrain/generators';
-import { isSeaAt, setQueryTerrain } from './terrain/query';
+import { findDryTile, isSeaAt, setQueryTerrain } from './terrain/query';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -198,8 +198,7 @@ export interface WorldState {
   terrainSeed: number;
 }
 
-// フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
-// フラナ拠点（マップ中央）付近は除外。
+// フリー配置障害物：陸地タイルのみ、フラナ拠点付近は除外。
 function createInitialObstacles(bounds: { w: number; h: number }, target = 24): Obstacle[] {
   const list: Obstacle[] = [];
   const kinds: ObstacleKind[] = ['rock', 'stump', 'bush'];
@@ -207,14 +206,13 @@ function createInitialObstacles(bounds: { w: number; h: number }, target = 24): 
   const centerX = bounds.w / 2;
   const centerY = bounds.h * 0.35;
   const minSpacing = 48;
-  const landBottom = CONFIG.DRY_Y_LIMIT - 40;
-  const landTop = 60;
   let attempts = 0;
   let seq = 0;
   while (list.length < target && attempts < 2000) {
     attempts++;
     const x = 60 + Math.random() * (bounds.w - 120);
-    const y = landTop + Math.random() * (landBottom - landTop);
+    const y = 60 + Math.random() * (bounds.h - 120);
+    if (isSeaAt(x, y)) continue;  // Σ-3-d: 海タイル除外
     // フラナ拠点から 120px 以内は避ける（初期村空間を確保）
     if (Math.hypot(x - centerX, y - centerY) < 120) continue;
     if (list.some((o) => Math.hypot(o.pos.x - x, o.pos.y - y) < minSpacing)) continue;
@@ -238,7 +236,7 @@ function createInitialFeatures(bounds: { w: number; h: number }): Feature[] {
   const mkId = () => `feat-${seq++}`;
   // 拠点中央の少し左に水源。フラナが bounds.w/2, bounds.h*0.35 付近にいる
   const centerY = bounds.h * 0.35;
-  const waterPos: Vec2 = { x: bounds.w / 2 - 180, y: centerY };
+  const waterPos: Vec2 = findDryTile(bounds.w / 2 - 180, centerY, 200);
   features.push({ id: mkId(), pos: waterPos, kind: 'water', devLevel: 3, workSec: 0 });
   features.push({ id: mkId(), pos: { x: waterPos.x + 55, y: waterPos.y }, kind: 'channel', devLevel: 2, workSec: 0 });
   features.push({ id: mkId(), pos: { x: waterPos.x + 110, y: waterPos.y }, kind: 'channel', devLevel: 2, workSec: 0 });
@@ -1242,6 +1240,13 @@ export function ensurePlots(w: WorldState) {
   // buryTimer は transient なのでロード後リセット
   for (const row of w.terrain) for (const tile of row) tile.buryTimer = 0;
   activateTerrain(w.terrain);
+  // Σ-3-d: ロード済み障害物が海タイルにある場合は陸地へ移動
+  for (const obs of w.obstacles) {
+    if (isSeaAt(obs.pos.x, obs.pos.y)) {
+      const dry = findDryTile(obs.pos.x, obs.pos.y, 200);
+      obs.pos = dry;
+    }
+  }
   // オオカミID連番をリセット（ラン毎に 1 から始め直す）
   resetWolfIdSeq(1);
   // モジュールレベルキャッシュをクリア（セーブロード後に旧参照が残らないよう）
@@ -1741,7 +1746,7 @@ export function forceSpawn(w: WorldState) {
   const child = spawnChibiwafu({
     name,
     birthTick: w.tick,
-    pos: { x: w.furanaPos.x + jitter(), y: w.furanaPos.y + 30 + Math.abs(jitter()) },
+    pos: findDryTile(w.furanaPos.x + jitter(), w.furanaPos.y + 30 + Math.abs(jitter()), 120),
     maxAgeSec: maxAge,
     traits,
     params,
