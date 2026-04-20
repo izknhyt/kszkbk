@@ -331,7 +331,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 0.75,
     obstacleCount: 50,
     eventIntervalMul: 1.5,
-    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, power: 5, brick: 0, wool: 0, cloth: 0, soil: 30 },
+    initialResources: { food: 40, water: 0, wood: 30, stone: 20, plank: 5, power: 10, brick: 5, wool: 5, cloth: 3, soil: 80 },
   },
   standard: {
     hazardMul: 1.0,
@@ -339,7 +339,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.0,
     obstacleCount: 90,
     eventIntervalMul: 1.0,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0, wool: 0, cloth: 0, soil: 0 },
+    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, power: 5, brick: 2, wool: 2, cloth: 1, soil: 40 },
   },
   hell: {
     hazardMul: 1.8,
@@ -347,7 +347,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.3,
     obstacleCount: 140,
     eventIntervalMul: 0.55,
-    initialResources: { food: 0, water: 0, wood: 0, stone: 0, plank: 0, power: 0, brick: 0, wool: 0, cloth: 0, soil: 0 },
+    initialResources: { food: 0, water: 0, wood: 5, stone: 5, plank: 0, power: 0, brick: 0, wool: 0, cloth: 0, soil: 0 },
   },
 };
 export function currentMods(w: WorldState): DifficultyMods {
@@ -991,10 +991,10 @@ export function worldToTile(x: number, y: number): { tx: number; ty: number } {
   };
 }
 
-const RAISE_COST_SOIL = 20;
+const RAISE_COST_SOIL = 10;
 const RAISE_ELEV_AMOUNT = 5;
-const LOWER_SOIL_GAIN = 8;
-const LOWER_STONE_GAIN = 2;  // rock タイルから
+const LOWER_SOIL_GAIN = 14;
+const LOWER_STONE_GAIN = 5;  // rock タイルから
 
 // 盛り土ジョブをキューに追加。soil 消費は即時（ジョブ登録時点で予約）。
 export function enqueueTerraformRaise(w: WorldState, tx: number, ty: number): boolean {
@@ -3330,8 +3330,8 @@ function updateLabor(w: WorldState, dt: number) {
       c.hunger += dt * 0.10;
     }
     if (workers === 0) continue;
-    // ちびわふ 1 人あたり 0.5 HP/秒（くそざこ）。多いほど速く片付く
-    obs.hp -= dt * 0.5 * workers;
+    // ちびわふ 1 人あたり 1.0 HP/秒（Σ-2.5-c 倍速）。多いほど速く片付く
+    obs.hp -= dt * 1.0 * workers;
     // バブル：作業中の気配（5% * workers / 秒）
     if (Math.random() < dt * 0.5 * workers) {
       const near = w.chibiHash.nearby(obs.pos, 28).find((c) => distance(c.pos, obs.pos) < 28);
