@@ -368,6 +368,89 @@ origin/claude/idle-village-game-7IfPd       ← 事実上の main（remote HEAD�
 現在発注済み：ちびわふ 9 ポーズ / フラナ 9 ポーズ / 背景 mockup。
 発注予定：気象エフェクト、家 3 種、水路拡張、災害エフェクト、オオカミ・クマ、UI アイコン、職業装飾 overlay。
 
+### 拡張 2.5D キャラ構成（Σ-4 前後で投入予定）
+
+**方針**：ちびわふ 200 体は 2D billboard のまま据え置き（再発注ゼロ、くそざこ味キープ、InstancedMesh 1 draw call）。
+表情・状態を可視化するためレイヤー合成で「生き生きと、くそざこく」動かす。
+カメラ回転は封印前提（核指針 2）なので Y 軸ビルボードのみで完結。
+
+#### 描画レイヤー（下から順に積む）
+
+1. **blob shadow**（地面に乗る丸影デカール、別 sprite）
+2. **body base**（既存 9 ポーズを **20 ポーズに拡張**）
+3. **face overlay**（表情だけの透過 PNG、10 種）
+4. **status overlay**（包帯/泥/血/涙/汗/キラキラ/咳/屁 の 8 種、複数同時可）
+5. **equipment overlay**（帽子/棒/カゴ/リボン 等、将来の職業・ランク表現用）
+6. **tint shader**（機嫌で色相シフト：怒り→赤み / 病気→緑み / 疲労→彩度低下）
+
+#### ファイル構成
+
+```
+public/chibiwafu/
+  body/    01-09（既存） + 10-20（新：tumble_a/b/c, drown, cough, dead_x,
+                                work_a/b, scared, dance, cry）
+  face/    neutral, happy, sad, angry, hungry, sick, scared, dead, sleepy, blush
+  status/  bandage, dirt, blood, tears, sweat, sparkle, cough_cloud, fart_cloud
+  equipment/ hat_straw, stick, basket, ribbon, ...
+  meta.json  ← 各 body ポーズの face/status/equipment 貼り付け座標
+              （px オフセット＋回転角、tumble 系は角度付き）
+```
+
+`meta.json` があれば顔 atlas を 1 セット描くだけで全ポーズに流用できる。
+
+#### 実装スケッチ
+
+```ts
+interface ChibiSprite {
+  body: Texture;         // state から選ぶ
+  face: Texture;         // hp/hunger/fatigue/mood で決定
+  statuses: Texture[];   // 複数重ね可（包帯＋泥 とか）
+  equipment?: Texture;
+  tint: number;          // moodTint(c) で算出
+}
+```
+
+#### 投入優先順（コスト小→大）
+
+| 優先 | 発注内容 | 効果 |
+|---|---|---|
+| 1 | 顔 atlas 10 表情 | 200 体が表情豊かに。最小コストで最大効果 |
+| 2 | status overlay 8 種 | 病気・泥・涙で状態可視化、因果連鎖が見える |
+| 3 | body 拡張 11 ポーズ | 死・労働・溺死・滑落の演出が映える |
+| 4 | equipment overlay | ランク / 職業 / カルト祭服 等の差別化 |
+
+### ChatGPT 発注テンプレ（ちびわふ整合性キープ）
+
+**共通ルール**（全発注の冒頭に固定で貼る）：
+
+> 既存ちびわふ（参照画像 `01_idle.png`）と完全に同じ：線画の太さ・色、カラーパレット、
+> アンチエイリアス強度、頭身比率（2.2 頭身）。キャンバス 512×512px、透過背景、中央配置。
+> 影・発光・グラデーションなし（セルシェーディングのフラット塗り）。
+
+**発注 1：body 拡張 11 ポーズ** — tumble_a/b/c（空中で傾き・倒立・落下）、drown（水中で両手突き出し）、cough（前かがみ咳き込み）、dead_x（横たわり x_x 目）、work_a/b（棒を振り上げ／振り下ろし）、scared（両手頭ヘナヘナ）、dance（両手上げ跳ねる）、cry（しゃがんで顔覆う）。各 1 枚ずつ別 PNG、顔は中央 128×128 に収める（顔差分で差し替え可能）。
+
+**発注 2：顔 atlas 10 表情** — 頭部のみ 128×128 透過で、neutral / happy / sad / angry / hungry / sick / scared / dead(x_x) / sleepy / blush。頭の輪郭は全表情完全一致、目口のみ差し替え、位置ずれ 1px 以内。
+
+**発注 3：status overlay 8 種** — **キャラ本体を描かず装飾のみ** 512×512 透過で、bandage / dirt / blood / tears / sweat / sparkle / cough_cloud / fart_cloud。後から PNG を重ねて使う用。
+
+**発注 4：equipment overlay**（任意）— 装備単体 512×512 透過で、麦わら帽子 / 棒 / カゴ / リボン / カルト祭服 等。キャラ本体なし。
+
+**Tips**：
+- 発注 1〜4 を別チャットに分け、各チャット冒頭で 1 回だけキャラ参照を添付
+- 1 枚目が良ければ「このまま続けて、次は〇〇」でシリーズ化（画風が固定される）
+- ブレたら「1 枚目と完全に同じ線と色で」と何度でも念押し
+- 背景が残ったら既存 `sprites.ts` の白抜き flood-fill を通す
+
+### 3D 化する候補 vs しない候補
+
+| 対象 | 3D 化 | 理由 |
+|---|---|---|
+| オオカミ / クマ / 将来の敵 | ◎ | ちびわふ 2D と対比して「異物感・恐怖感」を演出、数も 5-10 体でコスト許容 |
+| 建物 | ◎ | Σ-4 で地形が 3D 化するので整合性必須、PlaneGeometry + Toon で作る |
+| 神罰エフェクト（隕石・雷撃） | ○ | パーティクルと一体で 3D 映え |
+| NPC 4 体（フラナ・スズ・ココン・ルー） | △ 保留 | 特別感は出るが浮くリスク、Σ-4 完走後に判断 |
+| **ちびわふ 200 体** | **× 棄却** | チープ＝くそざこ味、billboard のままが最適解 |
+
 ## 開発の「くそざこ味」を保つための自戒
 
 - 死因を増やすときは **面白い瞬間** を想像して設計（単なる確率死じゃなく「あっそうなるんだ」みたいなネタ）
