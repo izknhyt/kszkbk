@@ -1,6 +1,6 @@
 import { Application, Container, Graphics, Rectangle, Sprite, Text, TextStyle, Texture } from 'pixi.js';
 import type { WorldState } from '../sim/world';
-import { getElevation, POWERLINE_CONNECT_RADIUS } from '../sim/world';
+import { POWERLINE_CONNECT_RADIUS, TERRAIN_TILE_SIZE } from '../sim/world';
 import type { Chibiwafu, DayPhase, HitTarget, PlacedBuilding, Season } from '../types';
 import { BUILDINGS } from '../city/buildings';
 import { NPC_DEFS, type NpcId, type NpcState } from '../sim/npcs';
@@ -8,13 +8,6 @@ import type { Bubble } from '../sim/bubbles';
 import { TRAIT_DEFS } from '../sim/traits';
 import { CONFIG } from '../config';
 import { frameFor, loadSpriteLibrary, type SpriteLibrary } from './sprites';
-
-const SEASON_COLORS: Record<Season, { grass: number; dirt: number; river: number; accents: number }> = {
-  spring: { grass: 0xc8b383, dirt: 0xddcca0, river: 0x8a6a42, accents: 0xf5b6c0 },
-  summer: { grass: 0xb2c66f, dirt: 0xd3c37c, river: 0x6a5028, accents: 0xffd35a },
-  autumn: { grass: 0xc18a4d, dirt: 0xb77338, river: 0x7a5222, accents: 0xd8572a },
-  winter: { grass: 0xd8d8de, dirt: 0xc2c0c6, river: 0x556680, accents: 0xffffff },
-};
 
 // 位相ティント：画面全体に薄い色を被せて時刻感を出す。
 // 昼は tint しない。朝=桃 / 夕=橙 / 夜=紺 を alpha 低めで重ねる。
@@ -99,6 +92,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const cameraLayer = new Container();
   app.stage.addChild(cameraLayer);
 
+  // Σ-2.5 地形レイヤ（bgLayer より前 = 最下部）
+  const terrainStaticLayer = new Container();    // タイル色キャッシュ
+  const terrainTransientLayer = new Container(); // 水波紋・崖線・terraform・stability
   const bgLayer = new Container();
   const plotLayer = new Container();  // 開拓プロット（地面レイヤの上）
   const buildingLayer = new Container();
@@ -110,7 +106,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const fxLayer = new Container();
   const eventOverLayer = new Container(); // 上レイヤ（火炎／粉塵）
   cameraLayer.addChild(
-    bgLayer, plotLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, wolfLayer, fxLayer, eventOverLayer,
+    terrainStaticLayer, terrainTransientLayer, bgLayer, plotLayer, buildingLayer, eventUnderLayer, corpseLayer, chibiLayer, npcLayer, wolfLayer, fxLayer, eventOverLayer,
   );
 
   const lib = await loadSpriteLibrary('/chibiwafu.png', '/chibiwafu');
@@ -315,6 +311,73 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   chibiLayer.sortableChildren = true;
   corpseLayer.sortableChildren = true;
 
+  // Σ-2.5 地形描画ステート（Σ-4 で stage3d.ts へ移行する際に丸ごと削除するブロック）
+  let terrainStaticGfx: Graphics | null = null;
+  const terrainTransientGfx = new Graphics();
+  terrainTransientLayer.addChild(terrainTransientGfx);
+  let waterTileCells: Array<{ col: number; row: number }> = [];
+  let terrainRebuildAt = -999;
+
+  const TILE_BASE_COLORS: Record<string, [number, number, number]> = {
+    water: [0x4a, 0x6b, 0x9c],
+    sand:  [0xe0, 0xc9, 0x8a],
+    soil:  [0xa8, 0x7a, 0x4a],
+    grass: [0x6b, 0x9e, 0x4a],
+    rock:  [0x7a, 0x7a, 0x7a],
+  };
+
+  function tileRgb(material: string, elev: number): number {
+    const base = TILE_BASE_COLORS[material] ?? TILE_BASE_COLORS['soil']!;
+    const bright = Math.min(1.3, 0.7 + elev * 0.003);
+    const r = Math.min(255, Math.round(base[0]! * bright));
+    const g = Math.min(255, Math.round(base[1]! * bright));
+    const b = Math.min(255, Math.round(base[2]! * bright));
+    return (r << 16) | (g << 8) | b;
+  }
+
+  function rebuildTerrainStatic(terrain: WorldState['terrain']): void {
+    if (terrainStaticGfx) { terrainStaticGfx.destroy(); terrainStaticGfx = null; }
+    destroyAllChildren(terrainStaticLayer);
+    waterTileCells = [];
+    const gfx = new Graphics();
+    for (let row = 0; row < terrain.length; row++) {
+      const rowArr = terrain[row]!;
+      for (let col = 0; col < rowArr.length; col++) {
+        const tile = rowArr[col]!;
+        gfx.rect(col * TERRAIN_TILE_SIZE, row * TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE)
+           .fill({ color: tileRgb(tile.material, tile.elev) });
+        if (tile.material === 'water') waterTileCells.push({ col, row });
+      }
+    }
+    terrainStaticGfx = gfx;
+    terrainStaticLayer.addChild(gfx);
+  }
+
+  function updateTerrainTransient(terrain: WorldState['terrain'], jobs: WorldState['terraformJobs'], timeSec: number): void {
+    const gfx = terrainTransientGfx;
+    gfx.clear();
+
+    // 水タイルの波紋シマー（alpha 0.06-0.11 の正弦変動）
+    for (const { col, row } of waterTileCells) {
+      const alpha = 0.06 + 0.05 * Math.sin(timeSec * 1.5 + col * 0.08 + row * 0.06);
+      gfx.rect(col * TERRAIN_TILE_SIZE, row * TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE)
+         .fill({ color: 0x88ccff, alpha });
+    }
+    void terrain; void jobs;
+  }
+
+  function drawTerrainLayer(world: WorldState): void {
+    if (!world.terrain || world.terrain.length === 0) return;
+    // 90 フレームごと（≈1.5 秒）に静的タイルを再ベイク
+    if (!terrainStaticGfx || drawFrameCount - terrainRebuildAt >= 90) {
+      rebuildTerrainStatic(world.terrain);
+      terrainRebuildAt = drawFrameCount;
+    }
+    if (drawFrameCount % 3 === 0) {
+      updateTerrainTransient(world.terrain, world.terraformJobs, world.timeSec);
+    }
+  }
+
   function resize(_w: number, _h: number) {
     // ワールドサイズは固定。表示領域が変わったらカメラの可視範囲再計算のみ。
     clampCamera();
@@ -347,6 +410,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     drawPhaseTint(world.dayPhase);
 
     drawFrameCount++;
+    drawTerrainLayer(world);
 
     // 開拓要素（feature / 障害物 / 氾濫セル）
     // obstacle は最大 140 個 × 2 Graphics。毎 60fps 再生成は GPU ドライバを詰まらせる。
@@ -1067,15 +1131,6 @@ function drawNpc(n: NpcState, furanaLib: SpriteLibrary): NpcView {
   return { container: c };
 }
 
-// 決定論的乱数。背景が毎フレーム違う形にならないよう、シード固定で再現する。
-function seededRand(seed: number): () => number {
-  let s = (seed | 0) || 1;
-  return () => {
-    s = (s * 1664525 + 1013904223) | 0;
-    return ((s >>> 8) & 0xffffff) / 0xffffff;
-  };
-}
-
 function drawBackground(layer: Container, w: number, h: number, season: Season, envArt: EnvironmentArt) {
   // 背景は季節変わり時のみ再描画されるため頻度低いが、念のため destroy
   for (let i = layer.children.length - 1; i >= 0; i--) layer.children[i]!.destroy({ children: true });
@@ -1099,127 +1154,9 @@ function drawBackground(layer: Container, w: number, h: number, season: Season, 
     return;
   }
 
-  // 3200×1800 スケール対応の procedural 背景。
-  // 画像を使わず、Graphics のみで季節色の草原 + 川 + 橋 + 装飾を生成する。
-  const palette = SEASON_COLORS[season];
-  const riverY = CONFIG.DRY_Y_LIMIT;
-
-  // 草原ベース（上領域）
-  const grass = new Graphics();
-  grass.rect(0, 0, w, riverY).fill({ color: palette.grass });
-  layer.addChild(grass);
-
-  // 地面の斑点ノイズ（scale に応じて密度を合わせる）
-  const noise = new Graphics();
-  const dots = Math.floor((w * riverY) / 14000);  // ~400 dots for 3200×1150
-  const rand = seededRand(season.length + w);
-  for (let i = 0; i < dots; i++) {
-    const x = rand() * w;
-    const y = rand() * (riverY - 10);
-    const r = 2 + rand() * 3;
-    const c = rand() < 0.5 ? 0xc5ba8a : 0xa8b66a;
-    noise.circle(x, y, r).fill({ color: c, alpha: 0.22 });
-  }
-  layer.addChild(noise);
-
-  // ふんわりした草原のパッチ（大きな楕円でムラを作る）
-  const patches = new Graphics();
-  const patchCount = Math.floor(w / 320);
-  for (let i = 0; i < patchCount; i++) {
-    const x = (i + 0.5) * (w / patchCount) + (rand() - 0.5) * 180;
-    const y = 80 + rand() * (riverY - 180);
-    const rx = 180 + rand() * 140;
-    const ry = 70 + rand() * 50;
-    patches.ellipse(x, y, rx, ry).fill({ color: 0xb6c785, alpha: 0.18 });
-  }
-  layer.addChild(patches);
-
-  // 高低差の等高線風の tint（高台は明るめ、低地は薄暗め）
-  // マップを 40x20 のグリッドでサンプリングして楕円で重ねる
-  const elevLayer = new Graphics();
-  const colsE = 40;
-  const rowsE = 20;
-  const cellW = w / colsE;
-  const cellH = riverY / rowsE;
-  for (let gy = 0; gy < rowsE; gy++) {
-    for (let gx = 0; gx < colsE; gx++) {
-      const cx = (gx + 0.5) * cellW;
-      const cy = (gy + 0.5) * cellH;
-      const elev = getElevation(cx, cy);
-      // 標高 50 を基準に +で明るく、-で暗く
-      const delta = (elev - 50) / 50;  // -1..+1
-      if (Math.abs(delta) < 0.15) continue;
-      const color = delta > 0 ? 0xf6e4b8 : 0x6e5430;
-      const alpha = Math.min(0.22, Math.abs(delta) * 0.16);
-      elevLayer.ellipse(cx, cy, cellW * 0.7, cellH * 0.7).fill({ color, alpha });
-    }
-  }
-  layer.addChild(elevLayer);
-
-  // 村の中央広場（フラナ拠点 = w/2, h*0.35 近くを土色で）
-  const centerX = w / 2;
-  const centerY = h * 0.35;
-  const commons = new Graphics();
-  commons.ellipse(centerX, centerY, 280, 160).fill({ color: palette.dirt, alpha: 0.75 });
-  commons.ellipse(centerX, centerY, 180, 100).fill({ color: 0xe9d3a8, alpha: 0.55 });
-  layer.addChild(commons);
-
-  // 川（y >= DRY_Y_LIMIT）
-  const river = new Graphics();
-  river.rect(0, riverY, w, h - riverY).fill({ color: palette.river });
-  river.rect(0, riverY, w, 4).fill({ color: 0x3a2a1a, alpha: 0.3 });
-  const waveCount = Math.floor(w / 110);
-  for (let i = 0; i < waveCount; i++) {
-    const wx = 40 + i * 110 + (i % 2) * 28;
-    const wy = riverY + 30 + (i % 4) * 80;
-    river.ellipse(wx, wy, 28, 5).fill({ color: 0xf5e8c8, alpha: 0.18 });
-  }
-  layer.addChild(river);
-
-  // 川岸
-  const shoreline = new Graphics();
-  shoreline.rect(0, riverY - 10, w, 14).fill({ color: 0xe6d8b9, alpha: 0.9 });
-  const shoreDots = Math.floor(w / 120);
-  for (let i = 0; i < shoreDots; i++) {
-    const x = 20 + i * 120;
-    shoreline.circle(x, riverY + 2 + (i % 2) * 3, 5).fill({ color: 0xfaf3e1, alpha: 0.45 });
-  }
-  layer.addChild(shoreline);
-
-  // 丸太橋（マップ中央）
-  const bridgeX = w / 2 - 22;
-  const bridgeY = riverY - 36;
-  const bridge = new Graphics();
-  bridge.roundRect(bridgeX, bridgeY, 44, 140, 8).fill({ color: 0x81532c }).stroke({ color: 0x3a2a1a, width: 1.5 });
-  for (let i = 0; i < 10; i++) {
-    bridge.rect(bridgeX + 4, bridgeY + 14 + i * 12, 36, 4).fill({ color: 0xb78853 });
-  }
-  bridge.rect(bridgeX + 3, bridgeY, 4, 140).fill({ color: 0x65411f });
-  bridge.rect(bridgeX + 37, bridgeY, 4, 140).fill({ color: 0x65411f });
-  layer.addChild(bridge);
-
-  // 花（季節色でアクセント、全域に散りばめる）
-  const flowerCount = Math.floor((w * riverY) / 38000);
-  const flowers = new Graphics();
-  for (let i = 0; i < flowerCount; i++) {
-    const x = rand() * w;
-    const y = 40 + rand() * (riverY - 80);
-    flowers.circle(x, y, 4).fill({ color: palette.accents, alpha: 0.5 });
-    flowers.circle(x + 8, y - 3, 3).fill({ color: 0xfff3d8, alpha: 0.4 });
-  }
-  layer.addChild(flowers);
-
-  // 石ころ
-  const stoneCount = Math.floor(w / 180);
-  const stones = new Graphics();
-  for (let i = 0; i < stoneCount; i++) {
-    const x = rand() * w;
-    const y = 60 + rand() * (riverY - 120);
-    stones.ellipse(x, y, 12, 7).fill({ color: 0xb7aa9b, alpha: 0.5 });
-    stones.ellipse(x + 10, y + 3, 7, 4).fill({ color: 0x938579, alpha: 0.38 });
-  }
-  layer.addChild(stones);
-
+  // Σ-2.5: procedural 背景はタイルレイヤ（terrainStaticLayer）で置換済み。
+  // bgLayer にはビネットのみ残す。
+  void season;
   const vignette = new Graphics();
   vignette.rect(0, 0, w, 24).fill({ color: 0x000000, alpha: 0.04 });
   vignette.rect(0, h - 34, w, 34).fill({ color: 0x000000, alpha: 0.08 });
