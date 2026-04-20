@@ -731,9 +731,14 @@ const LOWER_STONE_GAIN = 2;  // rock タイルから
 export function enqueueTerraformRaise(w: WorldState, tx: number, ty: number): boolean {
   if (tx < 0 || tx >= TERRAIN_COLS || ty < 0 || ty >= TERRAIN_ROWS) return false;
   if (w.resources.soil < RAISE_COST_SOIL) return false;
-  // 同タイルへの重複ジョブは上書き
+  // 同タイルへの重複ジョブは上書き（既存 raise なら先払い分を refund してから再消費）
   const existing = w.terraformJobs.findIndex((j) => j.tx === tx && j.ty === ty);
-  if (existing >= 0) w.terraformJobs.splice(existing, 1);
+  if (existing >= 0) {
+    if (w.terraformJobs[existing]!.target === 'raise') {
+      w.resources.soil += RAISE_COST_SOIL;
+    }
+    w.terraformJobs.splice(existing, 1);
+  }
   w.resources.soil -= RAISE_COST_SOIL;
   w.terraformJobs.push({ id: `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`, tx, ty, target: 'raise', progress: 0 });
   return true;
