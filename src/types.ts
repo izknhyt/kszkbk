@@ -80,7 +80,7 @@ export interface FlightState {
 }
 
 // =========================================================================
-// Σ-2-a タイル式ハイトマップ
+// Σ-2 タイル式ハイトマップ
 // =========================================================================
 export type TerrainMaterial = 'grass' | 'soil' | 'sand' | 'rock' | 'water';
 
@@ -90,6 +90,15 @@ export interface TerrainTile {
   stability: number;   // 0-1.0。1.0 = 安定、<0.4 で崩落リスク（Σ-2-c で使用）
   waterLevel: number;  // 0-1.0。1.0 = 水没タイル（川・海）
   buryTimer: number;   // Σ-2-c：崩落直後の生き埋め判定 残秒（0=通常、transient）
+}
+
+// プレイヤーが発行し、ちびわふが近傍で労働して進める地形編集ジョブ
+export interface TerraformJob {
+  id: string;
+  tx: number;    // タイルX インデックス
+  ty: number;    // タイルY インデックス
+  target: 'raise' | 'lower';
+  progress: number;  // 0-1.0
 }
 
 export type DeathCauseId =

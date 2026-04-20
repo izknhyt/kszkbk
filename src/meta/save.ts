@@ -1,4 +1,4 @@
-import type { Difficulty, TerrainMaterial, TerrainTile } from '../types';
+import type { Difficulty, TerrainMaterial, TerrainTile, TerraformJob } from '../types';
 import type { WorldState } from '../sim/world';
 import { activateTerrain, TERRAIN_COLS, TERRAIN_ROWS } from '../sim/world';
 import { peekNextId, resetIdCounter } from '../sim/chibiwafu';
@@ -127,8 +127,9 @@ interface SaveData {
   weatherForecast?: WorldState['weatherForecast'];
   lastWeatherDayCount?: number;
   wolvesKilled?: number;
-  // v11+: Σ-2-a 地形タイル配列
+  // v11+: Σ-2 地形
   terrain?: TerrainSave;
+  terraformJobs?: TerraformJob[];
 }
 
 // スロット概要（スタート画面で 3 枚のカードに表示）
@@ -210,6 +211,7 @@ export function save(w: WorldState, slot: SlotId) {
     lastWeatherDayCount: w.lastWeatherDayCount,
     wolvesKilled: w.wolvesKilled,
     terrain: serializeTerrain(w.terrain),
+    terraformJobs: w.terraformJobs,
   };
   try {
     localStorage.setItem(slotKey(slot), JSON.stringify(data));
@@ -259,6 +261,7 @@ export function load(w: WorldState, slot: SlotId): boolean {
       w.terrain = deserializeTerrain(data.terrain);
       activateTerrain(w.terrain);
     }
+    if (Array.isArray(data.terraformJobs)) w.terraformJobs = data.terraformJobs;
     // soil が古いセーブにない場合のデフォルト
     if (typeof w.resources.soil !== 'number') w.resources.soil = 0;
     return true;

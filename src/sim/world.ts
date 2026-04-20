@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -188,6 +188,8 @@ export interface WorldState {
   // 32px セルの 2D タイル配列 [row][col]。100×57 = 5700 タイル。
   // getElevation(x,y) はここから bi-linear 補間で返す。persist 対象（RLE 圧縮）。
   terrain: TerrainTile[][];
+  // Σ-2-b: ちびわふが盛り土・切り土を行うジョブキュー（persist 対象）
+  terraformJobs: TerraformJob[];
 }
 
 // フリー配置障害物：陸地（y 60〜DRY_Y_LIMIT-40）に広くランダム散在、
@@ -707,7 +709,94 @@ export function getElevation(x: number, y: number): number {
 function getTile(terrain: TerrainTile[][], tx: number, ty: number): TerrainTile | null {
   return terrain[ty]?.[tx] ?? null;
 }
-void getTile; // 後続フェーズ（Σ-2-b/c）で使用
+
+// =========================================================================
+// Σ-2-b 地形編集 API
+// =========================================================================
+
+// 世界座標 (x,y) → タイルインデックス (col, row)
+export function worldToTile(x: number, y: number): { tx: number; ty: number } {
+  return {
+    tx: Math.floor(x / TERRAIN_TILE_SIZE),
+    ty: Math.floor(y / TERRAIN_TILE_SIZE),
+  };
+}
+
+const RAISE_COST_SOIL = 20;
+const RAISE_ELEV_AMOUNT = 5;
+const LOWER_SOIL_GAIN = 8;
+const LOWER_STONE_GAIN = 2;  // rock タイルから
+
+// 盛り土ジョブをキューに追加。soil 消費は即時（ジョブ登録時点で予約）。
+export function enqueueTerraformRaise(w: WorldState, tx: number, ty: number): boolean {
+  if (tx < 0 || tx >= TERRAIN_COLS || ty < 0 || ty >= TERRAIN_ROWS) return false;
+  if (w.resources.soil < RAISE_COST_SOIL) return false;
+  // 同タイルへの重複ジョブは上書き
+  const existing = w.terraformJobs.findIndex((j) => j.tx === tx && j.ty === ty);
+  if (existing >= 0) w.terraformJobs.splice(existing, 1);
+  w.resources.soil -= RAISE_COST_SOIL;
+  w.terraformJobs.push({ id: `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`, tx, ty, target: 'raise', progress: 0 });
+  return true;
+}
+
+export function enqueueTerraformLower(w: WorldState, tx: number, ty: number): boolean {
+  if (tx < 0 || tx >= TERRAIN_COLS || ty < 0 || ty >= TERRAIN_ROWS) return false;
+  const existing = w.terraformJobs.findIndex((j) => j.tx === tx && j.ty === ty);
+  if (existing >= 0) w.terraformJobs.splice(existing, 1);
+  w.terraformJobs.push({ id: `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`, tx, ty, target: 'lower', progress: 0 });
+  return true;
+}
+
+// タイルの elev を変更し stability を減衰
+export function raiseTile(terrain: TerrainTile[][], tx: number, ty: number, amount: number): void {
+  const tile = getTile(terrain, tx, ty);
+  if (!tile) return;
+  tile.elev = Math.min(100, tile.elev + amount);
+  tile.stability = Math.min(tile.stability, 0.6);
+  tile.material = elevToMaterial(tile.elev, tile.waterLevel >= 0.5);
+}
+
+export function lowerTile(terrain: TerrainTile[][], tx: number, ty: number, amount: number): void {
+  const tile = getTile(terrain, tx, ty);
+  if (!tile) return;
+  tile.elev = Math.max(0, tile.elev - amount);
+  tile.stability = Math.min(tile.stability, 0.75);
+  tile.material = elevToMaterial(tile.elev, tile.waterLevel >= 0.5);
+}
+
+// ちびわふ労働：ジョブ近傍 28px 以内の生存ちびわふが進捗を進める
+const TERRAFORM_WORKER_RADIUS = 28;
+const TERRAFORM_PROGRESS_PER_WORKER_SEC = 0.05;  // 1 worker で 20 秒完了
+
+export function updateTerraformJobs(w: WorldState, dt: number): void {
+  if (w.terraformJobs.length === 0) return;
+  for (let i = w.terraformJobs.length - 1; i >= 0; i--) {
+    const job = w.terraformJobs[i]!;
+    const cx = (job.tx + 0.5) * TERRAIN_TILE_SIZE;
+    const cy = (job.ty + 0.5) * TERRAIN_TILE_SIZE;
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight || c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - cx, c.pos.y - cy) <= TERRAFORM_WORKER_RADIUS) workers++;
+    }
+    if (workers > 0) {
+      job.progress += dt * TERRAFORM_PROGRESS_PER_WORKER_SEC * Math.min(4, workers);
+    }
+    if (job.progress >= 1.0) {
+      if (job.target === 'raise') {
+        raiseTile(w.terrain, job.tx, job.ty, RAISE_ELEV_AMOUNT);
+      } else {
+        const tile = getTile(w.terrain, job.tx, job.ty);
+        if (tile) {
+          w.resources.soil += LOWER_SOIL_GAIN;
+          if (tile.material === 'rock') w.resources.stone += LOWER_STONE_GAIN;
+        }
+        lowerTile(w.terrain, job.tx, job.ty, RAISE_ELEV_AMOUNT);
+      }
+      w.terraformJobs.splice(i, 1);
+    }
+  }
+}
 
 // =========================================================================
 // オオカミ襲撃（Ω-5）
@@ -988,6 +1077,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     wolfSpawnCooldown: 0,
     wolvesKilled: 0,
     terrain,
+    terraformJobs: [],
   };
 }
 
@@ -1010,6 +1100,7 @@ export function ensurePlots(w: WorldState) {
   if (w.wolvesKilled === undefined) w.wolvesKilled = 0;
   // Σ-2: ロード後に地形タイルを再アクティブ化（v10 以前のセーブは procedural で再生成）
   if (!w.terrain || w.terrain.length === 0) w.terrain = initTerrain(w.bounds);
+  if (!w.terraformJobs) w.terraformJobs = [];
   // buryTimer は transient なのでロード後リセット
   for (const row of w.terrain) for (const tile of row) tile.buryTimer = 0;
   activateTerrain(w.terrain);
@@ -2920,6 +3011,7 @@ export function tickWorld(w: WorldState, dt: number) {
   updateInfra(w, dt);
   updateFloodZones(w, dt);
   updateWolves(w, dt);
+  updateTerraformJobs(w, dt);
   updateStomps(w, dt);
   updateBubbles(w.bubbles, dt);
   if (w.bokaigiMarkerTimer > 0) w.bokaigiMarkerTimer = Math.max(0, w.bokaigiMarkerTimer - dt);
