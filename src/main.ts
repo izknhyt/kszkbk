@@ -6,6 +6,8 @@ import {
   damageChibi,
   damageNpc,
   damageWolf,
+  enqueueTerraformLower,
+  enqueueTerraformRaise,
   ensurePlots,
   forceSpawn,
   launchFlight,
@@ -14,6 +16,7 @@ import {
   triggerFire,
   triggerOndo,
   upgradeOne,
+  worldToTile,
 } from './sim/world';
 import { pushLife } from './sim/world';
 import { isAlive as isChibiAlive, setState } from './sim/chibiwafu';
@@ -243,13 +246,52 @@ async function start() {
   document.querySelectorAll<HTMLButtonElement>('.plot-build-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const kind = btn.dataset.plotKind as BuildKind;
+      setTerraformMode(null);
       setBuildMode(buildMode === kind ? null : kind);
     });
   });
-  // 空クリック → 建設モードならクリック位置に feature を置く
+
+  // 地形編集モード（盛り土 / 切り土）
+  type TerraformMode = 'raise' | 'lower' | null;
+  let terraformMode: TerraformMode = null;
+  const terraformLabel: Record<NonNullable<TerraformMode>, string> = {
+    raise: '盛り土',
+    lower: '切り土',
+  };
+  function setTerraformMode(m: TerraformMode) {
+    terraformMode = m;
+    document.querySelectorAll<HTMLButtonElement>('.terraform-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.terraform === m);
+    });
+    if (m) {
+      setBuildMode(null);
+      const hint = document.getElementById('plot-build-hint');
+      if (hint) hint.textContent = `${terraformLabel[m]} モード：地面を左クリックでタイル選択（ちびわふが作業）`;
+    }
+  }
+  document.querySelectorAll<HTMLButtonElement>('.terraform-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const kind = btn.dataset.terraform as NonNullable<TerraformMode>;
+      setTerraformMode(terraformMode === kind ? null : kind);
+    });
+  });
+
+  // 空クリック → 建設 or 地形編集モード処理
   stage.app.canvas.addEventListener('kszk-empty-click', (e) => {
-    if (!buildMode) return;
     const detail = (e as CustomEvent).detail as { worldX: number; worldY: number };
+    if (terraformMode) {
+      const { tx, ty } = worldToTile(detail.worldX, detail.worldY);
+      if (terraformMode === 'raise') {
+        const ok = enqueueTerraformRaise(world, tx, ty);
+        if (!ok) flashToast('土が足りない（soil×20 必要）', 'info');
+        else flashToast(`盛り土 ジョブ追加 [${tx},${ty}]`, 'info');
+      } else {
+        enqueueTerraformLower(world, tx, ty);
+        flashToast(`切り土 ジョブ追加 [${tx},${ty}]`, 'info');
+      }
+      return;
+    }
+    if (!buildMode) return;
     const x = detail.worldX;
     const y = detail.worldY;
     // 川エリアには建てられない（path は橋代わりにできるが今回は未実装）

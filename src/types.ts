@@ -68,11 +68,37 @@ export interface LifeEvent {
 export interface FlightState {
   vx: number;  // px/sec
   vy: number;
+  // Σ-1-a z物理：posZ が getElevation(x,y) 以下になると崖落下着地
+  vz: number;       // z方向速度 terrain-units/sec（負 = 下降）
+  posZ: number;     // 現在高度（getElevation と同スケール）
+  startElev: number; // 発射地点の地形高度（崖落下ダメージ算出用）
   leftSec: number;
   totalSec: number;
   hitKeys: string[];  // 同一個体を重ねて巻き添えしない
   landingDamage: number;
   landCauseId: string;  // HP 0 になった時の死因
+}
+
+// =========================================================================
+// Σ-2 タイル式ハイトマップ
+// =========================================================================
+export type TerrainMaterial = 'grass' | 'soil' | 'sand' | 'rock' | 'water';
+
+export interface TerrainTile {
+  elev: number;        // 0-100 標高
+  material: TerrainMaterial;
+  stability: number;   // 0-1.0。1.0 = 安定、<0.4 で崩落リスク（Σ-2-c で使用）
+  waterLevel: number;  // 0-1.0。1.0 = 水没タイル（川・海）
+  buryTimer: number;   // Σ-2-c：崩落直後の生き埋め判定 残秒（0=通常、transient）
+}
+
+// プレイヤーが発行し、ちびわふが近傍で労働して進める地形編集ジョブ
+export interface TerraformJob {
+  id: string;
+  tx: number;    // タイルX インデックス
+  ty: number;    // タイルY インデックス
+  target: 'raise' | 'lower';
+  progress: number;  // 0-1.0
 }
 
 export type DeathCauseId =
@@ -118,8 +144,16 @@ export type DeathCauseId =
   | 'fatigue_death'           // 疲労で衰弱死
   | 'flood_drown'            // 洪水に流されて溺死
   | 'wolf_bite'              // オオカミに噛み殺された
+  // --- Ω-6 電力 追加 ------------------------------------------------------
   | 'electrocution'          // 雷・電線・発電所の事故で感電死
-  | 'thunder_blast';         // 発電所への落雷で爆発死（周囲巻き込み）
+  | 'thunder_blast'          // 発電所への落雷で爆発死（周囲巻き込み）
+  // --- Σ-1 z物理 追加 ----------------------------------------------------------
+  | 'cliff_fall'             // 崖から落ちて地面に激突
+  | 'slope_fall'             // 坂で足を滑らせて滑落死
+  | 'river_swept'            // 激流に流されて溺死
+  // --- Σ-2-c 地形崩落 追加 -------------------------------------------------
+  | 'landslide_crush'        // 土砂崩れで転倒打撲死
+  | 'buried_alive';          // 土砂崩れで生き埋め窒息死
 
 export interface DeathCause {
   id: DeathCauseId;

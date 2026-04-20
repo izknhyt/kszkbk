@@ -60,6 +60,7 @@
             <div class="stat"><span>🧱</span><b id="stat-brick">0</b></div>
             <div class="stat"><span>🐑</span><b id="stat-wool">0</b></div>
             <div class="stat"><span>🧶</span><b id="stat-cloth">0</b></div>
+            <div class="stat"><span>🟫</span><b id="stat-soil">0</b></div>
           </div>
           <div class="weather-row">
             <span class="weather-now" id="weather-now">☀ 快晴</span>
@@ -92,6 +93,10 @@
               <button class="plot-build-btn" data-plot-kind="kiln" title="精錬所 (wood×4 + stone×8) — 近くのちびわふが stone×3 を brick×1 に変換。建材として将来の建物に使用">🧱 精錬所<small>🪵×4 🪨×8</small></button>
               <button class="plot-build-btn" data-plot-kind="pasture" title="牧場 (wood×3 + stone×2) — 放置で wool を 0.03/sec 自動生産。雪/乾燥で半減。">🐑 牧場<small>🪵×3 🪨×2</small></button>
               <button class="plot-build-btn" data-plot-kind="loom" title="織機 (wood×6 + plank×2) — 近くのちびわふが wool×2 を cloth×1 に変換">🧶 織機<small>🪵×6 🪚×2</small></button>
+            </div>
+            <div class="plot-build-row" style="margin-top:4px">
+              <button class="terraform-btn" data-terraform="raise" title="盛り土 (soil×20 消費、+5 elev) — ちびわふが近くに寄って作業">⛰ 盛り土<small>🟫×20</small></button>
+              <button class="terraform-btn" data-terraform="lower" title="切り土 (soil 獲得、-5 elev) — ちびわふが近くに寄って作業">⛏ 切り土<small>→🟫</small></button>
             </div>
             <div id="plot-build-hint" class="plot-build-hint">ボタンを押してから地面の好きな場所を左クリック</div>
           </div>
