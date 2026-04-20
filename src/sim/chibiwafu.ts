@@ -1,5 +1,4 @@
 import type { ChibiState, Chibiwafu, TraitId, Vec2 } from '../types';
-import { CONFIG } from '../config';
 import {
   derivedMamaRadius,
   derivedRiverTrespass,
@@ -7,6 +6,7 @@ import {
   type ChibiParams,
 } from './personality';
 import type { Season } from '../types';
+import { isSeaAt } from './terrain/query';
 
 let nextId = 1;
 
@@ -63,9 +63,6 @@ export function isAlive(c: Chibiwafu): boolean {
   return c.state !== 'dead';
 }
 
-// 陸地の上限 y（これより下は泥川）。wanderStep の target 計算で利用。
-// 川に落ちる奴はたまにはいる（冒険家など）ので target 抽選で 6% だけ越境を許す。
-const DRY_Y_LIMIT = CONFIG.DRY_Y_LIMIT;
 
 interface WanderEnv {
   season: Season;
@@ -99,11 +96,12 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         newTarget = { x: env.cocoonPos.x + (Math.random() - 0.5) * 30, y: env.cocoonPos.y + (Math.random() - 0.5) * 30 };
         announcementKey = 'cocoon_ikusa';
       }
-      // 勇気：高いほど川/橋へ寄る
+      // 勇気：高いほど海/川縁に寄る（bounds 下端 75% 付近をうろつく）
       if (!newTarget && Math.random() < (c.params.courage - 50) * 0.008) {
+        const waterEdgeY = bounds.h * 0.75;
         newTarget = {
           x: margin + Math.random() * (bounds.w - margin * 2),
-          y: DRY_Y_LIMIT - 30 + Math.random() * 60,
+          y: waterEdgeY - 30 + Math.random() * 60,
         };
         announcementKey = 'river_bouken';
       }
@@ -151,11 +149,13 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
       }
     }
 
-    // fallback: 自由徘徊（ママ依存でフラナ近くに寄せつつ、勇気で川を許容）
+    // fallback: 自由徘徊（ママ依存でフラナ近くに寄せつつ、勇気で水辺を許容）
     if (!newTarget) {
       const riverChance = derivedRiverTrespass(c.params);
       const allowRiver = Math.random() < riverChance;
-      const maxY = allowRiver ? bounds.h - margin : Math.min(DRY_Y_LIMIT, bounds.h - margin);
+      // 海マスクがある場合は bounds.h * 0.85 を陸地上限とする（Σ-3-d の findDryTile と対）
+      const landBoundary = bounds.h * 0.85;
+      const maxY = allowRiver ? bounds.h - margin : Math.min(landBoundary, bounds.h - margin);
 
       // mama 値で中心寄せ：フラナからの距離を mamaRadius 以内に収めやすくする
       if (env && c.params.mama > 40) {
@@ -170,10 +170,18 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         }
       }
       if (!newTarget) {
-        newTarget = {
-          x: margin + Math.random() * (bounds.w - margin * 2),
-          y: margin + Math.random() * (maxY - margin),
-        };
+        // 海タイルを避ける（最大 6 回リトライ）
+        for (let t = 0; t < 6; t++) {
+          const cx = margin + Math.random() * (bounds.w - margin * 2);
+          const cy = margin + Math.random() * (maxY - margin);
+          if (!isSeaAt(cx, cy) || allowRiver) { newTarget = { x: cx, y: cy }; break; }
+        }
+        if (!newTarget) {
+          newTarget = {
+            x: margin + Math.random() * (bounds.w - margin * 2),
+            y: margin + Math.random() * (maxY - margin),
+          };
+        }
       }
     }
 

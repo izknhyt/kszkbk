@@ -25,7 +25,8 @@ import type { GlobalEvent } from './events';
 export interface HazardZone {
   id: string;
   causeId: DeathCauseId;
-  kind: 'circle' | 'rect' | 'random';
+  // 'sea': isSeaAt() で判定（DRY_Y_LIMIT 依存の rect を置き換え）
+  kind: 'circle' | 'rect' | 'random' | 'sea';
   // circle
   center?: Vec2;
   radius?: number;
@@ -49,32 +50,29 @@ export const HAZARDS: HazardZone[] = [
   {
     id: 'bouken_cliff',
     causeId: 'bouken_cliff',
-    kind: 'rect',
-    rect: { x: 0, y: CONFIG.DRY_Y_LIMIT + 10, w: 99999, h: 99999 },
+    kind: 'sea',  // Σ-3-c: DRY_Y_LIMIT rect → isSeaAt 判定
     ratePerSec: 3.0,
     seasons: ['spring'],
     bypassSafeZone: true,
     requiresAnyTrait: ['bouken'],
-    note: '春の川奥を覗く冒険家が墜落（bridge/mudriver と競合、順序で先に評価）',
+    note: '春の海辺を覗く冒険家が溺れる（sea kind は runHazards 側で isSeaAt を評価）',
   },
   {
     id: 'mudriver',
     causeId: 'mudriver',
-    kind: 'rect',
-    rect: { x: 0, y: CONFIG.DRY_Y_LIMIT, w: 99999, h: 99999 },
+    kind: 'sea',  // Σ-3-c: 海タイル全域
     ratePerSec: 0.35,
     traitMultipliers: { bouken: 1.5 },
-    note: '泥川 — 冒険家は1.5倍の確率で溺れる',
+    note: '海 — 冒険家は1.5倍の確率で溺れる',
   },
-  // bridge：画面中央の橋。広いマップなので bounds 中央に合わせて移動
+  // bridge は海沿いの桟橋イベント（難度 standard/hell のみ）— 旧丸太橋を海沿いに衣替え
   {
     id: 'bridge',
     causeId: 'bridge',
-    kind: 'rect',
-    rect: { x: CONFIG.WORLD_W / 2 - 18, y: CONFIG.DRY_Y_LIMIT - 30, w: 36, h: 90 },
-    ratePerSec: 4.0,
+    kind: 'sea',  // Σ-3-c: 海タイル判定
+    ratePerSec: 2.5,
     traitMultipliers: { bouken: 1.5 },
-    note: '丸太橋 — 渡ろうとすると落ちる（通過時間が短いので rate を高く）',
+    note: '海辺に立ちすぎて流される',
   },
   {
     id: 'stonebread',
@@ -255,6 +253,8 @@ export function hazardActiveInSeason(zone: HazardZone, season: Season): boolean 
 
 export function pointInZone(zone: HazardZone, p: Vec2): boolean {
   if (zone.kind === 'random') return true;
+  // 'sea' は呼び出し側で isSeaAt を使って評価するので常に false を返す（miss-eval 防止）
+  if (zone.kind === 'sea') return false;
   if (zone.kind === 'circle') {
     if (!zone.center || zone.radius == null) return false;
     const dx = p.x - zone.center.x;

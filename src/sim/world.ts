@@ -1,6 +1,7 @@
 import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
 import { seedFromRunId } from './terrain/noise';
 import { generateTerrain } from './terrain/generators';
+import { isSeaAt, setQueryTerrain } from './terrain/query';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -638,7 +639,11 @@ let _activeTerrain: TerrainTile[][] | null = null;
 
 export function activateTerrain(terrain: TerrainTile[][]): void {
   _activeTerrain = terrain;
+  setQueryTerrain(terrain);  // chibiwafu.ts など他モジュールも同期
 }
+
+// world.ts 内から呼ぶ isSeaAt は query.ts の実装を再エクスポート
+export { isSeaAt };
 
 // 既存の procedural 算出式（initTerrain の充填＆ v10 以前の load マイグレーション用）
 export function proceduralElevation(x: number, y: number): number {
@@ -951,7 +956,9 @@ function spawnWolfGroup(w: WorldState) {
   // map 端からまとまって入ってくる。edge は 4 方向からランダム
   const edge = Math.floor(Math.random() * 4);
   const baseX = edge === 0 ? 20 : edge === 1 ? w.bounds.w - 20 : Math.random() * w.bounds.w;
-  const baseY = edge === 2 ? 40 : edge === 3 ? CONFIG.DRY_Y_LIMIT - 40 : 60 + Math.random() * (CONFIG.DRY_Y_LIMIT - 120);
+  // 陸地端: 旧 DRY_Y_LIMIT の代わりに bounds.h * 0.85 を安全な陸地上限として使う
+  const safeBottom = w.bounds.h * 0.85;
+  const baseY = edge === 2 ? 40 : edge === 3 ? safeBottom - 40 : 60 + Math.random() * (safeBottom - 120);
   for (let i = 0; i < count; i++) {
     w.wolves.push({
       id: _wolfIdSeq++,
@@ -1099,8 +1106,8 @@ export function updateWolves(w: WorldState, dt: number) {
     // 接近
     wolf.pos.x += (dx / d) * wolf.speed * dt;
     wolf.pos.y += (dy / d) * wolf.speed * dt;
-    // 川には行かない
-    if (wolf.pos.y > CONFIG.DRY_Y_LIMIT - 20) wolf.pos.y = CONFIG.DRY_Y_LIMIT - 20;
+    // 海タイルには入らない（DRY_Y_LIMIT 旧境界の代わりにタイル判定）
+    if (isSeaAt(wolf.pos.x, wolf.pos.y)) wolf.pos.y -= wolf.speed * dt * 2;
   }
 }
 
@@ -1579,10 +1586,10 @@ function flightStep(
     // 位置クランプ（水＝泥川ゾーンはそのまま、陸は地面に）
     entity.pos.y = Math.min(entity.pos.y, w.bounds.h - 16);
     entity.flight = null;
-    // 着地処理：水中 (y > DRY_Y_LIMIT) なら溺死（ちびわふ）or 水HP削り（NPC）
+    // 着地処理：海タイルなら溺死（ちびわふ）or 水HP削り（NPC）
     if (isChibi) {
       const c = entity as Chibiwafu;
-      if (c.pos.y > CONFIG.DRY_Y_LIMIT) {
+      if (isSeaAt(c.pos.x, c.pos.y)) {
         spawnBubble(w.bubbles, c.pos, 'わふぅ…', 'speech', 1.1);
         pushLife(c, Math.floor(c.ageSec), '水に落ちて沈んだ');
         damageChibi(w, c, c.hp, 'kamisama_drown');
@@ -1600,7 +1607,7 @@ function flightStep(
       }
     } else {
       const n = entity as NpcState;
-      if (n.pos.y > CONFIG.DRY_Y_LIMIT) {
+      if (isSeaAt(n.pos.x, n.pos.y)) {
         spawnBubble(w.bubbles, n.pos, 'わぷっ…', 'npc-speech', 1.2);
         damageNpc(w, n, 10);
         return;
@@ -1832,7 +1839,12 @@ function runHazards(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZone
   for (const zone of hazards) {
     if (!hazardActiveInSeason(zone, w.season)) continue;
     if (insideSafe && !zone.bypassSafeZone) continue;
-    if (!pointInZone(zone, c.pos)) continue;
+    // 'sea' kind は isSeaAt で判定（DRY_Y_LIMIT rect の代替）
+    if (zone.kind === 'sea') {
+      if (!isSeaAt(c.pos.x, c.pos.y)) continue;
+    } else {
+      if (!pointInZone(zone, c.pos)) continue;
+    }
     // trait gate
     if (zone.requiresAnyTrait && !zone.requiresAnyTrait.some((t) => c.traits.includes(t))) continue;
     // event gate
@@ -2778,18 +2790,24 @@ function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punc
     pushNpcLife(n, Math.floor(w.timeSec), `${target.name} をぶん投げた（機嫌${Math.round(n.mood)}）`);
 
     const startPos = { x: target.pos.x, y: target.pos.y };
-    // 目的地：50% 川 / 50% ランダム遠投
+    // 目的地：50% 水辺へ / 50% ランダム遠投
+    // 水辺: フラナから離れた方向に向かって海タイルが最初に現れる座標を探す
     let landX: number, landY: number;
     if (Math.random() < 0.5) {
       const dir = target.pos.x < w.bounds.w / 2 ? 1 : -1;
       landX = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + dir * (250 + Math.random() * 150)));
-      landY = CONFIG.DRY_Y_LIMIT + 16 + Math.random() * 40;
-      pushLife(target, Math.floor(target.ageSec), 'フラナに川へぶん投げられた');
+      // 海マスクで水辺を探す（最大 bounds.h まで走査）
+      let waterY = w.bounds.h * 0.75;
+      for (let sy = Math.round(target.pos.y); sy < w.bounds.h - 20; sy += 16) {
+        if (isSeaAt(landX, sy)) { waterY = sy + 16; break; }
+      }
+      landY = waterY + Math.random() * 40;
+      pushLife(target, Math.floor(target.ageSec), 'フラナに海へぶん投げられた');
     } else {
       const ang = Math.random() * Math.PI * 2;
       const dist = 280 + Math.random() * 170;
       landX = Math.max(40, Math.min(w.bounds.w - 40, target.pos.x + Math.cos(ang) * dist));
-      landY = Math.max(40, Math.min(CONFIG.DRY_Y_LIMIT - 20, target.pos.y + Math.sin(ang) * dist));
+      landY = Math.max(40, Math.min(w.bounds.h - 20, target.pos.y + Math.sin(ang) * dist));
       pushLife(target, Math.floor(target.ageSec), 'フラナにぶん投げられた');
     }
     target.target = null;
