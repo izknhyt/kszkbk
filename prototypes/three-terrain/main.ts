@@ -481,10 +481,15 @@ function doPick(event: MouseEvent): void {
 
   const log = document.getElementById('pick-log')!;
   if (t) {
-    const mat = t.water ? 'water' : t.elev > 60 ? 'rock' : t.elev > 25 ? 'grass' : t.elev > 10 ? 'soil' : 'sand';
-    log.innerHTML = `③ GPU pick: tile [${col}, ${row}]<br>標高: ${t.elev.toFixed(1)} | 素材: ${mat}<br>world: (${(col * TILE_SIZE).toFixed(0)}, ${(row * TILE_SIZE).toFixed(0)})`;
+    const mat = t.water ? '🌊water' : t.elev > 60 ? '🪨rock' : t.elev > 25 ? '🌿grass' : t.elev > 10 ? '🟫soil' : '🏖sand';
+    log.innerHTML =
+      `③ GPU pick OK<br>` +
+      `tile [col=${col}, row=${row}] idx=${tileIdx}<br>` +
+      `標高: ${t.elev.toFixed(1)} | 素材: ${mat}<br>` +
+      `world XY: (${(col * TILE_SIZE).toFixed(0)}, ${(row * TILE_SIZE).toFixed(0)})<br>` +
+      `pick method: WebGLRenderTarget 1×1 readPixels`;
   } else {
-    log.innerHTML = `③ GPU pick: 地形外 (idx=${tileIdx})`;
+    log.innerHTML = `③ GPU pick: 地形外 (raw idx=${tileIdx}, RGB=[${buf[0]},${buf[1]},${buf[2]}])`;
   }
 
   // Also check if we clicked near a chibi (simple 2D screen-space check)
@@ -656,6 +661,12 @@ function onResize(): void {
 }
 
 // ---------------------------------------------------------------------------
+// DOM sync performance measurement (④)
+// ---------------------------------------------------------------------------
+let domSyncTotalMs = 0;
+let domSyncSamples = 0;
+
+// ---------------------------------------------------------------------------
 // Render loop
 // ---------------------------------------------------------------------------
 function renderLoop(now: number): void {
@@ -664,13 +675,17 @@ function renderLoop(now: number): void {
   // Sync billboards (⑤ PNG billboard)
   updateInstancedMesh();
 
-  // Sync DOM bubbles (④)
+  // Sync DOM bubbles (④) — measure ms cost
+  const t0 = performance.now();
   syncBubbles();
+  const domMs = performance.now() - t0;
+  domSyncTotalMs += domMs;
+  domSyncSamples++;
 
   // Render
   renderer.render(scene, camera);
 
-  // FPS
+  // FPS & stats HUD
   frameCount++;
   const elapsed = now - lastFpsTime;
   if (elapsed >= 1000) {
@@ -683,10 +698,20 @@ function renderLoop(now: number): void {
     const info = renderer.info;
     const statsEl = document.getElementById('stats')!;
     const avgEl = document.getElementById('avg')!;
+
+    // draw calls: terrain(1) + water(1) + shadow InstancedMesh(1) + sprite InstancedMesh(1)
     statsEl.textContent =
       `FPS: ${fps.toFixed(1)} | drawCalls: ${info.render.calls} | tris: ${info.render.triangles.toLocaleString()}`;
-    avgEl.textContent = `10s avg FPS: ${avg.toFixed(1)} | chibis: ${CHIBI_COUNT} (1 draw call = InstancedMesh)`;
 
+    const avgDomMs = domSyncSamples > 0 ? domSyncTotalMs / domSyncSamples : 0;
+    const frameBudget = 1000 / 60;
+    const domPct = ((avgDomMs / frameBudget) * 100).toFixed(1);
+    // ④ DOM sync ms cost (should be < 5% of 16.7ms frame budget)
+    avgEl.textContent =
+      `10s avg: ${avg.toFixed(1)}fps | DOM sync: ${avgDomMs.toFixed(2)}ms avg (${domPct}% of frame) | ④`;
+
+    domSyncTotalMs = 0;
+    domSyncSamples = 0;
     frameCount = 0;
     lastFpsTime = now;
     renderer.info.reset();
