@@ -189,6 +189,7 @@ let camera: THREE.PerspectiveCamera;
 let terrain: TileDef[][] = [];
 let terrainMesh: THREE.Mesh;
 let instancedMesh: THREE.InstancedMesh;
+let shadowMesh: THREE.InstancedMesh;  // blob shadow layer
 let currentMode: Difficulty = 'beginner';
 
 // Chibi positions (world coords, flat 2D — sim never uses Z)
@@ -290,10 +291,9 @@ function createPickMesh(tiles: TileDef[][]): THREE.Mesh {
 // Instanced billboards (② InstancedMesh 200 sprites in 1 draw call)
 // ---------------------------------------------------------------------------
 function buildInstancedMesh(): THREE.InstancedMesh {
-  // Plane geometry for billboard quad: 64×64 world units
-  const geo = new THREE.PlaneGeometry(64, 64);
+  // Billboard quad: 64w × 80h world units (matches ~2.2 head ratio)
+  const geo = new THREE.PlaneGeometry(64, 80);
   const loader = new THREE.TextureLoader();
-  // Use the idle pose (relative to the HTML file location)
   // Vite dev: public/ is served at root regardless of base setting
   const tex = loader.load('/chibiwafu/01_normal.png');
   tex.magFilter = THREE.NearestFilter;
@@ -302,6 +302,21 @@ function buildInstancedMesh(): THREE.InstancedMesh {
     transparent: true,
     alphaTest: 0.1,
     side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.InstancedMesh(geo, mat, CHIBI_COUNT);
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  return mesh;
+}
+
+function buildShadowMesh(): THREE.InstancedMesh {
+  // Blob shadow: flat circle on the ground, separate InstancedMesh (1 extra draw call)
+  const geo = new THREE.CircleGeometry(22, 8);
+  geo.rotateX(-Math.PI / 2);  // lie flat on XZ plane
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    transparent: true,
+    opacity: 0.25,
+    depthWrite: false,
   });
   const mesh = new THREE.InstancedMesh(geo, mat, CHIBI_COUNT);
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -330,7 +345,7 @@ function placeChibisRandomly(tiles: TileDef[][]): void {
 }
 
 const _dummy = new THREE.Object3D();
-const _up = new THREE.Vector3(0, 1, 0);
+const _dummy2 = new THREE.Object3D();
 
 function updateInstancedMesh(): void {
   for (let i = 0; i < CHIBI_COUNT; i++) {
@@ -339,24 +354,31 @@ function updateInstancedMesh(): void {
     const row = Math.floor(c.y / TILE_SIZE);
     const t = terrain[row]?.[col] ?? { elev: 0, water: false };
     const elevY = t.water ? 0 : t.elev * 2;
+    const wx = c.x - WORLD_W / 2;
+    const wz = c.y - WORLD_H / 2;
 
-    // World pos: x = world x, y = elev + half-height, z = world y (depth)
-    _dummy.position.set(c.x - WORLD_W / 2, elevY + 40, c.y - WORLD_H / 2);
+    // Billboard sprite: position at terrain surface + half-height offset
+    _dummy.position.set(wx, elevY + 42, wz);
 
-    // Billboard: always face camera (Y-axis billboard)
-    // For fixed-camera prototype, face the camera direction in XZ plane
+    // Y-axis billboard: rotate to face camera in XZ plane
     const toCam = new THREE.Vector3().subVectors(camera.position, _dummy.position);
     toCam.y = 0;
     if (toCam.lengthSq() > 0.001) {
       _dummy.rotation.y = Math.atan2(toCam.x, toCam.z);
     }
-
-    // Flip by scaling X
     _dummy.scale.set(c.flip ? -1 : 1, 1, 1);
     _dummy.updateMatrix();
     instancedMesh.setMatrixAt(i, _dummy.matrix);
+
+    // Blob shadow: flat circle at terrain surface, slightly above to avoid z-fight
+    _dummy2.position.set(wx, elevY + 0.5, wz);
+    _dummy2.rotation.set(0, 0, 0);
+    _dummy2.scale.set(1, 1, 1);
+    _dummy2.updateMatrix();
+    shadowMesh.setMatrixAt(i, _dummy2.matrix);
   }
   instancedMesh.instanceMatrix.needsUpdate = true;
+  shadowMesh.instanceMatrix.needsUpdate = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -499,6 +521,7 @@ function rebuild(mode: Difficulty): void {
   // Remove old meshes
   if (terrainMesh) scene.remove(terrainMesh);
   if (instancedMesh) scene.remove(instancedMesh);
+  if (shadowMesh) scene.remove(shadowMesh);
   if (pickMesh) pickScene.remove(pickMesh);
 
   // Terrain mesh
@@ -509,7 +532,9 @@ function rebuild(mode: Difficulty): void {
   pickMesh = createPickMesh(terrain);
   pickScene.add(pickMesh);
 
-  // Chibi instances
+  // Chibi sprites + blob shadows (② InstancedMesh — sprite layer + shadow layer)
+  shadowMesh = buildShadowMesh();
+  scene.add(shadowMesh);
   instancedMesh = buildInstancedMesh();
   scene.add(instancedMesh);
   placeChibisRandomly(terrain);
