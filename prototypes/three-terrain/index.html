@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>くそざこ村 Σ-4-proto — Three.js Terrain</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #111; overflow: hidden; font-family: monospace; }
+    #canvas-container { position: fixed; inset: 0; }
+    #ui {
+      position: fixed; top: 12px; left: 12px; z-index: 10;
+      color: #fff; background: rgba(0,0,0,0.6); padding: 10px 14px;
+      border-radius: 6px; font-size: 13px; line-height: 1.7;
+      pointer-events: none;
+    }
+    #mode-bar {
+      position: fixed; top: 12px; right: 12px; z-index: 10;
+      display: flex; gap: 8px;
+    }
+    #mode-bar button {
+      background: rgba(0,0,0,0.7); color: #fff; border: 1px solid #555;
+      padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px;
+    }
+    #mode-bar button.active { background: #2a6; border-color: #4c8; }
+    #bubbles { position: fixed; inset: 0; pointer-events: none; z-index: 20; }
+    .bubble {
+      position: absolute; background: rgba(255,255,255,0.92); color: #222;
+      border-radius: 10px; padding: 3px 8px; font-size: 11px; white-space: nowrap;
+      transform: translate(-50%, -100%); pointer-events: none;
+      border: 1px solid #bbb;
+    }
+    #pick-log {
+      position: fixed; bottom: 12px; left: 12px; z-index: 10;
+      color: #0f0; background: rgba(0,0,0,0.6); padding: 8px 12px;
+      border-radius: 6px; font-size: 12px; max-width: 340px;
+    }
+    #zoom-bar {
+      position: fixed; bottom: 12px; right: 12px; z-index: 10;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    #zoom-bar button {
+      background: rgba(0,0,0,0.7); color: #fff; border: 1px solid #555;
+      padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="ui">
+    <div id="stats">FPS: -- | frame: --ms | drawCalls: --</div>
+    <div id="avg">10s avg FPS: --</div>
+    <div id="terrain-mode">地形: beginner</div>
+    <div style="margin-top:4px;font-size:11px;color:#aaa">
+      ① PlaneGeometry 60fps　② InstancedMesh 1 draw call<br>
+      ③ GPU picking (click)　④ DOM bubble sync (見えてる)<br>
+      ⑤ PNG billboard 馴染み（目視）
+    </div>
+  </div>
+  <div id="mode-bar">
+    <button id="btn-beginner" class="active" onclick="window.__setMode('beginner')">beginner</button>
+    <button id="btn-standard" onclick="window.__setMode('standard')">standard</button>
+    <button id="btn-hell" onclick="window.__setMode('hell')">hell</button>
+    <button id="btn-screenshot" onclick="window.__screenshot()">📷</button>
+  </div>
+  <div id="bubbles"></div>
+  <div id="pick-log">click terrain or chibi to pick<br>(③ GPU picking test)</div>
+  <div id="zoom-bar">
+    <button onclick="window.__zoom(1)">＋</button>
+    <button onclick="window.__zoom(-1)">－</button>
+  </div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
