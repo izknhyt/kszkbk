@@ -295,36 +295,31 @@ Plan agent 分析による Top 5 決定事項。迷ったらここに戻る。
 ### ブランチ運用（現時点のトポロジー）
 
 ```
-origin/claude/idle-village-game-7IfPd       ← 事実上の main（remote HEAD）
-├─ claude/review-progress-XaRZT             ← ⚠️ インフラ並行作業（Ω-6 / Ω-7 P2/P3）
-│
-└─ claude/evaluate-3d-topdown-view-PMH23    ← 3D 化路線の起点（CLAUDE.md v2 + agent）
-    ├─ claude/sigma-0-cleanup               ← Σ-0 掃除（未着手）
-    └─ claude/sigma-1-z-physics             ← Σ-1 z 物理（未着手）
+origin/claude/idle-village-game-7IfPd       ← 本流（Σ-0/1/2/2.5/3 + Ω-6/7 + docs 全部入り）
+├─ claude/sigma-4-proto                     ← Σ-4 本実装の参照（捨てプロト、検証済み GO）
+└─ claude/sigma-4-main                      ← Σ-4 本実装中（着手後に作成）
 ```
 
-**merge 順序（3D 路線優先方針）**：
-1. `evaluate-3d` → `idle-village` に merge（CLAUDE.md 統合済みなので衝突しない）
-2. `sigma-0` 完了 → `idle-village` に merge
-3. `sigma-1` 完了 → `idle-village` に rebase & merge
-4. Σ-2, Σ-3, Σ-4-proto, Σ-4 を順次
-5. Σ-4 完走後に `review-progress` を rebase & merge（Ω-6/7 を正式統合）
-6. Ω 系の残タスクへ
+**整理済み状況（2026-04-21）**：Σ-0〜Σ-3 + Σ-2.5 + Ω-6/7 + character-image-brainstorm
+を全て本流 `idle-village` に merge 済み。以降の merge 済みブランチは削除して
+本流 1 本 + Σ-4 系 2 本に絞った。
 
-**並行作業の注意**：
-- `sigma-1` の z 物理は `types.ts` の `Flight` 型を触る。`review-progress` も `types.ts` に `FeatureKind` 6 種と `DeathCauseId` 2 種を追加済 → **rebase 時に軽い衝突あり得るが別フィールド追加なので統合容易**
-- `sigma-0` の landmarks 削除は `world.ts` / `chats.ts` / `deaths.ts` を触る。`review-progress` も `world.ts` / `deaths.ts` を触るが**別領域（電力・生産チェイン系 vs POI 系）** で衝突は軽微
+**運用ルール**：
+- 日常プレイ・開発は `idle-village` だけで OK（pull 一本で最新）
+- 新フェーズ実装時は `claude/sigma-X-*` ブランチを `idle-village` から切る
+- 実装完了後に本流へ merge → 作業ブランチは削除
+- Σ-4 本実装が終わったら `sigma-4-proto` も削除予定
 
 ## 削除予定（Σ-0 掃除パスで実行）
 
 | 対象 | 理由 |
 |---|---|
-| `src/sim/landmarks.ts` 全体 | procedural 地形に移行すると固定座標は破綻、player-built building で代替可 |
-| `WorldState.landmarks` フィールド + セーブ項目 | 上に同じ、save version +1 |
-| `Chibiwafu.targetLandmarkId` + `pickLandmarkTarget` in chibiwafu.ts | wander ロジックから POI 参照を除去 |
-| `drawLandmark` + `landmarkLayer` in stage.ts | 描画系 |
+| ~~`src/sim/landmarks.ts` 全体~~ | ✅ Σ-0 で削除済み |
+| ~~`WorldState.landmarks` フィールド + セーブ項目~~ | ✅ Σ-0 で削除済み |
+| ~~`Chibiwafu.targetLandmarkId` + `pickLandmarkTarget` in chibiwafu.ts~~ | ✅ Σ-0 で削除済み |
+| ~~`drawLandmark` + `landmarkLayer` in stage.ts~~ | ✅ Σ-0 で削除済み |
 | 哲学石特殊挙動 (world.ts 1769-1785) | カルト儀式（採用済み⑥）に機能移転 |
-| `chats.ts` の `landmark_*` 6 エントリ | - |
+| ~~`chats.ts` の `landmark_*` 6 エントリ~~ | ✅ Σ-0 で削除済み |
 | `public/mockup/background.png` (3.5MB) | 未参照、Ω-2-b で廃止済みの残骸 |
 
 **ニュアンス保持で rename 残し**：
