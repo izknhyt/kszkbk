@@ -23,15 +23,21 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 
 ## 発注運用フロー
 
+詳細手順は `50_prompt_templates.md § 7`（キャラ別）を参照。概要：
+
 ```
-1. 欲しいアセットを決める（例: walk_lean）
-2. 50_prompt_templates.md からマスタープロンプトをコピー
-3. [POSE] 部分を 30_pose_catalog.md から該当ポーズの記述に差し替え
-4. 10 + 20 の要点をプロンプト先頭に貼る
-5. 既存 01_normal.png を style reference として添付
-6. ChatGPT に投入
-7. 納品物を 90_qa_checklist.md で検品
-8. NG 項目あれば該当項目のみ追加指示で再発注
+1. 欲しいアセットを決める（例: 10_walk_lean）
+2. 対象キャラを決める（ちびわふ or フラナ）
+3. 50_prompt_templates.md § 1（ちびわふ）または § 2（フラナ）のプロンプトをコピー
+4. [POSE_DESCRIPTION] を 30_pose_catalog.md から差し替え
+   ※ フラナ発注時は description 中の "Chibiwafu" → "Furana" に全置換
+5. 対応するリファレンス画像を添付：
+   - ちびわふ: public/chibiwafu/01_normal.png
+   - フラナ:  public/furana/01_normal.png
+6. ChatGPT（または Codex Desktop）に投入
+7. 納品物を 90_qa_checklist.md § B-1+B-2（ちびわふ）/ B-2+B-3（フラナ）で検品
+8. NG 項目あれば 50_prompt_templates.md § 6 のリトライ指示を送る
+9. OK なら public/{chibiwafu|furana}/NN_poseName.png に保存
 ```
 
 ---
@@ -50,3 +56,6 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 - v0.2 キャラ仕様 v0.3 への波及修正：
   - 「スタイ」→「おむつ」、「尻尾色」→「尻尾根元リボン」に用語訂正
   - 他 doc の v0.3 / v0.2 改訂に合わせて一貫性確保
+- v0.3 発注運用フローをキャラ別に書き直し（50_prompt_templates.md § 7 へ委譲）：
+  - リファレンス画像がちびわふ/フラナで分岐することを明記
+  - 「Chibiwafu → Furana」の文字列置換手順を明記

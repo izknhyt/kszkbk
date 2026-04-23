@@ -304,15 +304,33 @@ Redraw with the diaper on the lower body and the ribbon at the tail base.
 
 ## 7. 発注ワークフロー
 
+### 7.1 ちびわふ発注
+
 ```
 1. 30_pose_catalog.md から発注したいポーズを選ぶ
-2. このファイル § 1 のプロンプトをコピー
-3. [POSE_DESCRIPTION] にポーズの描画指示を貼り付け
+2. このファイル § 1 のプロンプトをコピー（ちびわふ用 CHARACTER 入り）
+3. [POSE_DESCRIPTION] に 30_pose_catalog.md の描画指示を貼り付け
 4. public/chibiwafu/01_normal.png を添付
 5. ChatGPT に送信
-6. 納品物を 90_qa_checklist.md でチェック
-7. NG があれば § 6 のリトライ指示を送る
+6. 納品物を 90_qa_checklist.md § B-1 + B-2 でチェック
+7. NG があれば § 6.1-6.5, 6.7 のリトライ指示を送る
 8. OK なら public/chibiwafu/NN_poseName.png で保存
+```
+
+### 7.2 フラナ発注
+
+```
+1. 30_pose_catalog.md から発注したいポーズを選ぶ
+   （ただしフラナで省略するポーズは除外：14/15/16/19）
+2. このファイル § 1 のプロンプトをコピーし、CHARACTER セクションを
+   § 2 のフラナ用 CHARACTER で全置換
+3. [POSE_DESCRIPTION] に 30_pose_catalog.md の描画指示を貼り付け、
+   "Chibiwafu" → "Furana"、"chibiwafu's" → "furana's" に全置換
+4. public/furana/01_normal.png を添付（ちびわふの方ではない）
+5. ChatGPT に送信
+6. 納品物を 90_qa_checklist.md § B-2 + B-3 でチェック
+7. NG があれば § 6.1-6.4, 6.6, 6.7 のリトライ指示を送る
+8. OK なら public/furana/NN_poseName.png で保存
 ```
 
 ---
@@ -331,3 +349,8 @@ Redraw with the diaper on the lower body and the ribbon at the tail base.
     凛表情 / 関節なし などに更新
   - § 6.5 固定要素リトライ指示を diaper / tail ribbon 前提に更新、
     § 6.6 フラナ版リトライ指示を新設、§ 6.7 用語混同リトライ指示を新設
+- v0.3 2nd レビューで発見した抜けを修正：
+  - § 2 フラナ CHARACTER の「1.8x」を単独発注時は適用外と明記
+  - § 7 ワークフローを § 7.1 ちびわふ / § 7.2 フラナ にキャラ別分岐
+  - リファレンス画像の分岐（chibiwafu/01_normal.png vs furana/01_normal.png）明示
+  - 所有格 "chibiwafu's → furana's" の置換ルール追加（§7.2 step 3）
