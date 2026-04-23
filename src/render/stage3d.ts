@@ -430,9 +430,24 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   host.appendChild(bubbleOverlay);
   const bubbleDivs = new Map<number, HTMLDivElement>();
 
-  // --- terraform / stability 一時メッシュ ---
-  let tfMeshes: THREE.Mesh[] = [];
-  let stMeshes: THREE.Mesh[] = [];
+  // --- terraform / stability — InstancedMesh（毎フレーム dispose を廃止）---
+  const _tfGeo = new THREE.BoxGeometry(TERRAIN_TILE_SIZE*0.88,4,TERRAIN_TILE_SIZE*0.88);
+  const tfRaiseIM = new THREE.InstancedMesh(_tfGeo,
+    new THREE.MeshBasicMaterial({color:0xc89650,transparent:true,opacity:0.5}), 50);
+  const tfLowerIM = new THREE.InstancedMesh(_tfGeo,
+    new THREE.MeshBasicMaterial({color:0x1e1e1e,transparent:true,opacity:0.5}), 50);
+  tfRaiseIM.count=0; tfLowerIM.count=0;
+  fxGrp.add(tfRaiseIM,tfLowerIM);
+
+  const _stGeo = new THREE.BoxGeometry(TERRAIN_TILE_SIZE*0.94,3,TERRAIN_TILE_SIZE*0.94);
+  const stWarnIM = new THREE.InstancedMesh(_stGeo,
+    new THREE.MeshBasicMaterial({color:0xff6030,transparent:true,opacity:0.25}), T_COLS*T_ROWS);
+  const stCritIM = new THREE.InstancedMesh(_stGeo,
+    new THREE.MeshBasicMaterial({color:0xff2020,transparent:true,opacity:0.40}), T_COLS*T_ROWS);
+  stWarnIM.count=0; stCritIM.count=0;
+  fxGrp.add(stWarnIM,stCritIM);
+
+  const _imDummy = new THREE.Object3D();
 
   // ============================================================
   // カメラ状態
@@ -584,7 +599,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const keys=new Set<string>();
   document.addEventListener('keydown',e=>keys.add(e.key));
   document.addEventListener('keyup',  e=>keys.delete(e.key));
-  document.addEventListener('keydown',e=>{ if(e.key==='r'||e.key==='R') resetCamera(); });
+  // 'r'/'R' によるカメラリセットは main.ts 側で処理（二重発火を防ぐため stage3d からは削除）
 
   function applyKeyPan(dt:number){
     const spd=400/zoom;
@@ -782,36 +797,35 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
     }
 
-    // ---- Terraform オーバーレイ ----
-    tfMeshes.forEach(m=>{fxGrp.remove(m); m.geometry.dispose();});
-    tfMeshes=[];
+    // ---- Terraform オーバーレイ（InstancedMesh）----
+    let tfRI=0, tfLI=0;
     for(const job of world.terraformJobs){
       const wx=(job.tx+0.5)*TERRAIN_TILE_SIZE, wz=(job.ty+0.5)*TERRAIN_TILE_SIZE;
-      const wy=elevAt(world.terrain,wx,wz);
-      const m=new THREE.Mesh(
-        new THREE.BoxGeometry(TERRAIN_TILE_SIZE*0.88,4,TERRAIN_TILE_SIZE*0.88),
-        new THREE.MeshBasicMaterial({color:job.target==='raise'?0xc89650:0x1e1e1e,transparent:true,opacity:0.5}),
-      );
-      m.position.set(wx,wy+2,wz); fxGrp.add(m); tfMeshes.push(m);
+      _imDummy.position.set(wx,elevAt(world.terrain,wx,wz)+2,wz); _imDummy.updateMatrix();
+      if(job.target==='raise') tfRaiseIM.setMatrixAt(tfRI++,_imDummy.matrix);
+      else tfLowerIM.setMatrixAt(tfLI++,_imDummy.matrix);
     }
+    tfRaiseIM.count=tfRI; tfLowerIM.count=tfLI;
+    tfRaiseIM.instanceMatrix.needsUpdate=true;
+    tfLowerIM.instanceMatrix.needsUpdate=true;
 
-    // ---- stability 警告（3フレームごと）----
+    // ---- stability 警告（3フレームごと、InstancedMesh）----
     if(frameCount%3===0){
-      stMeshes.forEach(m=>{fxGrp.remove(m); m.geometry.dispose();}); stMeshes=[];
       const pS=Math.sin(world.timeSec*3)*0.5+0.5, pF=Math.sin(world.timeSec*5)*0.5+0.5;
+      (stWarnIM.material as THREE.MeshBasicMaterial).opacity=0.18+pS*0.15;
+      (stCritIM.material as THREE.MeshBasicMaterial).opacity=0.30+pF*0.20;
+      let warnIdx=0, critIdx=0;
       for(let r=0;r<world.terrain.length;r++) for(let c=0;c<world.terrain[r]!.length;c++){
         const tile=world.terrain[r]![c]!;
         if(tile.stability>=0.5) continue;
-        const wx=(c+0.5)*TERRAIN_TILE_SIZE, wz=(r+0.5)*TERRAIN_TILE_SIZE;
-        const wy=tile.elev*ELEV_SCALE;
-        const col2=tile.stability<0.3?0xff2020:0xff6030;
-        const alpha=tile.stability<0.3?0.3+pF*0.2:0.18+pS*0.15;
-        const m=new THREE.Mesh(
-          new THREE.BoxGeometry(TERRAIN_TILE_SIZE*0.94,3,TERRAIN_TILE_SIZE*0.94),
-          new THREE.MeshBasicMaterial({color:col2,transparent:true,opacity:alpha}),
-        );
-        m.position.set(wx,wy+2,wz); fxGrp.add(m); stMeshes.push(m);
+        _imDummy.position.set((c+0.5)*TERRAIN_TILE_SIZE, tile.elev*ELEV_SCALE+2, (r+0.5)*TERRAIN_TILE_SIZE);
+        _imDummy.updateMatrix();
+        if(tile.stability<0.3) stCritIM.setMatrixAt(critIdx++,_imDummy.matrix);
+        else stWarnIM.setMatrixAt(warnIdx++,_imDummy.matrix);
       }
+      stWarnIM.count=warnIdx; stCritIM.count=critIdx;
+      stWarnIM.instanceMatrix.needsUpdate=true;
+      stCritIM.instanceMatrix.needsUpdate=true;
     }
 
     // ---- Features（3フレームごと）----
@@ -981,6 +995,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   }
 
   // app アダプタ：main.ts が canvas イベントと renderer.on('resize') を使う
+  // TODO: 将来 StageHandle から canvas/onResize を直接生やして app フィールドを捨てる
+  //       その時点でこの as unknown as Application キャストを除去できる
   const resizeCbs: Array<(w:number,h:number)=>void> = [];
   window.addEventListener('resize',()=>{
     const w=renderer.domElement.clientWidth, h=renderer.domElement.clientHeight;
