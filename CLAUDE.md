@@ -13,7 +13,7 @@
 
 ## 技術スタック
 
-- Vite 5 / TypeScript 5.4 / PixiJS 8（ESM）
+- Vite 5 / TypeScript 5.4 / Three.js 0.184（ESM）
 - HUD は素の HTML/CSS、React 等は使わない
 - 保存は localStorage（スロット 3 つ）
 - テスト：`scripts/sim.ts` が headless で 60 分シミュレート
@@ -56,8 +56,7 @@ src/
       generators.ts      plains/peninsula/island 3 地形生成器（Σ-3）
       query.ts           isSeaAt / findDryTile / setQueryTerrain（Σ-3、循環 import 回避）
   render/
-    stage.ts             PixiJS 2D 描画（カメラ、気象ティント、日時計、Σ-2.5 タイル可視化、1,800+ 行）
-    sprites.ts           スプライトシート読込 & 白背景 flood-fill 透過
+    stage3d.ts           Three.js 3D 描画（地形メッシュ、ビルボードキャラ、カメラ、気象ティント、日時計、崖線、土砂崩れ煙、建物 Lv、約 1,060 行）
     ui.ts                HUD 更新、ビルドパネル、統計表示（power/brick/wool/cloth/soil 含む）
   meta/
     save.ts              3 スロット save/load、version 12（Σ-2 RLE 地形圧縮、Σ-3 terrainSeed）
@@ -217,15 +216,19 @@ public/
 - stability <0.5 = 橙パルス 3Hz、<0.3 = 赤パルス 5Hz
 - terraform ジョブに半透明色オーバーレイ + 橙の進捗リング
 
-### Σ-4 Three.js 3D レンダラー（実装中、`claude/sigma-4-main-xhp2Y`）
-- `src/render/stage3d.ts`（880 行）新設。stage.ts と同じ `StageHandle` を Three.js で実装。
-- `VITE_RENDER=3d npm run dev` で切替。デフォルトは Pixi.js のまま（parity 確認後 Pixi 削除）。
-- **座標系**：world(x,y) → Three.js(x, elev×5, y)。カメラは `(camX, h, camZ+h)` から `(camX, 0, camZ)` を向く 45° 俯瞰。
-- **地形**：100×57 タイル → 101×58 頂点 PlaneGeometry（隣接タイル平均で平滑化）、MeshToonMaterial + vertexColors
-- **スプライト**：既存 9 ポーズ PNG を Y 軸ビルボード（PlaneGeometry、+Z 向き固定）。floodFillAlpha で白背景除去。
-- **Raycaster picking**：pointerdown/contextmenu でスプライトメッシュに直接当てて HitTarget を返す。外れたら CPU hitFn フォールバック。
-- **昼夜・天候**：dayPhase/weather.kind ごとに AmbientLight/DirectionalLight 色温度を切替。
+### Σ-4 Three.js 3D レンダラー（本流統合済み）
+- `src/render/stage3d.ts`（約 1060 行）が唯一のステージ実装。Pixi `stage.ts` は Σ-4-f で削除済み。
+- **座標系**：world(x,y) → Three.js(x, elev×5, y)。カメラは `(camX, h, camZ+h)` から `(camX, 0, camZ)` を向く fov=20° / 45° 俯瞰固定（回転封印）。
+- **地形**：100×57 タイル → 101×58 頂点 PlaneGeometry。頂点 elev は隣接 4 タイル平均で平滑化（`buildTerrainGeo`）。MeshToonMaterial + vertexColors + Toon gradientMap。
+- **elevAt() は bilinear**：メッシュ頂点と同じ平滑化式で標高を返す。タイル中心 elev をそのまま返すと埋もれ / 浮きが起きるため必須。
+- **スプライト**：既存 9 ポーズ PNG を Y 軸ビルボード（PlaneGeometry、+Z 向き固定、左右反転で faceLeft）。floodFillAlpha で白背景除去。MeshBasicMaterial + 手動 color tint で夜間 / 天候に反応。
+- **オオカミ / 死体 / feature / obstacle** も全て sprite billboard。建物のみ BoxGeometry + ConeGeometry + Lv 表示 CanvasTexture。
+- **Raycaster picking**：pointerdown/contextmenu でスプライトメッシュに直接当てて HitTarget を返す。外れたら CPU hitFn フォールバック。ドラッグ位置（`screenToWorld`）も terrainMesh への raycast で高台でもずれない。
+- **InstancedMesh 最適化**：terraform オーバーレイ（raise/lower）と stability 警告（warn/crit）は使い回し、毎フレーム dispose なし。
+- **崖線**：隣接 elev 差 ≥15 の境界を黒 LineSegments で描画。土砂崩れ時は前フレーム elev 比較で茶色パーティクル煙（0.5s fade）。
+- **昼夜・天候**：dayPhase/weather.kind ごとに AmbientLight/DirectionalLight + sky + fog + スプライト手動 tint を切替。
 - **吹き出し**：DOM overlay + `camera.project()` で worldToScreen 変換、`translate3d` で追従。
+- **StageHandle インターフェース**は stage3d.ts 内で定義。`canvas: HTMLCanvasElement` + `onResize(cb)` を直接公開（旧 Pixi `Application` shim は撤廃）。
 
 ### Ω-6 電力（インフラ並行系、本流統合済）
 - 発電所 `generator`：ちびわふが近くでペダル→ power 生産
@@ -296,9 +299,23 @@ https://claude.ai/code/session_XXXXXX
 **追加された FeatureKind**：`generator / streetlamp / powerline / kiln / pasture / loom`
 **追加された死因**：`electrocution / thunder_blast`
 
-### ロードマップ v2（地形・3D 化）【現在のメイン路線 / 最優先】
+#### ✅ Σ-4 Three.js 3D レンダラー本実装（2026-04-23 に本流 merge）
 
-**方針**：インフラ路線（Ω-6/7）は既に本流統合済。残りは 3D 路線 Σ-4 本実装に集中。
+| Phase | 内容 | Commit |
+|---|---|---|
+| Σ-4-a/b/c/d | 地形メッシュ + キャラ billboard + world オブジェクト + 3D FX | 8985ab9 |
+| Σ-4-e | Raycaster ベースの GPU ピッキング | 3f39e28 |
+| Σ-4-f | VITE_RENDER=3d フィーチャーフラグ + vite-env.d.ts | 1bfc26e |
+| レビュー修正 | キャラ夜暗転 / オオカミ billboard / 崖線 | 7ab9548 |
+| レビュー修正 | 土砂崩れ煙 / 建物 Lv / 難度カメラ | 3dc921a |
+| レビュー修正 | InstancedMesh / キー重複削除 / TODO | 964c669 |
+| merge | sigma-4-main-xhp2Y → idle-village へ統合 | c252374 |
+| render fix | elevAt bilinear / stwXZ raycast / 夜ティント漏れ | 3fa80c9 |
+| Σ-4-f 完了 | stage.ts + sprites.ts 削除、Pixi 依存撤去、StageHandle 移設 | （本コミット） |
+
+### ロードマップ v2（地形・3D 化）【完了、次は新フェーズへ】
+
+**方針**：インフラ路線（Ω-6/7）統合済、3D 路線（Σ-0〜Σ-4）も全て完了。次は Ω 継続 or Σ-5 以降の新アイデア。
 **ビジョン**：巨人のドシン × ピクミン × Don't Starve × Elona。なめらかな 3D 地形で
 神様が盛り土切り土を指示、ちびわふ 200+ がわちゃわちゃ動き回り、**改変がズボラで土砂崩れ事故で全滅**。
 **マインクラフト要素**＝**ブロック見た目ではなく破壊/創造の自由度**（既に Σ-2 で実装済み）。
@@ -311,7 +328,7 @@ https://claude.ai/code/session_XXXXXX
 | **Σ-3** | **3 地形 procedural 生成**：beginner=平野、standard=半島、hell=くそざこ島。ハイトマップ＋海マスクをシードで生成。既存 `DRY_Y_LIMIT` 一律泥川の前提を破棄 | 3 日 | ✅ 完了 |
 | **Σ-2.5** | **地形可視化 + 素材バランス**（Σ-3 後追い）：stage.ts に標高色分け + 崖線 + terraform ジョブ UI + stability 警告パルスを追加。初期資源と建築コストを実プレイ向けに再調整。Σ-3 まででデータは生成されるが 2D 描画に出ないので、Σ-4 Three.js を待たず 2D Pixi のまま見せて遊べる状態にする | 2-3 日 | ✅ 完了 |
 | **Σ-4-proto** | **Three.js 検証プロト**（`prototypes/three-terrain/`、`origin/claude/sigma-4-proto` 保管）。5 項目実測 GO | 1 週 | ✅ 完了（**fps=75 / drawCalls=5 / DOM sync=0.01ms (0.1%)**、5 項目全 GO） |
-| **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag `VITE_RENDER=3d` で `stage.ts` と並行、parity 達成後に Pixi 削除。elev×5 displace、45° 固定俯瞰、Y 軸ビルボード、盛り土切り土の 3D 反映、土砂崩れアニメ、わちゃわちゃキャラ（歩行 pose animation） | 2 週 | 🚧 実装中（`claude/sigma-4-main-xhp2Y`）|
+| **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag `VITE_RENDER=3d` で `stage.ts` と並行、parity 達成後に Pixi 削除。elev×5 displace、45° 固定俯瞰、Y 軸ビルボード、盛り土切り土の 3D 反映、土砂崩れアニメ、わちゃわちゃキャラ（歩行 pose animation） | 2 週 | ✅ 完了（Σ-4-a/b/c/d/e/f 全て本流統合、Pixi 削除済み）|
 
 ### ロードマップ v2 後の予定（Ω 系、Σ-4 完走後に再開）
 
@@ -364,20 +381,18 @@ Plan agent 分析による Top 5 決定事項。迷ったらここに戻る。
 ### ブランチ運用（現時点のトポロジー）
 
 ```
-origin/claude/idle-village-game-7IfPd       ← 本流（Σ-0/1/2/2.5/3 + Ω-6/7 + docs 全部入り）
-├─ claude/sigma-4-proto                     ← Σ-4 本実装の参照（捨てプロト、検証済み GO）
-└─ claude/sigma-4-main                      ← Σ-4 本実装中（着手後に作成）
+origin/claude/idle-village-game-7IfPd       ← 本流（Σ-0/1/2/2.5/3/4 + Ω-6/7 + docs 全部入り）
+└─ claude/character-image-brainstorm-rxHdJ  ← キャラアセット仕様書（docs/ v0.4 系、並行作業中）
 ```
 
-**整理済み状況（2026-04-21）**：Σ-0〜Σ-3 + Σ-2.5 + Ω-6/7 + character-image-brainstorm
-を全て本流 `idle-village` に merge 済み。以降の merge 済みブランチは削除して
-本流 1 本 + Σ-4 系 2 本に絞った。
+**整理済み状況（2026-04-23）**：Σ-4 本実装が完了して本流へ merge 済み。
+Pixi は完全削除、Three.js のみで動作。merge 済みブランチ（sigma-4-main-xhp2Y、
+sigma-4-proto）は削除済み。
 
 **運用ルール**：
 - 日常プレイ・開発は `idle-village` だけで OK（pull 一本で最新）
-- 新フェーズ実装時は `claude/sigma-X-*` ブランチを `idle-village` から切る
+- 新フェーズ実装時は `claude/<phase>-*` ブランチを `idle-village` から切る
 - 実装完了後に本流へ merge → 作業ブランチは削除
-- Σ-4 本実装が終わったら `sigma-4-proto` も削除予定
 
 ## 削除予定（Σ-0 掃除パスで実行）
 
@@ -406,16 +421,17 @@ origin/claude/idle-village-game-7IfPd       ← 本流（Σ-0/1/2/2.5/3 + Ω-6/7
 - **save v12**：terrain を RLE 圧縮で persist、terrainSeed も含む。v11 以下は ensurePlots で procedural 再生成
 - **Vite MPA 設定必須**：`vite.config.ts` に `appType: 'mpa'` がないと dev server が SPA fallback で root `index.html` を返し、`prototypes/three-terrain/` 等のサブページが見えない（Σ-4-proto 実機確認時に判明）。現在は設定済
 - **chibi death cause "fatigue_death"** は P1-C1 時点で ほぼ発火せず（hunger 死が先）、P2 で食料ある状態で初めて顕在化
-- **PixiJS の `const CONFIG = { ... } as const`**：リテラル型になるので `currentBoundsW: number = CONFIG.WORLD_W` のように明示型が必要
-- **`getElevation(x,y)` は関数ベース**：Σ-2 でタイル配列に置換予定。固定勾配なので現状「一定の坂」にしか見えない
-- **`DRY_Y_LIMIT = 1150` 南側一律泥川**：Σ-3 で 3 地形化すると前提崩壊、`hazards.ts` の mudriver/bridge/季節ゾーンも再設計対象
+- **Three.js の `elevAt` 実装**：メッシュ頂点と同じ「隣接 4 タイル平均」で bilinear 補間しないと、キャラ / feature の Y が地形表面と一致せず、周囲より低いタイルで埋もれ、高いタイルで浮く。新たに高度を使うコードを書くときは必ず `elevAt(wx, wy)` を使う
+- **Three.js `screenToWorld`**：`Plane(Y=0)` 交点ではなく `terrainMesh` への raycast を優先する。高台ではマウス位置と実メッシュ表面がズレるため、raycast しないとドラッグ位置が奥へワープする
+- **カメラ回転は封印**：Y 軸ビルボード前提が崩れるので `OrbitControls` など導入禁止。スプライトが横から見えてしまう
+- **`DRY_Y_LIMIT = 1150` 南側一律泥川**：Σ-3 で 3 地形化すると前提崩壊、`hazards.ts` の mudriver/bridge/季節ゾーンも再設計対象（`isSeaAt` に移行済、DRY_Y_LIMIT は legacy）
 
 ## よくある作業パターン
 
 ### 新機能追加
 
 1. `TodoWrite` でタスク分解（3-6 ステップ）
-2. types.ts に型追加 → sim/world.ts に状態フィールド追加 → 挙動関数 → render/stage.ts に描画 → render/ui.ts に HUD
+2. types.ts に型追加 → sim/world.ts に状態フィールド追加 → 挙動関数 → render/stage3d.ts に描画 → render/ui.ts に HUD
 3. `npx tsc --noEmit` で型チェック
 4. `npx tsx -e "..."` か `npx tsx scripts/sim.ts` でスモーク
 5. コミット（規約に従う）

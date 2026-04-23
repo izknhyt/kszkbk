@@ -1,6 +1,4 @@
-import { createStage as _createStage2d } from './render/stage';
-import { createStage as _createStage3d } from './render/stage3d';
-const createStage = import.meta.env.VITE_RENDER === '3d' ? _createStage3d : _createStage2d;
+import { createStage } from './render/stage3d';
 import { bindUI, refreshUI, type UICallbacks } from './render/ui';
 import {
   buildAt,
@@ -158,7 +156,7 @@ async function start() {
   }
 
   const stage = await createStage(host);
-  stage.app.renderer.on('resize', (w: number, h: number) => {
+  stage.onResize((w: number, h: number) => {
     stage.resize(w, h);
   });
 
@@ -279,7 +277,7 @@ async function start() {
   });
 
   // 空クリック → 建設 or 地形編集モード処理
-  stage.app.canvas.addEventListener('kszk-empty-click', (e) => {
+  stage.canvas.addEventListener('kszk-empty-click', (e) => {
     const detail = (e as CustomEvent).detail as { worldX: number; worldY: number };
     if (terraformMode) {
       const { tx, ty } = worldToTile(detail.worldX, detail.worldY);
@@ -376,7 +374,7 @@ async function start() {
   });
 
   // 右クリック → 情報モーダル（ちびわふ: life log、NPC: 名前/HP、死体: epitaph）
-  stage.app.canvas.addEventListener('kszk-inspect', (e) => {
+  stage.canvas.addEventListener('kszk-inspect', (e) => {
     const detail = (e as CustomEvent).detail as { target: HitTarget | null; clientX: number; clientY: number };
     if (detail.target?.kind === 'chibi') {
       const alive = world.chibis.find((c) => c.id === detail.target!.id);
@@ -397,7 +395,7 @@ async function start() {
   });
 
   // 左クリック（動かなかった場合）→ 殴る
-  stage.app.canvas.addEventListener('kszk-entity-punch', (e) => {
+  stage.canvas.addEventListener('kszk-entity-punch', (e) => {
     const detail = (e as CustomEvent).detail as { target: HitTarget };
     if (detail.target.kind === 'chibi') punchChibi(world, detail.target.id);
     else if (detail.target.kind === 'npc') punchNpc(world, detail.target.id as NpcId);
@@ -437,7 +435,7 @@ async function start() {
   }
 
   // ドラッグ中：対象をカーソル位置に移動 + 振り回しダメージ
-  stage.app.canvas.addEventListener('kszk-entity-drag', (e) => {
+  stage.canvas.addEventListener('kszk-entity-drag', (e) => {
     const detail = (e as CustomEvent).detail as { target: HitTarget; worldX: number; worldY: number };
     if (detail.target.kind === 'chibi') handleDragChibi(detail.target.id, detail.worldX, detail.worldY);
     else if (detail.target.kind === 'npc') handleDragNpc(detail.target.id as NpcId, detail.worldX, detail.worldY);
@@ -524,7 +522,7 @@ async function start() {
   }
 
   // ドロップ → カーソル速度をそのまま投射速度に。速くフリングすれば飛ぶ距離もスピードも増す。
-  stage.app.canvas.addEventListener('kszk-entity-drop', (e) => {
+  stage.canvas.addEventListener('kszk-entity-drop', (e) => {
     const detail = (e as CustomEvent).detail as { target: HitTarget; worldX: number; worldY: number };
     const { vx, vy } = dragSession && dragTargetsSame(dragSession.target, detail.target)
       ? computeThrowVelocity() : { vx: 0, vy: 0 };

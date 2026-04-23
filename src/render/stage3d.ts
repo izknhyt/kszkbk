@@ -1,5 +1,5 @@
 // Σ-4 Three.js 3D renderer — くそざこ村
-// stage.ts と同じ StageHandle を実装。VITE_RENDER=3d で切替。
+// Σ-4-f で旧 Pixi stage.ts を削除し本レンダラーが唯一のステージ実装になった。
 import * as THREE from 'three';
 import type { WorldState } from '../sim/world';
 import { POWERLINE_CONNECT_RADIUS, TERRAIN_TILE_SIZE } from '../sim/world';
@@ -7,7 +7,32 @@ import type { ChibiState, DayPhase, Difficulty, HitTarget, PlacedBuilding, Seaso
 import { NPC_DEFS, type NpcId } from '../sim/npcs';
 import { CONFIG } from '../config';
 import type { Bubble } from '../sim/bubbles';
-import type { CameraView, StageHandle } from './stage';
+
+// ============================================================
+// StageHandle インターフェース
+// Σ-4 以前は Pixi stage.ts で定義していたが Pixi 削除と同時にこちらへ移設。
+// app: Application の duck-type shim は廃止、canvas と onResize を直接公開。
+// ============================================================
+export interface CameraView {
+  x: number; y: number;
+  w: number; h: number;
+  scale: number;
+  bounds: { w: number; h: number };
+}
+
+export interface StageHandle {
+  canvas: HTMLCanvasElement;
+  onResize: (cb: (w: number, h: number) => void) => void;
+  resize: (w: number, h: number) => void;
+  draw: (world: WorldState) => void;
+  setSeason: (s: Season) => void;
+  resetCamera: () => void;
+  focusOn: (x: number, y: number, scale?: number) => void;
+  panCamera: (dx: number, dy: number) => void;
+  getCamera: () => CameraView;
+  screenToWorld: (cx: number, cy: number) => { x: number; y: number };
+  setHitTest: (fn: (wx: number, wy: number) => HitTarget | null) => void;
+}
 
 // ============================================================
 // 定数
@@ -1025,27 +1050,16 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     else focusOn(1280,700,0.85);
   }
 
-  // app アダプタ：main.ts が canvas イベントと renderer.on('resize') を使う
-  // TODO: 将来 StageHandle から canvas/onResize を直接生やして app フィールドを捨てる
-  //       その時点でこの as unknown as Application キャストを除去できる
+  // ウィンドウリサイズ配信（Σ-4-f 以降、Pixi app shim ではなく直接 StageHandle 提供）
   const resizeCbs: Array<(w:number,h:number)=>void> = [];
   window.addEventListener('resize',()=>{
     const w=renderer.domElement.clientWidth, h=renderer.domElement.clientHeight;
     resizeCbs.forEach(cb=>cb(w,h));
   });
-  const appAdapter = {
-    canvas: renderer.domElement as unknown as HTMLCanvasElement,
-    renderer: {
-      on(ev:string, cb:(w:number,h:number)=>void){ if(ev==='resize') resizeCbs.push(cb); },
-      get width(){ return renderer.domElement.clientWidth; },
-      get height(){ return renderer.domElement.clientHeight; },
-    },
-  };
-
-  // pickTarget() が Raycaster でメッシュ直撃し、外れたら CPU hitFn に委ねる（Σ-4-e）
 
   return {
-    app: appAdapter as unknown as import('pixi.js').Application,
+    canvas: renderer.domElement,
+    onResize: (cb)=>{ resizeCbs.push(cb); },
     resize,
     draw,
     setSeason(_s: Season){ /* 季節ごとの色変更は draw() 内の weather/dayPhase で対応 */ },
