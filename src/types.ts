@@ -11,7 +11,9 @@ export type ChibiState =
   // --- P5: 生活ステート ---------------------------------------------------
   | 'chatting'   // すれ違い立ち話（移動停止）
   | 'staring'    // 浮世離れが空を見上げる
-  | 'eating';    // 飲食ステート
+  | 'eating'     // 飲食ステート
+  // --- Σ-5-d: 逃走ステート -----------------------------------------------
+  | 'scared';    // 狼を検知して逃げている
 
 export interface Vec2 {
   x: number;
@@ -153,7 +155,9 @@ export type DeathCauseId =
   | 'river_swept'            // 激流に流されて溺死
   // --- Σ-2-c 地形崩落 追加 -------------------------------------------------
   | 'landslide_crush'        // 土砂崩れで転倒打撲死
-  | 'buried_alive';          // 土砂崩れで生き埋め窒息死
+  | 'buried_alive'           // 土砂崩れで生き埋め窒息死
+  // --- Σ-5-d 狼 flee 追加 --------------------------------------------------
+  | 'fled_to_exhaustion';    // 逃げ疲れて崩れ落ちたところをオオカミに食われた
 
 export interface DeathCause {
   id: DeathCauseId;

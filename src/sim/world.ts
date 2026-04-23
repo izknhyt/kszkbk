@@ -2196,6 +2196,7 @@ interface WanderEnvCache {
   taikoPositions: Vec2[];
   obstaclePositions: Vec2[];
   shrinePositions: Vec2[];
+  terraformJobPositions: Vec2[];
 }
 let _wanderEnvCache: WanderEnvCache | null = null;
 function getWanderEnv(w: WorldState): WanderEnvCache {
@@ -2216,7 +2217,12 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   // obstaclePositions の近くへ歩く。sawmill も労働対象として混ぜておく）
   const obstaclePositions: Vec2[] = w.obstacles.map((o) => o.pos);
   for (const f of w.features) if (f.kind === 'sawmill' || f.kind === 'kiln' || f.kind === 'loom') obstaclePositions.push(f.pos);
-  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions };
+  // Σ-5-a: terraform ジョブのタイル中心座標
+  const terraformJobPositions: Vec2[] = w.terraformJobs.map((j) => ({
+    x: (j.tx + 0.5) * TERRAIN_TILE_SIZE,
+    y: (j.ty + 0.5) * TERRAIN_TILE_SIZE,
+  }));
+  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions, terraformJobPositions };
   return _wanderEnvCache;
 }
 
@@ -2517,6 +2523,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       taikoPositions: env.taikoPositions,
       obstaclePositions: env.obstaclePositions,
       farmPositions: env.farmPositions,
+      terraformJobPositions: env.terraformJobPositions,
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {

@@ -114,6 +114,7 @@ const STATE_IDX: Record<ChibiState, number> = {
   idle:0, cry:1, surprised:2, angry:3,
   sleep:4, dazed:5, hurt:6, exhausted:7, dead:8,
   chatting:0, staring:2, eating:3,
+  scared:2,  // Σ-5-d: 逃走中は surprised ポーズ流用
 };
 
 const CHIBI_URLS = [
