@@ -1,4 +1,6 @@
-import { createStage } from './render/stage';
+import { createStage as _createStage2d } from './render/stage';
+import { createStage as _createStage3d } from './render/stage3d';
+const createStage = import.meta.env.VITE_RENDER === '3d' ? _createStage3d : _createStage2d;
 import { bindUI, refreshUI, type UICallbacks } from './render/ui';
 import {
   buildAt,

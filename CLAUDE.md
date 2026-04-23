@@ -217,6 +217,16 @@ public/
 - stability <0.5 = 橙パルス 3Hz、<0.3 = 赤パルス 5Hz
 - terraform ジョブに半透明色オーバーレイ + 橙の進捗リング
 
+### Σ-4 Three.js 3D レンダラー（実装中、`claude/sigma-4-main-xhp2Y`）
+- `src/render/stage3d.ts`（880 行）新設。stage.ts と同じ `StageHandle` を Three.js で実装。
+- `VITE_RENDER=3d npm run dev` で切替。デフォルトは Pixi.js のまま（parity 確認後 Pixi 削除）。
+- **座標系**：world(x,y) → Three.js(x, elev×5, y)。カメラは `(camX, h, camZ+h)` から `(camX, 0, camZ)` を向く 45° 俯瞰。
+- **地形**：100×57 タイル → 101×58 頂点 PlaneGeometry（隣接タイル平均で平滑化）、MeshToonMaterial + vertexColors
+- **スプライト**：既存 9 ポーズ PNG を Y 軸ビルボード（PlaneGeometry、+Z 向き固定）。floodFillAlpha で白背景除去。
+- **Raycaster picking**：pointerdown/contextmenu でスプライトメッシュに直接当てて HitTarget を返す。外れたら CPU hitFn フォールバック。
+- **昼夜・天候**：dayPhase/weather.kind ごとに AmbientLight/DirectionalLight 色温度を切替。
+- **吹き出し**：DOM overlay + `camera.project()` で worldToScreen 変換、`translate3d` で追従。
+
 ### Ω-6 電力（インフラ並行系、本流統合済）
 - 発電所 `generator`：ちびわふが近くでペダル→ power 生産
 - 街灯 `streetlamp`：夜間の視界補助 + オオカミ忌避
@@ -301,7 +311,7 @@ https://claude.ai/code/session_XXXXXX
 | **Σ-3** | **3 地形 procedural 生成**：beginner=平野、standard=半島、hell=くそざこ島。ハイトマップ＋海マスクをシードで生成。既存 `DRY_Y_LIMIT` 一律泥川の前提を破棄 | 3 日 | ✅ 完了 |
 | **Σ-2.5** | **地形可視化 + 素材バランス**（Σ-3 後追い）：stage.ts に標高色分け + 崖線 + terraform ジョブ UI + stability 警告パルスを追加。初期資源と建築コストを実プレイ向けに再調整。Σ-3 まででデータは生成されるが 2D 描画に出ないので、Σ-4 Three.js を待たず 2D Pixi のまま見せて遊べる状態にする | 2-3 日 | ✅ 完了 |
 | **Σ-4-proto** | **Three.js 検証プロト**（`prototypes/three-terrain/`、`origin/claude/sigma-4-proto` 保管）。5 項目実測 GO | 1 週 | ✅ 完了（**fps=75 / drawCalls=5 / DOM sync=0.01ms (0.1%)**、5 項目全 GO） |
-| **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag `VITE_RENDER=3d` で `stage.ts` と並行、parity 達成後に Pixi 削除。elev×5 displace、45° 固定俯瞰、Y 軸ビルボード、盛り土切り土の 3D 反映、土砂崩れアニメ、わちゃわちゃキャラ（歩行 pose animation） | 2 週 | 未着手（次） |
+| **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag `VITE_RENDER=3d` で `stage.ts` と並行、parity 達成後に Pixi 削除。elev×5 displace、45° 固定俯瞰、Y 軸ビルボード、盛り土切り土の 3D 反映、土砂崩れアニメ、わちゃわちゃキャラ（歩行 pose animation） | 2 週 | 🚧 実装中（`claude/sigma-4-main-xhp2Y`）|
 
 ### ロードマップ v2 後の予定（Ω 系、Σ-4 完走後に再開）
 
