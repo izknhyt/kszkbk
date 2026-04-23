@@ -33,37 +33,55 @@
 ```
 src/
   config.ts              物理・時間・ワールド定数（単一情報源）
-  types.ts               全型定義（Chibiwafu / Feature / Obstacle / Weather 等）
+  types.ts               全型定義（Chibiwafu / Feature / Obstacle / Weather / TerrainTile / TerraformJob 等）
   main.ts                エントリ。ゲームループ、UI イベント、スタート画面
   sim/
-    world.ts             【中心】WorldState, tickWorld, 各 update* 関数群（2,885 行）
-    chibiwafu.ts         spawnChibiwafu, wanderStep, DRY_Y_LIMIT
+    world.ts             【中心】WorldState, tickWorld, 各 update* 関数群（3,200+ 行）
+    chibiwafu.ts         spawnChibiwafu, wanderStep
     npcs.ts              NpcState, NPC_DEFS, セリフプール、createNpcs
     chats.ts             会話セリフ（GENERIC/TRAIT/CHEEKY/反応系多数）
-    deaths.ts            DEATH_CAUSES カタログ（40+ 種）
-    hazards.ts           HazardZone データ定義、mudriver/bridge/季節ゾーン
+    deaths.ts            DEATH_CAUSES カタログ（47 種、Σ-1/2/Ω-6 で拡張済）
+    hazards.ts           HazardZone データ定義（mudriver/bridge → 海マスクベースに移行）
     traits.ts            20 種の性格特性
     flavorTraits.ts      82 種のフレーバー ラベル
     flavorBehaviors.ts   フレーバーに紐づく挙動 & EMBARRASSING_FLAVORS
     personality.ts       10 軸パラメータ生成＆派生関数
     events.ts            季節 / DayPhase / GlobalEvent 型
-    landmarks.ts         石パン岩 / 哲学石 等の固定 POI【Σ-0 で廃止予定】
     bubbles.ts           吹き出しキュー
     rank.ts              4 段階ランク (村/集落/町/都)
     naming.ts            ちびわふ名前プール
     spatialHash.ts       空間分割ハッシュ（O(n²)→O(n)）
+    terrain/
+      noise.ts           Wang hash ベース seeded value noise（Σ-3）
+      generators.ts      plains/peninsula/island 3 地形生成器（Σ-3）
+      query.ts           isSeaAt / findDryTile / setQueryTerrain（Σ-3、循環 import 回避）
   render/
-    stage.ts             PixiJS 描画、カメラ制御、気象ティント、日時計（1,535 行）
+    stage.ts             PixiJS 2D 描画（カメラ、気象ティント、日時計、Σ-2.5 タイル可視化、1,800+ 行）
     sprites.ts           スプライトシート読込 & 白背景 flood-fill 透過
-    ui.ts                HUD 更新、ビルドパネル、統計表示
+    ui.ts                HUD 更新、ビルドパネル、統計表示（power/brick/wool/cloth/soil 含む）
   meta/
-    save.ts              3 スロット save/load、version 10、runId/difficulty 保持
-index.html               start-screen + HUD + minimap canvas
+    save.ts              3 スロット save/load、version 12（Σ-2 RLE 地形圧縮、Σ-3 terrainSeed）
+index.html               start-screen + HUD + minimap canvas + terraform/infra ボタン
+vite.config.ts           appType='mpa' で multi-page（prototypes/ も serve）
 scripts/sim.ts           headless バランス計測、難度比較に使う
+docs/                    （character-image-brainstorm 由来）
+  00_README.md           全体マップ・運用フロー
+  10_character_design.md ちびわふ/フラナ 固定デザイン要素
+  20_technical_spec.md   PNG 形式・解像度・flood-fill 対応
+  30_pose_catalog.md     22 ポーズ描画指示
+  40_accessory_library.md 小物 20 種と trait マッピング
+  50_prompt_templates.md 発注コピペ用マスタープロンプト
+  90_qa_checklist.md     納品検品チェックリスト
+prototypes/
+  three-terrain/         Σ-4-proto（Three.js 検証プロト、5 項目 GO 確定）
+    main.ts              self-contained 3D シーン（src/ への import ゼロ）
+    REPORT.md            検証結果レポート（fps/drawCalls/DOM sync の数値）
 public/
   chibiwafu/{01-09}_*.png    ちびわふ 9 ポーズ（ChatGPT 生成）
   furana/{01-09}_*.png       フラナ 9 ポーズ
-  mockup/{bg,buildings,props}.png  背景＆環境アート
+  mockup/{buildings,props}.png  環境アート（background.png は Σ-0 で削除済）
+.claude/agents/
+  balance-tester.md      Haiku エージェント（headless sim で死因分布確認）
 ```
 
 ## ゲームビジョン
@@ -152,14 +170,16 @@ public/
 ### 水力（フリー配置）
 - `water` feature → `channel` を 70px 以内で繋げると watered
 - `farm` feature が watered feature から 65px 以内で潤う → food 0.08/sec 生産
+- 洪水（storm）で溢れると `launchFlight` で `flood_drown`
 
 ### 労働ループ
-- 障害物近傍 28px にちびわふがいると HP -0.5/sec × ワーカー数
+- 障害物近傍 28px にちびわふがいると HP -1.0/sec × ワーカー数（Σ-2.5-c で倍速化）
 - 破壊で wood/stone 生産（rock→stone×2 / stump→wood×2 / bush→wood×1）
 
 ### 気象効果
 - 畑：drought/snow 停止、rain 加速、heatwave 半減
 - ちびわふ：heatwave hunger×1.5、snow で軽い HP ドレイン
+- storm：stability 回復 ×0（Σ-2-c）、発電所に落雷で `thunder_blast`（Ω-6 P2b）
 
 ### プレイヤー操作
 - 左クリック：ちびわふ or NPC を殴る（HP ダメージ）
@@ -167,11 +187,52 @@ public/
 - ドラッグ：掴んで移動、離すと速度×0.55 秒の物理投げ（弧を描く、軌道上の他個体を巻き込み）
 - 水中投げ：ちびわふ即溺死、NPC は -10 HP
 - 建設モード：HUD のボタン → 任意座標クリックで feature 設置（wood/stone 消費）
+- 地形編集モード（Σ-2-b）：⛰ 盛り土（soil×10 消費）/ ⛏ 切り土（soil+14 獲得、rock なら stone+5）、ちびわふが労働
+
+### Σ-1 z 物理（2.5D）
+- `flight` に `vz/posZ/startElev` 追加、重力 CLIFF_GRAVITY=200 で自由落下
+- 高所→低所の投げで落差 ≥15 → `cliff_fall`（即死級ダメージ 30 + drop×1.5）
+- 坂勾配 >0.6 で courage 判定失敗 → 下方向 launchFlight → `slope_fall`
+- water/channel 上 flow >1.5 で下流押し流し → resist 失敗で HP ドレ → `river_swept`
+- 激流が崖端で `cliff_fall` に遷移（滝落下）
+
+### Σ-2 タイル式ハイトマップ
+- 32px セルの `TerrainTile[][]`（100×57 = 5700 タイル）、`{elev, material, stability, waterLevel, buryTimer}`
+- `getElevation(x,y)` は bi-linear 補間、シグネチャは Ω-3-b 以来互換
+- 盛り土 `raiseTile` / 切り土 `lowerTile` で elev ±5、stability を 0.6/0.75 まで減衰
+- `updateTerrainStability`：stability 回復 +0.02/sec（storm ×0、heatwave ×1.5）
+- 崩落トリガー：stability <0.4 かつ隣接 elev 差 ≥20 で 0.005/sec 発動
+- 崩落で elev 差 ≥30 → `landslide_crush`（即死）、<30 → HP-40
+- 崩落先タイルに buryTimer=5sec、上にいるちびわふが dt×0.15 確率で `buried_alive`
+
+### Σ-3 3 地形 procedural 生成
+- `terrainSeed` を runId から派生、save に persist（v11→v12）
+- beginner=平野（海 0 タイル）、standard=半島（海 ~1355 + 半島 3 本）、hell=島（海 ~2373 + 崖帯）
+- `isSeaAt(x,y)` が `DRY_Y_LIMIT` を置換、既存コード（溺死判定/オオカミ/フラナ投げ）も移行済
+- `findDryTile` で spawn/feature/obstacle が海を回避
+
+### Σ-2.5 地形可視化
+- stage.ts に `terrainStaticLayer` + `terrainTransientLayer` 追加、material×elev ブライトネスで 5700 タイル描画（90f 再ベイク）
+- 隣接 elev 差 ≥15 の境界に黒線（崖ライン、cliff_fall 発火ラインの可視化）
+- stability <0.5 = 橙パルス 3Hz、<0.3 = 赤パルス 5Hz
+- terraform ジョブに半透明色オーバーレイ + 橙の進捗リング
+
+### Ω-6 電力（インフラ並行系、本流統合済）
+- 発電所 `generator`：ちびわふが近くでペダル→ power 生産
+- 街灯 `streetlamp`：夜間の視界補助 + オオカミ忌避
+- 電線 `powerline`：発電所から街灯まで BFS 接続グラフで伝搬、途中で切れると機能停止
+- 感電死 `electrocution`：電線に触れると確率発動
+- 落雷 `thunder_blast`：storm 中に発電所へ確率落雷→爆発→周囲巻き込み
+
+### Ω-7 生産チェイン（P1 完了 + P2/P3 統合済）
+- 製材所 `sawmill`：近くのちびわふが wood×2 → plank×1 変換（Ω-7 P1、神社などの建材）
+- 精錬所 `kiln`：stone×2 → brick×1（Ω-7 P2）
+- 牧場 `pasture`：wool/sec 生産、織機 `loom`：wool→cloth 変換（Ω-7 P3）
 
 ### セーブ
-3 スロット、起動時にスタート画面で選択 or 新規 + 難度選択。
-保存対象：meta（runId/difficulty）、points、統計、buildings、features、obstacles、resources、weather。
-**chibis / npcs / landmarks は persist しない**（毎ロード再生成）。
+3 スロット、起動時にスタート画面で選択 or 新規 + 難度選択。version 12。
+保存対象：meta（runId/difficulty）、points、統計、buildings、features、obstacles、resources、weather、**terrain（RLE 圧縮）**、**terrainSeed**、**terraformJobs**。
+**chibis / npcs は persist しない**（毎ロード再生成）。
 
 ## コミット規約
 
@@ -212,7 +273,7 @@ https://claude.ai/code/session_XXXXXX
 | polish | 警告 toast / 神社 ✨ / ログタブ戦績 | 4fd4609 / a42ecb5 |
 | refactor | バグ 6 件修正 + パフォーマンス最適化 | 67b75c2 |
 
-#### 🚧 並行作業中のインフラ系（`claude/review-progress-XaRZT` ブランチ、本流に未 merge）
+#### ✅ 本流統合済みのインフラ系（旧 `claude/review-progress-XaRZT`、2026-04-21 に本流 merge）
 
 | Phase | 内容 | Commit |
 |---|---|---|
@@ -227,9 +288,10 @@ https://claude.ai/code/session_XXXXXX
 
 ### ロードマップ v2（地形・3D 化）【現在のメイン路線 / 最優先】
 
-**方針**：3D 路線（Σ-0〜Σ-4）を先に完走、その後にインフラ路線（Ω-6/7 の正式統合 + 残タスク）再開。
-**ビジョン**：巨人のドシン × ピクミン × くそざこマインクラフト。
-神様が盛り土切り土を指示、ちびわふが労働、**改変がズボラで土砂崩れ事故で全滅**。
+**方針**：インフラ路線（Ω-6/7）は既に本流統合済。残りは 3D 路線 Σ-4 本実装に集中。
+**ビジョン**：巨人のドシン × ピクミン × Don't Starve × Elona。なめらかな 3D 地形で
+神様が盛り土切り土を指示、ちびわふ 200+ がわちゃわちゃ動き回り、**改変がズボラで土砂崩れ事故で全滅**。
+**マインクラフト要素**＝**ブロック見た目ではなく破壊/創造の自由度**（既に Σ-2 で実装済み）。
 
 | Phase | 内容 | 期間 | 状態 |
 |---|---|---|---|
@@ -238,14 +300,11 @@ https://claude.ai/code/session_XXXXXX
 | **Σ-2** | **タイル式ハイトマップ化**：`getElevation(x,y)` 関数 → 32px セルの 2D 配列データに移行、`{elev, material, stability, water}`、地形編集 API、`raiseTile/loweTile`、stability 計算、土砂崩れ災害、`landslide_crush/buried_alive` 死因追加 | 1 週 | ✅ 完了 |
 | **Σ-3** | **3 地形 procedural 生成**：beginner=平野、standard=半島、hell=くそざこ島。ハイトマップ＋海マスクをシードで生成。既存 `DRY_Y_LIMIT` 一律泥川の前提を破棄 | 3 日 | ✅ 完了 |
 | **Σ-2.5** | **地形可視化 + 素材バランス**（Σ-3 後追い）：stage.ts に標高色分け + 崖線 + terraform ジョブ UI + stability 警告パルスを追加。初期資源と建築コストを実プレイ向けに再調整。Σ-3 まででデータは生成されるが 2D 描画に出ないので、Σ-4 Three.js を待たず 2D Pixi のまま見せて遊べる状態にする | 2-3 日 | ✅ 完了 |
-| **Σ-4-proto** | **Three.js 検証プロト**（捨てプロト、1 週）。5 項目通れば本実装着手：① PlaneGeometry displace 60fps、② InstancedMesh 200 sprite 1 draw call、③ GPU picking、④ camera.project DOM 同期、⑤ 既存 PNG billboard の見え方 | 1 週 | 未着手 |
-| **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag で `stage.ts` と並行、parity 達成後に Pixi 削除。ビルボード＋ Toon 地形＋ splatmap＋ blob shadow | 2 週 | 未着手 |
+| **Σ-4-proto** | **Three.js 検証プロト**（`prototypes/three-terrain/`、`origin/claude/sigma-4-proto` 保管）。5 項目実測 GO | 1 週 | ✅ 完了（**fps=75 / drawCalls=5 / DOM sync=0.01ms (0.1%)**、5 項目全 GO） |
+| **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag `VITE_RENDER=3d` で `stage.ts` と並行、parity 達成後に Pixi 削除。elev×5 displace、45° 固定俯瞰、Y 軸ビルボード、盛り土切り土の 3D 反映、土砂崩れアニメ、わちゃわちゃキャラ（歩行 pose animation） | 2 週 | 未着手（次） |
 
 ### ロードマップ v2 後の予定（Ω 系、Σ-4 完走後に再開）
 
-**最初にやる**：`claude/review-progress-XaRZT` を本流に merge → Ω-6 と Ω-7 P2/P3 を正式化
-
-続けて：
 - **Ω-4 継続** 災害 P1 拡張（火災、熱波、消防署）
 - **Ω-5 拡張** クマ/疫病/地震/野盗（+ 採用済み②**病気＆集団感染**を Σ-3 以降の時点で合わせる）
 - **Ω-6 P3〜** 電力拡張（より複雑な電気回路、停電、過負荷）
@@ -318,9 +377,9 @@ origin/claude/idle-village-game-7IfPd       ← 本流（Σ-0/1/2/2.5/3 + Ω-6/7
 | ~~`WorldState.landmarks` フィールド + セーブ項目~~ | ✅ Σ-0 で削除済み |
 | ~~`Chibiwafu.targetLandmarkId` + `pickLandmarkTarget` in chibiwafu.ts~~ | ✅ Σ-0 で削除済み |
 | ~~`drawLandmark` + `landmarkLayer` in stage.ts~~ | ✅ Σ-0 で削除済み |
-| 哲学石特殊挙動 (world.ts 1769-1785) | カルト儀式（採用済み⑥）に機能移転 |
+| 哲学石特殊挙動 (world.ts 1769-1785) | カルト儀式（採用済み⑥）実装時に機能移転予定、それまで保留 |
 | ~~`chats.ts` の `landmark_*` 6 エントリ~~ | ✅ Σ-0 で削除済み |
-| `public/mockup/background.png` (3.5MB) | 未参照、Ω-2-b で廃止済みの残骸 |
+| ~~`public/mockup/background.png` (3.5MB)~~ | ✅ Σ-0 で削除済み |
 
 **ニュアンス保持で rename 残し**：
 - 死因 `石パンで歯折れ` / 窒息死 → 「硬い木の実で歯折れ」「どんぐり窒息」にフレーバー変更
@@ -332,9 +391,9 @@ origin/claude/idle-village-game-7IfPd       ← 本流（Σ-0/1/2/2.5/3 + Ω-6/7
 
 ## 既知の注意点・quirks
 
-- **world.ts が 2,885 行超**：分割候補だが未実施。近々 `disasters.ts` 等に外出し検討
-- **sim.ts balance assertion は pre-existing failing**（top share > 22% 等）、ブロッカーではない
-- **save v1-v9 履歴**：plots は v8 で廃止（Feature に置換）、landmarks は Σ-0 で廃止予定
+- **world.ts が 3,200+ 行**：Σ-2/3 で膨張、`disasters.ts` / `terraform.ts` への分割が候補
+- **sim.ts balance assertion は pre-existing failing**（top share > 22%、mudriver 独占等）、ブロッカーではない。Σ-3 の 3 地形化で mudriver 独占は緩和済だが hell の均衡は継続調整
+- **save v12**：terrain を RLE 圧縮で persist、terrainSeed も含む。v11 以下は ensurePlots で procedural 再生成
 - **chibi death cause "fatigue_death"** は P1-C1 時点で ほぼ発火せず（hunger 死が先）、P2 で食料ある状態で初めて顕在化
 - **PixiJS の `const CONFIG = { ... } as const`**：リテラル型になるので `currentBoundsW: number = CONFIG.WORLD_W` のように明示型が必要
 - **`getElevation(x,y)` は関数ベース**：Σ-2 でタイル配列に置換予定。固定勾配なので現状「一定の坂」にしか見えない
