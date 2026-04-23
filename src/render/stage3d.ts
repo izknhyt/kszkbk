@@ -203,12 +203,35 @@ function makeGradMap(): THREE.DataTexture {
 }
 
 // ============================================================
-// 地形標高ルックアップ
+// 地形標高ルックアップ（buildTerrainGeo と同じ頂点平滑化を bilinear で再現）
+// タイル中心 elev をそのまま返すとメッシュ表面と一致せず、
+// 周囲より低い / 高いタイルでキャラが埋もれたり浮いたりしていた。
 // ============================================================
 function elevAt(terrain: import('../types').TerrainTile[][], wx: number, wy: number): number {
-  const c = Math.max(0,Math.min(T_COLS-1,Math.floor(wx/TERRAIN_TILE_SIZE)));
-  const r = Math.max(0,Math.min(T_ROWS-1,Math.floor(wy/TERRAIN_TILE_SIZE)));
-  return (terrain[r]?.[c]?.elev ?? 0) * ELEV_SCALE;
+  const ROWS = terrain.length;
+  const COLS = terrain[0]?.length ?? 0;
+  if (ROWS === 0 || COLS === 0) return 0;
+  const u = wx / TERRAIN_TILE_SIZE;
+  const v = wy / TERRAIN_TILE_SIZE;
+  const u0 = Math.max(0, Math.min(COLS, Math.floor(u)));
+  const v0 = Math.max(0, Math.min(ROWS, Math.floor(v)));
+  const u1 = Math.min(COLS, u0 + 1);
+  const v1 = Math.min(ROWS, v0 + 1);
+  const fu = Math.max(0, Math.min(1, u - u0));
+  const fv = Math.max(0, Math.min(1, v - v0));
+  const vElev = (ui: number, vi: number): number => {
+    let sum = 0, cnt = 0;
+    for (let dr = -1; dr <= 0; dr++) for (let dc = -1; dc <= 0; dc++) {
+      const tr = vi + dr, tc = ui + dc;
+      if (tr >= 0 && tr < ROWS && tc >= 0 && tc < COLS) { sum += terrain[tr]![tc]!.elev; cnt++; }
+    }
+    return cnt > 0 ? sum / cnt : 0;
+  };
+  const e00 = vElev(u0, v0), e10 = vElev(u1, v0);
+  const e01 = vElev(u0, v1), e11 = vElev(u1, v1);
+  const e0 = e00 * (1 - fu) + e10 * fu;
+  const e1 = e01 * (1 - fu) + e11 * fu;
+  return (e0 * (1 - fv) + e1 * fv) * ELEV_SCALE;
 }
 
 // ============================================================
@@ -496,6 +519,12 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     const ndcX=((cx-rect.left)/rect.width)*2-1;
     const ndcY=-((cy-rect.top)/rect.height)*2+1;
     rc.setFromCamera(new THREE.Vector2(ndcX,ndcY), camera);
+    // 地形メッシュ直接 raycast：Y=0 平面交点だと高台でドラッグが奥にズレる
+    if (terrainGeo) {
+      const hits = rc.intersectObject(terrainMesh, false);
+      if (hits.length > 0) return { x: hits[0]!.point.x, y: hits[0]!.point.z };
+    }
+    // フォールバック：初期化直後など terrainGeo 未構築時は Y=0 平面で代用
     const tgt=new THREE.Vector3();
     return rc.ray.intersectPlane(groundPlane,tgt) ? {x:tgt.x,y:tgt.z} : {x:camX,y:camZ};
   }
@@ -621,6 +650,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     if(!v){
       const tex=texs[STATE_IDX[state]]??texs[0]!;
       const mesh=spriteMesh(w,h,tex);
+      (mesh.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
       grp.add(mesh);
       v={mesh,lastState:state,lastFace:false};
       map.set(id,v);
@@ -934,6 +964,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         const w=NPC_SCALE_BASE*def.scale*NPC_SCALE_BASE*18, h=w*1.4;
         const tex=texs[STATE_IDX[n.state]]??texs[0]!;
         const mesh=spriteMesh(Math.max(w,30),Math.max(h,42),tex);
+        (mesh.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
         npcGrp.add(mesh);
         npcViews.set(n.id,{mesh,lastState:n.state,lastFace:false});
       }
