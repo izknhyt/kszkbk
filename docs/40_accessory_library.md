@@ -21,7 +21,7 @@
 | 01 | 赤い鉢巻 | 顔前面（額） | yuukan（勇敢） | Red folded cloth headband tied around forehead, small knot at the side |
 | 02 | 丸メガネ | 顔前面 | tetsugakusha（哲学者） | Round black-framed glasses, simple thin frame |
 | 03 | 花冠 | 頭上 | oshaberi / social高 | Small woven crown of pink and white daisies, worn on head |
-| 04 | 小さなエプロン | 胴中央 | mama好き | Miniature white apron with small heart pocket, tied at waist |
+| 04 | 小さなエプロン | 胴中央 | mama好き | Miniature white apron with small heart pocket, tied at waist. 注：フラナ本体はエプロンを着ない（10_character_design.md § 2 参照）。このアクセサリはちびわふの mama好き trait 識別用 overlay |
 | 05 | 木の杖 | 尻尾横 | bouken（冒険家） | Gnarled brown walking stick, taller than the chibi, held in one paw |
 | 06 | ほっかむり | 頭上 | noumin（農民） | White cloth tied over head like a farmer's kerchief, knot under chin |
 | 07 | 長い木の棒 | 尻尾横 | bo_meijin（棒名人） | Long straight bamboo-like stick, held horizontally at side |
@@ -33,7 +33,7 @@
 | 13 | 絆創膏 | 顔前面（頬） | tough 低 / 被虐歴 | Small beige adhesive bandage on one cheek, X-shape |
 | 14 | ぬいぐるみ | 尻尾横 | ukiyo（浮世離れ） | Tiny blue teddy bear plush held in one paw, a bit worn |
 | 15 | 音符 | 頭上 | スズファン / onkai | Small black musical note symbol floating above head |
-| 16 | ピンクリボン | 頭上（耳の付け根） | akachan感 | Pink ribbon bow tied at the base of one ear |
+| 16 | 赤リボン | 頭上（耳の付け根） | akachan感 | Red ribbon bow (not peach-pink — use `#E05860` or similar red-pink) tied at the base of one ear. **注**: 尻尾根元の桃色リボン (`#F2A576`) と色・位置で区別すること。アクセサリ版は耳元、色は赤寄せ |
 | 17 | 頬赤（酔い） | 顔前面 | nomisuke（酒好き） | Enhanced pink blush on cheeks, one whiskey drop near mouth |
 | 18 | はてなマーク | 頭上 | tabikko（迷子癖） | Floating "?" symbol above head, light gray |
 | 19 | 鼻血 | 顔前面 | oshaberi 激 / namaiki | Small red droplet hanging from one nostril |
@@ -97,7 +97,7 @@ public/accessories/
  ├─ 13_bandaid.png
  ├─ 14_teddy.png
  ├─ 15_note.png
- ├─ 16_ribbon.png
+ ├─ 16_red_ribbon.png
  ├─ 17_drunk_cheeks.png
  ├─ 18_question.png
  ├─ 19_nosebleed.png
@@ -153,3 +153,7 @@ style lock 確認後、以下の 5 種を先発注（視認性が高く、trait 
 ## 7. 変更履歴
 
 - v0.1 初版（20 traits にマッピングして 20 小物設定）
+- v0.2 キャラデザ仕様 v0.3 との整合：
+  - #16 ピンクリボン → 赤リボンにリネーム（尻尾根元の桃色リボンと色で区別）
+  - ファイル名 `16_ribbon.png` → `16_red_ribbon.png`
+  - #04 エプロンにフラナ本体との区別注記（フラナはエプロン着ない）
