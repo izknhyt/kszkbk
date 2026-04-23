@@ -444,11 +444,33 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   }
 
   // ============================================================
-  // 入力
+  // 入力 + Σ-4-e GPU picking（Raycaster でスプライトメッシュ直撃）
   // ============================================================
   let hitFn: ((wx:number,wy:number)=>HitTarget|null)|null = null;
   const canvas = renderer.domElement;
   canvas.style.touchAction='none'; canvas.style.display='block';
+
+  // Raycaster でスプライトメッシュを直撃 → 外れたら CPU hitFn フォールバック
+  function pickTarget(cx:number,cy:number): HitTarget|null {
+    const rect=canvas.getBoundingClientRect();
+    const ndc=new THREE.Vector2(((cx-rect.left)/rect.width)*2-1,-((cy-rect.top)/rect.height)*2+1);
+    rc.setFromCamera(ndc,camera);
+    // chibi
+    const chibiMeshes=[...chibiViews.values()].map(v=>v.mesh);
+    const ch=rc.intersectObjects(chibiMeshes,false);
+    if(ch.length){ for(const [id,v] of chibiViews) if(v.mesh===ch[0]!.object) return {kind:'chibi',id}; }
+    // npc
+    const npcMeshes=[...npcViews.values()].filter(v=>v.mesh.visible).map(v=>v.mesh);
+    const nh=rc.intersectObjects(npcMeshes,false);
+    if(nh.length){ for(const [id,v] of npcViews) if(v.mesh===nh[0]!.object) return {kind:'npc',id:id as NpcId}; }
+    // wolf
+    const wolfMeshes=[...wolfViews.values()].filter(m=>m.visible);
+    const wh=rc.intersectObjects(wolfMeshes,false);
+    if(wh.length){ for(const [id,m] of wolfViews) if(m===wh[0]!.object) return {kind:'wolf',id}; }
+    // CPU fallback
+    const wp=stwXZ(cx,cy);
+    return hitFn?hitFn(wp.x,wp.y):null;
+  }
 
   canvas.addEventListener('wheel',(e)=>{
     e.preventDefault();
@@ -463,8 +485,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   canvas.addEventListener('contextmenu',(e)=>{
     e.preventDefault();
-    const wp=stwXZ(e.clientX,e.clientY);
-    const target=hitFn?hitFn(wp.x,wp.y):null;
+    const target=pickTarget(e.clientX,e.clientY);
     canvas.dispatchEvent(new CustomEvent('kszk-inspect',{detail:{target,clientX:e.clientX,clientY:e.clientY}}));
   });
 
@@ -474,8 +495,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   canvas.addEventListener('pointerdown',(e)=>{
     if(e.button===2) return;
     canvas.setPointerCapture(e.pointerId);
-    const wp=stwXZ(e.clientX,e.clientY);
-    const target=hitFn?hitFn(wp.x,wp.y):null;
+    const target=pickTarget(e.clientX,e.clientY);
     ptr={id:e.pointerId,mode:target?'drag':'pan',sx:e.clientX,sy:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,target};
   });
 
@@ -839,8 +859,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     },
   };
 
-  // GPU picking（Σ-4-e 実装）— 現状は CPU フォールバック
-  // hitFn は main.ts が setHitTest で登録した関数をそのまま使う
+  // pickTarget() が Raycaster でメッシュ直撃し、外れたら CPU hitFn に委ねる（Σ-4-e）
 
   return {
     app: appAdapter as unknown as import('pixi.js').Application,
