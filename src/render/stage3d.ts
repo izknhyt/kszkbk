@@ -970,7 +970,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       npcViews.forEach(v=>applyT(v.mesh));
       wolfViews.forEach(m=>applyT(m));
       corpseViews.forEach(m=>applyT(m));
-      featViews.forEach(v=>v.grp.traverse(o=>{ if((o as THREE.Mesh).isMesh) applyT(o as THREE.Mesh); }));
+      featViews.forEach(v=>v.grp.traverse((o: THREE.Object3D)=>{ if((o as THREE.Mesh).isMesh) applyT(o as THREE.Mesh); }));
       obsViews.forEach(m=>applyT(m));
     }
 
