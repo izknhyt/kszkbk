@@ -647,6 +647,14 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   Object.assign(bubbleOverlay.style,{position:'absolute',top:'0',left:'0',width:'100%',height:'100%',pointerEvents:'none',overflow:'hidden'});
   host.style.position = 'relative';
   host.appendChild(bubbleOverlay);
+
+  // --- Σ-5-c: terraform 進捗オーバーレイ ---
+  const tfOverlay = document.createElement('div');
+  Object.assign(tfOverlay.style,{position:'absolute',top:'0',left:'0',width:'100%',height:'100%',pointerEvents:'none',overflow:'hidden'});
+  host.appendChild(tfOverlay);
+  const tfDivs = new Map<string, HTMLDivElement>();
+  // jobId → last worker が居た時刻（秒）
+  const tfLastWorkerSec = new Map<string, number>();
   const bubbleDivs = new Map<number, HTMLDivElement>();
 
   // --- terraform / stability — InstancedMesh（毎フレーム dispose を廃止）---
@@ -1204,6 +1212,49 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const alpha=Math.min(1,b.ttl/Math.max(0.2,b.maxTtl*0.35));
       div.style.transform=`translate(-50%,-100%) translate(${sc.x}px,${sc.y}px)`;
       div.style.opacity=String(alpha);
+    }
+
+    // ---- Σ-5-c: terraform 進捗オーバーレイ ----
+    {
+      const activeIds = new Set(world.terraformJobs.map(j=>j.id));
+      for(const [id,div] of tfDivs){ if(!activeIds.has(id)){ tfOverlay.removeChild(div); tfDivs.delete(id); tfLastWorkerSec.delete(id); } }
+      const WORKER_R = 28;
+      for(const job of world.terraformJobs){
+        // 作業者数カウント
+        const cx=(job.tx+0.5)*TERRAIN_TILE_SIZE, cy=(job.ty+0.5)*TERRAIN_TILE_SIZE;
+        let workers=0;
+        for(const c of world.chibis){
+          if(c.state==='dead'||c.flight) continue;
+          if(Math.hypot(c.pos.x-cx,c.pos.y-cy)<=WORKER_R) workers++;
+        }
+        // 放置タイマー更新
+        if(workers>0) tfLastWorkerSec.set(job.id, world.timeSec);
+        const idleSec = world.timeSec - (tfLastWorkerSec.get(job.id) ?? world.timeSec);
+        const abandoned = idleSec >= 60;
+
+        let div = tfDivs.get(job.id);
+        if(!div){
+          div = document.createElement('div');
+          div.style.cssText='position:absolute;left:0;top:0;pointer-events:none;transform:translate(-50%,-50%);';
+          tfOverlay.appendChild(div);
+          tfDivs.set(job.id, div);
+        }
+        // 位置更新（terrain 高度に追従）
+        const ey=elevAt(world.terrain,cx,cy);
+        const sc=worldToScreen(cx,cy,ey);
+        div.style.transform=`translate(-50%,-50%) translate(${sc.x-Math.round(sc.x)+Math.round(sc.x)}px,${sc.y-Math.round(sc.y)+Math.round(sc.y)}px)`;
+        div.style.left=`${sc.x}px`;
+        div.style.top=`${sc.y - 20}px`;
+
+        const pct=Math.round(job.progress*100);
+        const label=job.target==='raise'?'▲盛':'▽切';
+        const barFill=abandoned?'#ff8020':'#4ad870';
+        const bg=abandoned?'rgba(200,80,0,0.85)':'rgba(20,10,5,0.75)';
+        div.innerHTML=`<div style="background:${bg};border-radius:3px;padding:2px 4px;font-size:10px;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">` +
+          `${abandoned?'⚠ 誰も来ない':`${label} ${pct}% (${workers}人)`}` +
+          `</div><div style="width:40px;height:4px;background:#333;border-radius:2px;margin-top:1px">` +
+          `<div style="width:${pct}%;height:100%;background:${barFill};border-radius:2px;transition:width 0.3s"></div></div>`;
+      }
     }
 
     renderer.render(scene, camera);
