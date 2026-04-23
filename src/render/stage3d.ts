@@ -233,6 +233,21 @@ const PHASE_TINT: Record<DayPhase,{sky:number;amb:number;dir:number;dirC:number}
   night:   {sky:0x0a1020, amb:0.15, dir:0.20, dirC:0x6080b0},
 };
 
+// キャラクタースプライト用手動ティント（MeshBasicMaterial はライト応答なし）
+const PHASE_CHAR: Record<DayPhase,[number,number,number]> = {
+  morning: [1.00,0.88,0.70],
+  noon:    [1.00,1.00,1.00],
+  evening: [0.90,0.65,0.45],
+  night:   [0.22,0.28,0.40],
+};
+const WEATHER_CHAR: Partial<Record<string,[number,number,number]>> = {
+  storm:      [0.55,0.60,0.65],
+  heavy_rain: [0.65,0.72,0.80],
+  fog:        [0.80,0.82,0.85],
+  snow:       [0.85,0.90,1.00],
+  heatwave:   [1.00,0.70,0.45],
+};
+
 // ============================================================
 // feature・obstacle プロシージャルテクスチャ
 // ============================================================
@@ -286,6 +301,22 @@ function npcCircleTex(color: number, r=28): THREE.Texture {
     ctx.beginPath(); ctx.arc(sz/2-7,sz/2-2,3,0,Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(sz/2+7,sz/2-2,3,0,Math.PI*2); ctx.fill();
   });
+}
+
+function wolfTex(): THREE.Texture {
+  return makeCanvasTex((ctx,sz)=>{
+    const h=sz/2;
+    ctx.fillStyle='#4a3a30';
+    ctx.beginPath(); ctx.ellipse(h,h+4,20,10,0,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(h+16,h-6,11,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#7a6a60';
+    ctx.beginPath(); ctx.moveTo(h+10,h-14); ctx.lineTo(h+16,h-20); ctx.lineTo(h+22,h-14); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#ff8820';
+    ctx.beginPath(); ctx.arc(h+20,h-8,2.5,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#2a1a10'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.ellipse(h,h+4,20,10,0,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(h+16,h-6,11,0,Math.PI*2); ctx.stroke();
+  },80);
 }
 
 // ============================================================
@@ -373,6 +404,14 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const bldViews    = new Map<string, THREE.Group>();
 
   let wireLines: THREE.LineSegments|null = null;
+  let cliffLines: THREE.LineSegments|null = null;
+
+  // オオカミビルボードテクスチャ（共有）
+  const wolfTexture = wolfTex();
+
+  // キャラクタースプライト ティント状態
+  let curCharTint: [number,number,number] = [1,1,1];
+  let lastCharTintKey = '';
 
   // --- バブルオーバーレイ ---
   const bubbleOverlay = document.createElement('div');
@@ -641,6 +680,23 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       case 'heatwave':   renderer.setClearColor(0xff9a60); break;
     }
 
+    // キャラクタースプライトのティント（MeshBasicMaterial は手動で color 乗算）
+    const charTintKey=`${world.dayPhase}:${world.weather.kind}`;
+    if(charTintKey!==lastCharTintKey){
+      lastCharTintKey=charTintKey;
+      let t: [number,number,number]=[...PHASE_CHAR[world.dayPhase]];
+      const wt=WEATHER_CHAR[world.weather.kind];
+      if(wt) t=[Math.min(1,t[0]*wt[0]),Math.min(1,t[1]*wt[1]),Math.min(1,t[2]*wt[2])];
+      curCharTint=t;
+      const applyT=(m:THREE.Mesh)=>(m.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
+      chibiViews.forEach(v=>applyT(v.mesh));
+      npcViews.forEach(v=>applyT(v.mesh));
+      wolfViews.forEach(m=>applyT(m));
+      corpseViews.forEach(m=>applyT(m));
+      featViews.forEach(m=>applyT(m));
+      obsViews.forEach(m=>applyT(m));
+    }
+
     // ---- 地形（90フレームごとリビルド）----
     if(world.terrain.length>0 && frameCount-terrainBuiltAt>=90){
       terrainBuiltAt=frameCount;
@@ -652,6 +708,28 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         refreshTerrainGeo(terrainGeo, world.terrain);
       }
       waterMesh.visible=world.terrain.some(row=>row.some(t=>t.material==='water'));
+
+      // 崖線（elev 差 ≥15 の境界に黒 LineSegments）
+      if(cliffLines){ scene.remove(cliffLines); cliffLines.geometry.dispose(); cliffLines=null; }
+      const ROWS2=world.terrain.length, COLS2=world.terrain[0]?.length??0;
+      const cPts:number[]=[];
+      for(let r2=0;r2<ROWS2;r2++) for(let c2=0;c2<COLS2;c2++){
+        const e0=world.terrain[r2]![c2]!.elev;
+        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=15){
+          const x=(c2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ex)*ELEV_SCALE;
+          cPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
+        }}
+        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=15){
+          const z=(r2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ey)*ELEV_SCALE;
+          cPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
+        }}
+      }
+      if(cPts.length){
+        const lg=new THREE.BufferGeometry();
+        lg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(cPts),3));
+        cliffLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x1a1a1a}));
+        scene.add(cliffLines);
+      }
     }
 
     // ---- Terraform オーバーレイ ----
@@ -695,6 +773,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
           if(!featTexMap.has(f.kind)) featTexMap.set(f.kind,featTex(f.kind));
           const sz=(FEAT_RAD[f.kind]??16)*2;
           const m=spriteMesh(sz,sz,featTexMap.get(f.kind)!);
+          (m.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
           featGrp.add(m); featViews.set(f.id,m);
         }
         const m=featViews.get(f.id)!;
@@ -730,6 +809,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(!obsViews.has(obs.id)){
           if(!obsTexMap.has(obs.kind)) obsTexMap.set(obs.kind,obsTex(obs.kind));
           const m=spriteMesh(36,36,obsTexMap.get(obs.kind)!);
+          (m.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
           obsGrp.add(m); obsViews.set(obs.id,m);
         }
         const m=obsViews.get(obs.id)!;
@@ -756,6 +836,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       if(!corpseViews.has(c.id)){
         const tex=chibiTexs[8]??chibiTexs[0]!;
         const m=spriteMesh(CHIBI_W*0.85,CHIBI_H*0.85,tex);
+        (m.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
         (m.material as THREE.MeshBasicMaterial).opacity=0.8;
         corpseGrp.add(m); corpseViews.set(c.id,m);
       }
@@ -807,11 +888,12 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     for(const [id,m] of wolfViews){ if(!wids.has(id)){ wolfGrp.remove(m); wolfViews.delete(id); } }
     for(const wolf of world.wolves){
       if(!wolfViews.has(wolf.id)){
-        const m=new THREE.Mesh(new THREE.BoxGeometry(36,16,20),new THREE.MeshToonMaterial({color:0x4a3a30,gradientMap:gradMap}));
+        const m=spriteMesh(60,36,wolfTexture);
+        (m.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
         wolfGrp.add(m); wolfViews.set(wolf.id,m);
       }
       const m=wolfViews.get(wolf.id)!;
-      m.position.set(wolf.pos.x, elevAt(world.terrain,wolf.pos.x,wolf.pos.y)+12, wolf.pos.y);
+      m.position.set(wolf.pos.x, elevAt(world.terrain,wolf.pos.x,wolf.pos.y)+20, wolf.pos.y);
       m.scale.x=wolf.faceLeft?-1:1;
       m.visible=wolf.state!=='dead';
     }
