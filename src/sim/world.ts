@@ -1342,7 +1342,12 @@ export function updateWolves(w: WorldState, dt: number) {
       wolf.targetChibiId = null;  // 次のターゲットを再選定
       spawnBubble(w.bubbles, target.pos, 'ぎゃわふー！！', 'speech', 2.0);
       pushLife(target, Math.floor(target.ageSec), 'オオカミに噛まれた');
-      damageChibi(w, target, WOLF_BITE_DAMAGE, 'wolf_bite');
+      // 逃げ疲れて倒れてた（scared/exhausted）ところを食われた → fled_to_exhaustion
+      const biteDeathCause: DeathCauseId =
+        (target.state === 'scared' || target.state === 'exhausted') && target.fatigue >= 50
+          ? 'fled_to_exhaustion'
+          : 'wolf_bite';
+      damageChibi(w, target, WOLF_BITE_DAMAGE, biteDeathCause);
       // 近くのちびわふが叫ぶ
       for (const c of w.chibis) {
         if (c === target || !isAlive(c)) continue;
@@ -2561,14 +2566,14 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
         c.pos.x += sx * fleeSpeed * dt;
         c.pos.y += sy * fleeSpeed * dt;
         c.faceLeft = sx < 0;
-        c.fatigue = Math.min(100, c.fatigue + dt * 8);  // 全力疾走で疲労 +8/sec
+        c.fatigue = Math.min(100, c.fatigue + dt * 18);  // 全力疾走で疲労 +18/sec
 
-        // 疲労 >= 90 で collapse → fled_to_exhaustion
-        if (c.fatigue >= 90) {
+        // 疲労 >= 60 で collapse → fled_to_exhaustion
+        if (c.fatigue >= 60) {
           setState(c, 'exhausted', 2.0);
           pushLife(c, Math.floor(c.ageSec), '狼に追われて走り疲れた');
           // 近くに狼がいてかつ fatigue 高すぎ → 食われる
-          if (nearestWolfDist < 50 && Math.random() < 0.6) {
+          if (nearestWolfDist < 60 && Math.random() < 0.65) {
             spawnBubble(w.bubbles, c.pos, 'もう……だめ……わふ', 'speech', 1.8);
             kill(w, c, 'fled_to_exhaustion');
             return;
