@@ -394,6 +394,7 @@ origin/claude/idle-village-game-7IfPd       ← 本流（Σ-0/1/2/2.5/3 + Ω-6/7
 - **world.ts が 3,200+ 行**：Σ-2/3 で膨張、`disasters.ts` / `terraform.ts` への分割が候補
 - **sim.ts balance assertion は pre-existing failing**（top share > 22%、mudriver 独占等）、ブロッカーではない。Σ-3 の 3 地形化で mudriver 独占は緩和済だが hell の均衡は継続調整
 - **save v12**：terrain を RLE 圧縮で persist、terrainSeed も含む。v11 以下は ensurePlots で procedural 再生成
+- **Vite MPA 設定必須**：`vite.config.ts` に `appType: 'mpa'` がないと dev server が SPA fallback で root `index.html` を返し、`prototypes/three-terrain/` 等のサブページが見えない（Σ-4-proto 実機確認時に判明）。現在は設定済
 - **chibi death cause "fatigue_death"** は P1-C1 時点で ほぼ発火せず（hunger 死が先）、P2 で食料ある状態で初めて顕在化
 - **PixiJS の `const CONFIG = { ... } as const`**：リテラル型になるので `currentBoundsW: number = CONFIG.WORLD_W` のように明示型が必要
 - **`getElevation(x,y)` は関数ベース**：Σ-2 でタイル配列に置換予定。固定勾配なので現状「一定の坂」にしか見えない
