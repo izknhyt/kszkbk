@@ -21,23 +21,23 @@ CHARACTER (fixed design, must NOT deviate):
 - Species: a "chibiwafu" — a small cream-colored puppy-like chibi creature
   in the style of Sanrio characters (Pochacco, Cinnamoroll). A cute chubby
   standing chibi, NOT a Kirby-style blob, NOT a Disney-style puppy.
-- Body color: warm cream (#F5E6D3)
+- Body color: light warm cream (#FEFBE7)
 - Long droopy ears on both sides, hanging down to jaw level. Inner side
   light pink (#F5D5D0). Ears are as tall as the face — this is critical.
 - A single short "ahoge" strand sticking up from the top of the head
 - Short fringe/bangs over the forehead
-- Large round dark brown eyes (#4A2A1A) with two small white highlights
+- Large round dark brown eyes (#502C1B) with two small white highlights
 - Soft pink cheek blushes (#F5B5B0)
 - A tiny, barely-visible nose: just a small dot or simple inverted V (#3A2A1A)
-- Wears a white DIAPER covering the lower body / belly, with a brown paw-print
-  motif (#8B5A2B) on the center of the diaper. This is NOT a bib, NOT around
-  the neck — it is a diaper on the lower torso.
+- Wears a white DIAPER (#FAFAFA) covering the lower body / belly, with a
+  warm-brown paw-print motif (#A27250) on the center of the diaper.
+  This is NOT a bib, NOT around the neck — it is a diaper on the lower torso.
 - A fluffy tail in the same cream body color (no tip color change), with
-  a small peach-pink ribbon (#F2A576) tied at the BASE of the tail. The
+  a small peach-pink ribbon (#F9C4A1) tied at the BASE of the tail. The
   ribbon is at the base (near the body), NOT at the tip.
-- Head is approximately the same size as the body or slightly larger
-  (head:body ≈ 1.05:1). Proportions: head ~45-50% of total height,
-  body ~30-35%, legs ~15-20%.
+- The head is NOTICEABLY LARGER than the body (head:body ≈ 1.5:1).
+  Proportions: head ~60% of total height, body ~30%, legs ~10%.
+  This is "inverted head ratio" — head dominates the silhouette.
 - Has TWO clearly visible but short legs and TWO short arms, NOT nub-stubs.
   Arms hang at sides and can swing. Legs stand and can walk.
 - NO neck (head sits directly on body, no neck outline)
@@ -83,30 +83,32 @@ no text, no labels, no border, no watermark.
 CHARACTER (fixed design, must NOT deviate):
 - Species: a "furana" — the adult/mother form of the chibiwafu species.
   She is related but a DIFFERENT body type, NOT just a scaled-up chibiwafu.
-- Body color: cream-white, between cream and white (#F5EFE2) — noticeably
+- Body color: cream-white, between cream and white (#FEFAEF) — noticeably
   paler than the chibiwafu's warmer cream.
 - Long droopy ears on both sides, same shape as chibiwafu, inner side
   light pink (#F5D5D0).
 - A single short "ahoge" strand sticking up from the top of the head.
 - Short fringe/bangs over the forehead.
-- Large round RED eyes (#C0363A) with two small white highlights. Eyes
-  are fully open, NOT half-lidded, NOT tired. She looks calm and composed.
+- Large round vivid RED eyes (#D33023) with two small white highlights.
+  Eyes are fully open, NOT half-lidded, NOT tired. She looks calm and composed.
 - Soft but subdued pink cheek blushes (#F5B5B0), more restrained than chibiwafu.
 - A tiny, barely-visible nose: just a small dot or simple inverted V.
-- Wears a RED COLLAR around the neck (#B82B2B), with a GOLDEN BELL
-  (#E8C84A) hanging from the front center of the collar. This is the
-  signature feature — always draw the collar and bell clearly.
-- Wears a white DIAPER on the lower body with a PINK paw-print motif
-  (#F5B5B0) on the center. NOTE: the paw-print is PINK for furana
-  (different from chibiwafu whose paw-print is brown).
+- Wears a RED COLLAR around the neck (#D12E21), with an ANTIQUE-GOLD BELL
+  (#EFC573) hanging from the front center of the collar. The bell is a
+  warm muted gold, NOT a bright neon yellow. This is the signature
+  feature — always draw the collar and bell clearly.
+- Wears a white DIAPER (#FAFAFA) on the lower body with a vivid PINK
+  paw-print motif (#FC97A6) on the center. NOTE: the paw-print is PINK
+  for furana (different from chibiwafu whose paw-print is brown).
 - A fluffy tail in the same body color with a small peach-pink ribbon
-  (#F2A576) tied at the BASE of the tail (same as chibiwafu).
-- Proportions: head roughly equal to or slightly smaller than body
-  (head:body ≈ 0.9-1.0 : 1.0), body elongated compared to a chibiwafu.
-  About 2-head-bodies total. Still SD chibi style (short arms, short
-  legs, rounded body). For this single-asset output, fill 70% of canvas
-  per the FRAMING instruction below (the "1.8x vs chibiwafu" scale only
-  applies when both are composited together in scene, NOT here).
+  (#F9C4A1) tied at the BASE of the tail (same as chibiwafu).
+- Proportions: the head is still slightly larger than the body, but less
+  dominant than in a chibiwafu (head:body ≈ 1.2:1 vs chibiwafu's 1.5:1).
+  Head ~55% of total height, body ~35%, legs ~10%. The body is more
+  elongated than a chibiwafu but the head is still the largest portion.
+  For this single-asset output, fill 70% of canvas per the FRAMING
+  instruction below (the "1.8x vs chibiwafu" scale only applies when
+  both are composited together in scene, NOT here).
 - Has two clearly visible legs and two arms, same style as chibiwafu
   (no joints, no fingers, no claws).
 - NO neck outline (head still sits directly on body; the collar goes
@@ -351,3 +353,12 @@ Redraw with the diaper on the lower body and the ribbon at the tail base.
   - § 7 ワークフローを § 7.1 ちびわふ / § 7.2 フラナ にキャラ別分岐
   - リファレンス画像の分岐（chibiwafu/01_normal.png vs furana/01_normal.png）明示
   - 所有格 "chibiwafu's → furana's" の置換ルール追加（§7.2 step 3）
+- v0.4 全色値・頭身比を実測値に置換（10_character_design.md v0.4 と同期）：
+  - § 1 ちびわふ CHARACTER の体色 / 瞳 / 茶肉球 / リボン の hex を実測値に
+  - § 1 ちびわふ頭身比を「head:body 1.05:1, 頭 45-50%」→「1.5:1, 頭 60%」に
+  - § 2 フラナ CHARACTER の体色 / 赤目 / 首輪 / 鈴 / ピンク肉球 / リボン の
+    hex を実測値に
+  - § 2 フラナ頭身比を「head:body 0.9-1.0:1」→「1.2:1, 頭 55%」に修正
+    （実測：フラナも頭が体より大きい、ちびわふより僅差）
+  - 鈴を「golden bell」→「antique-gold bell」、爽やかな金 → 落ち着いた金 に表現修正
+  - ピンク肉球を「pink」→「vivid PINK」に強調（実測の鮮やかさを反映）
