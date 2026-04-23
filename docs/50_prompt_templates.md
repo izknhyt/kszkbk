@@ -101,15 +101,12 @@ CHARACTER (fixed design, must NOT deviate):
   (different from chibiwafu whose paw-print is brown).
 - A fluffy tail in the same body color with a small peach-pink ribbon
   (#F2A576) tied at the BASE of the tail (same as chibiwafu).
-- Proportions: unlike the chibiwafu (whose head is slightly larger than
-  its body), the furana has a more elongated body, so the head is roughly
-  EQUAL to or SLIGHTLY SMALLER than the body (head:body ≈ 1.0:1.0 to
-  0.9:1.0). Overall about 2-head-bodies tall. She is noticeably taller
-  and more elongated than a chibiwafu, but still SD chibi proportions
-  overall (short arms, short legs, rounded body).
-  (Note: the "1.8x" scale relative to a chibiwafu only applies when both
-  are composited together in scene — for a single-asset order, still
-  fill about 70% of canvas height per the FRAMING instruction below.)
+- Proportions: head roughly equal to or slightly smaller than body
+  (head:body ≈ 0.9-1.0 : 1.0), body elongated compared to a chibiwafu.
+  About 2-head-bodies total. Still SD chibi style (short arms, short
+  legs, rounded body). For this single-asset output, fill 70% of canvas
+  per the FRAMING instruction below (the "1.8x vs chibiwafu" scale only
+  applies when both are composited together in scene, NOT here).
 - Has two clearly visible legs and two arms, same style as chibiwafu
   (no joints, no fingers, no claws).
 - NO neck outline (head still sits directly on body; the collar goes

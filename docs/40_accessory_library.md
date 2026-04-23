@@ -36,7 +36,7 @@
 | 13 | 絆創膏 | 顔前面（頬） | tough 低 / 被虐歴 | Small beige adhesive bandage on one cheek, X-shape |
 | 14 | ぬいぐるみ | 尻尾横 | ukiyo（浮世離れ） | Tiny blue teddy bear plush held in one paw, a bit worn |
 | 15 | 音符 | 頭上 | スズファン / onkai | Small black musical note symbol floating above head |
-| 16 | 赤リボン | 頭上（耳の付け根） | akachan感 | Red ribbon bow (not peach-pink — use `#E05860` or similar red-pink) tied at the base of one ear. **注**: 尻尾根元の桃色リボン (`#F2A576`) と色・位置で区別すること。アクセサリ版は耳元、色は赤寄せ |
+| 16 | 赤リボン | 頭上（耳の付け根） | akachan感 | Red ribbon bow (color fixed at `#E05860`, NOT peach-pink) tied at the base of one ear. **注**: 尻尾根元の桃色リボン (`#F2A576`) と色・位置で区別すること。アクセサリ版は耳元で色は `#E05860` 固定 |
 | 17 | 頬赤（酔い） | 顔前面 | nomisuke（酒好き） | Enhanced pink blush on cheeks, one whiskey drop near mouth |
 | 18 | はてなマーク | 頭上 | tabikko（迷子癖） | Floating "?" symbol above head, light gray |
 | 19 | 鼻血 | 顔前面 | oshaberi 激 / namaiki | Small red droplet hanging from one nostril |
