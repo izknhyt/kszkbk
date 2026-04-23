@@ -2511,6 +2511,76 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   // 怒ってる子 → 怯える
   emergentPeerReactions(w, c);
 
+  // Σ-5-d: 狼検知と逃走 AI
+  if (!c.flight && c.state !== 'dead' && c.state !== 'sleep') {
+    const WOLF_DETECT_RADIUS = 80;
+    let nearestWolf: { pos: { x: number; y: number } } | null = null;
+    let nearestWolfDist = Infinity;
+    for (const wolf of w.wolves) {
+      if (wolf.state === 'dead') continue;
+      const wd = Math.hypot(wolf.pos.x - c.pos.x, wolf.pos.y - c.pos.y);
+      if (wd < WOLF_DETECT_RADIUS && wd < nearestWolfDist) {
+        nearestWolfDist = wd;
+        nearestWolf = wolf;
+      }
+    }
+
+    if (nearestWolf) {
+      // sanctuary（家・火の見やぐら 40px 以内）に居れば safe
+      const inSanctuary = w.features.some((f) =>
+        (f.kind === 'house' || f.kind === 'firewatch') && Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= 40
+      );
+      if (!inSanctuary) {
+        // scared ステートに遷移
+        if (c.state !== 'scared') {
+          setState(c, 'scared', 0.6);
+          if (Math.random() < 0.4) {
+            const FLEE_LINES = ['ぎゃああわふ！', '狼こわいわふ！', 'むり！もうむり！', 'たすけてわふ〜！', 'ひぃぃぃわふ！'];
+            spawnBubble(w.bubbles, c.pos, FLEE_LINES[Math.floor(Math.random() * FLEE_LINES.length)]!, 'speech', 1.5);
+          }
+        }
+        // 狼から離れる方向に移動（1.3 倍速）
+        const fdx = c.pos.x - nearestWolf.pos.x;
+        const fdy = c.pos.y - nearestWolf.pos.y;
+        const fLen = Math.max(0.001, Math.hypot(fdx, fdy));
+        const fleeSpeed = c.speed * 1.3;
+
+        // sanctuary がある方向は優先して逃げ込む
+        let sx = fdx / fLen, sy = fdy / fLen;
+        for (const f of w.features) {
+          if (f.kind !== 'house' && f.kind !== 'firewatch') continue;
+          const sd = Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y);
+          if (sd < 200) {
+            sx = (f.pos.x - c.pos.x) / Math.max(1, sd);
+            sy = (f.pos.y - c.pos.y) / Math.max(1, sd);
+            c.target = { x: f.pos.x, y: f.pos.y };
+            break;
+          }
+        }
+
+        c.pos.x += sx * fleeSpeed * dt;
+        c.pos.y += sy * fleeSpeed * dt;
+        c.faceLeft = sx < 0;
+        c.fatigue = Math.min(100, c.fatigue + dt * 8);  // 全力疾走で疲労 +8/sec
+
+        // 疲労 >= 90 で collapse → fled_to_exhaustion
+        if (c.fatigue >= 90) {
+          setState(c, 'exhausted', 2.0);
+          pushLife(c, Math.floor(c.ageSec), '狼に追われて走り疲れた');
+          // 近くに狼がいてかつ fatigue 高すぎ → 食われる
+          if (nearestWolfDist < 50 && Math.random() < 0.6) {
+            spawnBubble(w.bubbles, c.pos, 'もう……だめ……わふ', 'speech', 1.8);
+            kill(w, c, 'fled_to_exhaustion');
+            return;
+          }
+        }
+      }
+    } else if (c.state === 'scared') {
+      // 狼が去ったら idle に戻る
+      setState(c, 'idle', 0.3);
+    }
+  }
+
   // 移動（止まってるステート中は動かない）
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
     const cocoon = w.npcs.find((n) => n.id === 'cocoon');
