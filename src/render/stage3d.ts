@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import type { WorldState } from '../sim/world';
 import { POWERLINE_CONNECT_RADIUS, TERRAIN_TILE_SIZE } from '../sim/world';
-import type { ChibiState, DayPhase, HitTarget, PlacedBuilding, Season } from '../types';
+import type { ChibiState, DayPhase, Difficulty, HitTarget, PlacedBuilding, Season } from '../types';
 import { NPC_DEFS, type NpcId } from '../sim/npcs';
 import { CONFIG } from '../config';
 import type { Bubble } from '../sim/bubbles';
@@ -413,6 +413,16 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   let curCharTint: [number,number,number] = [1,1,1];
   let lastCharTintKey = '';
 
+  // 難度（resetCamera で使用）
+  let currentDifficulty: Difficulty = 'standard';
+
+  // 土砂崩れ煙パーティクル
+  type SmokeParticle = { pts: THREE.Points; mat: THREE.PointsMaterial; startMs: number };
+  let smokeParticles: SmokeParticle[] = [];
+
+  // 地形の前フレーム標高（崩落検出用）
+  let prevElevs: number[][] | null = null;
+
   // --- バブルオーバーレイ ---
   const bubbleOverlay = document.createElement('div');
   Object.assign(bubbleOverlay.style,{position:'absolute',top:'0',left:'0',width:'100%',height:'100%',pointerEvents:'none',overflow:'hidden'});
@@ -645,6 +655,16 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     box.position.y=15*s; box.castShadow=true; g.add(box);
     const roof=new THREE.Mesh(new THREE.ConeGeometry(30*s,20*s,4), new THREE.MeshToonMaterial({color:0x5a311d,gradientMap:gradMap}));
     roof.position.y=40*s; g.add(roof);
+    // Lv 表示ビルボード
+    const lvc=document.createElement('canvas'); lvc.width=64; lvc.height=32;
+    const lctx=lvc.getContext('2d')!;
+    lctx.font='bold 20px sans-serif'; lctx.textAlign='center'; lctx.textBaseline='middle';
+    lctx.strokeStyle='#2a1a0a'; lctx.lineWidth=4; lctx.strokeText(`Lv${b.level}`,32,16);
+    lctx.fillStyle='#ffffff'; lctx.fillText(`Lv${b.level}`,32,16);
+    const lvTex=new THREE.CanvasTexture(lvc); lvTex.minFilter=THREE.LinearFilter;
+    const lvMesh=new THREE.Mesh(new THREE.PlaneGeometry(32,16),
+      new THREE.MeshBasicMaterial({map:lvTex,transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+    lvMesh.position.y=60*s+8; g.add(lvMesh);
     return g;
   }
 
@@ -661,6 +681,14 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     prevDrawMs=now; frameCount++;
 
     applyKeyPan(dt);
+    currentDifficulty = world.difficulty;
+
+    // 土砂崩れ煙フェードアウト
+    smokeParticles = smokeParticles.filter(s=>{
+      const t=(now-s.startMs)/500;
+      if(t>=1){ fxGrp.remove(s.pts); s.pts.geometry.dispose(); return false; }
+      s.mat.opacity=0.8*(1-t); return true;
+    });
 
     // 日時計ティント
     if(world.dayPhase!==lastPhase){
@@ -708,6 +736,28 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         refreshTerrainGeo(terrainGeo, world.terrain);
       }
       waterMesh.visible=world.terrain.some(row=>row.some(t=>t.material==='water'));
+
+      // 崩落検出 → 土煙パーティクル（前フレーム比 elev 差 ≥10 のタイル）
+      if(prevElevs){
+        const PR=world.terrain.length, PC=world.terrain[0]?.length??0;
+        for(let r2=0;r2<PR;r2++) for(let c2=0;c2<PC;c2++){
+          const cur=world.terrain[r2]![c2]!.elev, prv=prevElevs[r2]?.[c2]??cur;
+          if(prv-cur<10) continue;
+          const px=(c2+0.5)*TERRAIN_TILE_SIZE, pz=(r2+0.5)*TERRAIN_TILE_SIZE, py=prv*ELEV_SCALE;
+          const N=30; const pos=new Float32Array(N*3);
+          for(let i=0;i<N;i++){
+            pos[i*3]  =px+(Math.random()-.5)*TERRAIN_TILE_SIZE;
+            pos[i*3+1]=py+Math.random()*30;
+            pos[i*3+2]=pz+(Math.random()-.5)*TERRAIN_TILE_SIZE;
+          }
+          const geo=new THREE.BufferGeometry();
+          geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+          const mat=new THREE.PointsMaterial({color:0x8b6040,size:8,transparent:true,opacity:0.8,depthWrite:false});
+          const pts=new THREE.Points(geo,mat);
+          fxGrp.add(pts); smokeParticles.push({pts,mat,startMs:now});
+        }
+      }
+      prevElevs=world.terrain.map(row=>row.map(t=>t.elev));
 
       // 崖線（elev 差 ≥15 の境界に黒 LineSegments）
       if(cliffLines){ scene.remove(cliffLines); cliffLines.geometry.dispose(); cliffLines=null; }
@@ -924,7 +974,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     camera.updateProjectionMatrix();
   }
 
-  function resetCamera(){ focusOn(CONFIG.WORLD_W/2, CONFIG.WORLD_H*0.35, 0.6); }
+  function resetCamera(){
+    if(currentDifficulty==='beginner') focusOn(1600,900,0.7);
+    else if(currentDifficulty==='hell') focusOn(1600,900,1.0);
+    else focusOn(1280,700,0.85);
+  }
 
   // app アダプタ：main.ts が canvas イベントと renderer.on('resize') を使う
   const resizeCbs: Array<(w:number,h:number)=>void> = [];
