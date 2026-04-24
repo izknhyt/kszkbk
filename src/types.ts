@@ -234,7 +234,9 @@ export interface Obstacle {
 export type HitTarget =
   | { kind: 'chibi'; id: number }
   | { kind: 'npc'; id: string }
-  | { kind: 'wolf'; id: number };
+  | { kind: 'wolf'; id: number }
+  | { kind: 'feature'; id: string }
+  | { kind: 'building'; id: string };
 // 1日の位相。time-of-day で挙動・見た目を変える。
 // morning(0-25%) / noon(25-55%) / evening(55-80%) / night(80-100%)
 export type DayPhase = 'morning' | 'noon' | 'evening' | 'night';
