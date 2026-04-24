@@ -304,15 +304,9 @@ async function start() {
       flashToast('範囲外です', 'info');
       return;
     }
-    // 既存 feature と 28px 以上離す
-    const TOO_CLOSE = 28;
-    const conflicts = world.features.some(
-      (f) => Math.hypot(f.pos.x - x, f.pos.y - y) < TOO_CLOSE,
-    );
-    if (conflicts) {
-      flashToast('近くに建物あり', 'info');
-      return;
-    }
+    // 既存 feature との最小間隔チェックは廃止。
+    // 水路が並んだり、家が水路の上にかぶったり、神社が畑に埋まったりするのは
+    // くそざこ村としてむしろ正しい挙動（狭い土地にぎゅうぎゅう詰め可）。
     const cost = plotBuildCosts[buildMode];
     const plankCost = cost.plank ?? 0;
     if (world.resources.wood < cost.wood || world.resources.stone < cost.stone || world.resources.plank < plankCost) {
