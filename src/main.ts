@@ -11,6 +11,7 @@ import {
   ensurePlots,
   forceSpawn,
   launchFlight,
+  LOWER_SOIL_GAIN,
   tickWorld,
   triggerBokaigi,
   triggerFire,
@@ -244,10 +245,10 @@ async function start() {
     if (f.devLevel >= 2) return;  // 完成済みはキャンセル不可
     const cost = plotBuildCosts[f.kind as BuildKind];
     if (!cost) return;
-    const refundWood  = Math.ceil(cost.wood / 2);
-    const refundStone = Math.ceil(cost.stone / 2);
-    const refundPlank = Math.ceil((cost.plank ?? 0) / 2);
-    const refundSoil  = Math.ceil((cost.soil ?? 0) / 2);
+    const refundWood  = Math.ceil(cost.wood * 0.8);
+    const refundStone = Math.ceil(cost.stone * 0.8);
+    const refundPlank = Math.ceil((cost.plank ?? 0) * 0.8);
+    const refundSoil  = Math.ceil((cost.soil ?? 0) * 0.8);
     world.resources.wood  += refundWood;
     world.resources.stone += refundStone;
     world.resources.plank += refundPlank;
@@ -468,6 +469,16 @@ async function start() {
     }
     closeChibiModal();
     pinnedId = null;
+  });
+
+  // terraform ジョブ完了 toast
+  stage.canvas.addEventListener('kszk-terraform-complete', (e) => {
+    const {target} = (e as CustomEvent).detail as {target: 'raise'|'lower'};
+    if(target==='raise'){
+      flashToast('⛰ 盛り土完了！', 'info');
+    } else {
+      flashToast(`⛏ 切り土完了（🌱soil+${LOWER_SOIL_GAIN} 獲得）`, 'info');
+    }
   });
 
   // 左クリック（動かなかった場合）→ 殴る
