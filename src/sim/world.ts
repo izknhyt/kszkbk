@@ -1115,6 +1115,24 @@ export const LOWER_SOIL_GAIN = 18;
 export const LOWER_STONE_GAIN = 7;  // rock タイルから
 
 // 盛り土ジョブをキューに追加。soil 消費は即時（ジョブ登録時点で予約）。
+// Σ-6-x: terraform ジョブ優先指示（Map で transient に管理、5 分で expire）。
+// プレイヤーがクリックで置いたジョブは自動的に優先扱い → ちびわふが集まる。
+const terraformPriorityExpire = new Map<string, number>();
+
+function markTerraformPriority(jobId: string, durationSec = 300): void {
+  terraformPriorityExpire.set(jobId, Date.now() + durationSec * 1000);
+}
+
+function getActiveTerraformPriorityIds(): Set<string> {
+  const now = Date.now();
+  const active = new Set<string>();
+  for (const [id, expire] of terraformPriorityExpire) {
+    if (expire < now) terraformPriorityExpire.delete(id);
+    else active.add(id);
+  }
+  return active;
+}
+
 export function enqueueTerraformRaise(w: WorldState, tx: number, ty: number): boolean {
   if (tx < 0 || tx >= TERRAIN_COLS || ty < 0 || ty >= TERRAIN_ROWS) return false;
   if (w.resources.soil < RAISE_COST_SOIL) return false;
@@ -1124,18 +1142,26 @@ export function enqueueTerraformRaise(w: WorldState, tx: number, ty: number): bo
     if (w.terraformJobs[existing]!.target === 'raise') {
       w.resources.soil += RAISE_COST_SOIL;
     }
+    terraformPriorityExpire.delete(w.terraformJobs[existing]!.id);
     w.terraformJobs.splice(existing, 1);
   }
   w.resources.soil -= RAISE_COST_SOIL;
-  w.terraformJobs.push({ id: `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`, tx, ty, target: 'raise', progress: 0 });
+  const jobId = `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  w.terraformJobs.push({ id: jobId, tx, ty, target: 'raise', progress: 0 });
+  markTerraformPriority(jobId, 300);  // 新規登録時は 5 分間優先
   return true;
 }
 
 export function enqueueTerraformLower(w: WorldState, tx: number, ty: number): boolean {
   if (tx < 0 || tx >= TERRAIN_COLS || ty < 0 || ty >= TERRAIN_ROWS) return false;
   const existing = w.terraformJobs.findIndex((j) => j.tx === tx && j.ty === ty);
-  if (existing >= 0) w.terraformJobs.splice(existing, 1);
-  w.terraformJobs.push({ id: `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`, tx, ty, target: 'lower', progress: 0 });
+  if (existing >= 0) {
+    terraformPriorityExpire.delete(w.terraformJobs[existing]!.id);
+    w.terraformJobs.splice(existing, 1);
+  }
+  const jobId = `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  w.terraformJobs.push({ id: jobId, tx, ty, target: 'lower', progress: 0 });
+  markTerraformPriority(jobId, 300);  // 新規登録時は 5 分間優先
   return true;
 }
 
@@ -2435,6 +2461,7 @@ interface WanderEnvCache {
   obstaclePositions: Vec2[];
   shrinePositions: Vec2[];
   terraformJobPositions: Vec2[];
+  priorityTerraformJobPositions: Vec2[]; // Σ-6-x: 直近 5 分の terraform ジョブ（自動優先）
   constructionPositions: Vec2[]; // Σ-5-e-b: 建設中 feature（devLevel < 2）の位置
   priorityConstructionPositions: Vec2[]; // Σ-6-x: プレイヤー指示「優先建設」の位置
 }
@@ -2465,13 +2492,19 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   const obstaclePositions: Vec2[] = w.obstacles.map((o) => o.pos);
   for (const f of w.features) if (f.kind === 'sawmill' || f.kind === 'kiln' || f.kind === 'loom') obstaclePositions.push(f.pos);
   // Σ-5-a: terraform ジョブのタイル中心座標
-  const terraformJobPositions: Vec2[] = w.terraformJobs.map((j) => ({
-    x: (j.tx + 0.5) * TERRAIN_TILE_SIZE,
-    y: (j.ty + 0.5) * TERRAIN_TILE_SIZE,
-  }));
+  // Σ-6-x: 直近置かれたジョブは priorityTerraformJobPositions に入れる（自動 5 分優先）
+  const terraformJobPositions: Vec2[] = [];
+  const priorityTerraformJobPositions: Vec2[] = [];
+  const terraformPriorityIds = getActiveTerraformPriorityIds();
+  for (const j of w.terraformJobs) {
+    const p = { x: (j.tx + 0.5) * TERRAIN_TILE_SIZE, y: (j.ty + 0.5) * TERRAIN_TILE_SIZE };
+    terraformJobPositions.push(p);
+    if (terraformPriorityIds.has(j.id)) priorityTerraformJobPositions.push(p);
+  }
   _wanderEnvCache = {
     tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions,
-    shrinePositions, terraformJobPositions, constructionPositions, priorityConstructionPositions,
+    shrinePositions, terraformJobPositions, priorityTerraformJobPositions,
+    constructionPositions, priorityConstructionPositions,
   };
   return _wanderEnvCache;
 }
@@ -2846,6 +2879,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       obstaclePositions: env.obstaclePositions,
       farmPositions: env.farmPositions,
       terraformJobPositions: env.terraformJobPositions,
+      priorityTerraformJobPositions: env.priorityTerraformJobPositions,
       constructionPositions: env.constructionPositions,
       priorityConstructionPositions: env.priorityConstructionPositions,
     });
@@ -3295,7 +3329,9 @@ function updateFuranaBehavior(w: WorldState, n: NpcState, dt: number) {
   if (n.abuseCooldown > 0) return;
   // 攻撃候補（70px 以内）は空間分割で絞る。フラナの "最寄りを追う" 移動は
   // pickFuranaTarget が全走査で行うので、遠くの子へも向かって行ける。
-  const candidates = w.chibiHash.nearby(n.pos, 70).filter((c) => distance(c.pos, n.pos) < 70);
+  // Σ-6-x: 新生児保護（ageSec < 5）→ 生まれた瞬間にぶん投げられて即死を防ぐ
+  const candidates = w.chibiHash.nearby(n.pos, 70)
+    .filter((c) => distance(c.pos, n.pos) < 70 && c.ageSec >= 5);
   if (candidates.length === 0) {
     n.abuseCooldown = 2 + Math.random() * 2;
     return;
@@ -3523,7 +3559,9 @@ function applyFuranaLossPanic(w: WorldState, dt: number) {
 function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
   n.abuseCooldown -= dt;
   if (n.abuseCooldown > 0) return;
-  const candidates = w.chibiHash.nearby(n.pos, 90).filter((c) => distance(c.pos, n.pos) < 90);
+  // Σ-6-x: 新生児保護（ageSec < 5）→ 生まれた瞬間に棒で突かれるのを防ぐ
+  const candidates = w.chibiHash.nearby(n.pos, 90)
+    .filter((c) => distance(c.pos, n.pos) < 90 && c.ageSec >= 5);
   if (candidates.length === 0) {
     n.abuseCooldown = 0.6;
     return;
