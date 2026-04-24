@@ -400,6 +400,40 @@ export function currentMods(w: WorldState): DifficultyMods {
   return DIFFICULTY_MODS[w.difficulty];
 }
 
+// ============================================================
+// 建設優先指示（Σ-6-x）：プレイヤーが「ここを優先して建てて」と指定した feature の
+// 有効期限を timestamp で管理。期限切れは自動で通常扱いに戻る。
+// wanderStep env の priorityConstructionPositions に反映される。
+// ============================================================
+const constructionPriorityExpire = new Map<string, number>();  // featureId → epoch(ms)
+
+/** featureId に優先指示を付ける（期限 durationSec 秒、デフォ 300=5分） */
+export function setConstructionPriority(featureId: string, durationSec = 300): void {
+  constructionPriorityExpire.set(featureId, Date.now() + durationSec * 1000);
+}
+
+/** 現在優先中の featureId セット（期限切れを自動削除） */
+function getActivePriorityIds(): Set<string> {
+  const now = Date.now();
+  const active = new Set<string>();
+  for (const [id, expire] of constructionPriorityExpire) {
+    if (expire < now) constructionPriorityExpire.delete(id);
+    else active.add(id);
+  }
+  return active;
+}
+
+/** 外部（main.ts UI）から優先状態を問い合わせるためのヘルパー */
+export function isConstructionPriority(featureId: string): boolean {
+  const expire = constructionPriorityExpire.get(featureId);
+  if (expire == null) return false;
+  if (expire < Date.now()) {
+    constructionPriorityExpire.delete(featureId);
+    return false;
+  }
+  return true;
+}
+
 // 接続距離：water/channel 同士はこの半径以内で繋がる
 const WATER_LINK_RADIUS = 70;
 // 畑が water/channel の効果を受ける最大距離
@@ -1380,7 +1414,7 @@ export function updateTerrainStability(w: WorldState, dt: number): void {
 // =========================================================================
 
 const WOLF_MAX_HP = 30;
-const WOLF_SPEED = 55;
+const WOLF_SPEED = 75;  // Σ-6-x：55 → 75（ちびわふ最速 28 に対して 2.7 倍、より狩猟本能を強調）
 const WOLF_BITE_RANGE = 22;
 const WOLF_BITE_DAMAGE = 28;  // HP 20 の弱い子は一撃、HP 40+ の丈夫は2発必要
 const WOLF_SPAWN_INTERVAL_NIGHT_BASE = 75;  // 夜の平均スポーン間隔（秒）
@@ -2402,6 +2436,7 @@ interface WanderEnvCache {
   shrinePositions: Vec2[];
   terraformJobPositions: Vec2[];
   constructionPositions: Vec2[]; // Σ-5-e-b: 建設中 feature（devLevel < 2）の位置
+  priorityConstructionPositions: Vec2[]; // Σ-6-x: プレイヤー指示「優先建設」の位置
 }
 let _wanderEnvCache: WanderEnvCache | null = null;
 function getWanderEnv(w: WorldState): WanderEnvCache {
@@ -2409,10 +2444,15 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   const farmPositions: Vec2[] = [];
   const shrinePositions: Vec2[] = [];
   const constructionPositions: Vec2[] = [];
+  const priorityConstructionPositions: Vec2[] = [];
+  const priorityIds = getActivePriorityIds();
   for (const f of w.features) {
     if (f.kind === 'farm') farmPositions.push(f.pos);
     else if (f.kind === 'shrine') shrinePositions.push(f.pos);
-    if (f.devLevel < 2) constructionPositions.push(f.pos);
+    if (f.devLevel < 2) {
+      constructionPositions.push(f.pos);
+      if (priorityIds.has(f.id)) priorityConstructionPositions.push(f.pos);
+    }
   }
   const noukouPositions: Vec2[] = [];
   const taikoPositions: Vec2[] = [];
@@ -2429,7 +2469,10 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
     x: (j.tx + 0.5) * TERRAIN_TILE_SIZE,
     y: (j.ty + 0.5) * TERRAIN_TILE_SIZE,
   }));
-  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions, terraformJobPositions, constructionPositions };
+  _wanderEnvCache = {
+    tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions,
+    shrinePositions, terraformJobPositions, constructionPositions, priorityConstructionPositions,
+  };
   return _wanderEnvCache;
 }
 
@@ -2802,6 +2845,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       farmPositions: env.farmPositions,
       terraformJobPositions: env.terraformJobPositions,
       constructionPositions: env.constructionPositions,
+      priorityConstructionPositions: env.priorityConstructionPositions,
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {

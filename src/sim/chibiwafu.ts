@@ -78,6 +78,8 @@ interface WanderEnv {
   terraformJobPositions: Vec2[];
   // 建設中 feature 位置リスト（Σ-5-e-b：terraform に次ぐ労働先）
   constructionPositions: Vec2[];
+  // 優先建設中 feature 位置リスト（Σ-6-x：プレイヤー指示で他より優先）
+  priorityConstructionPositions: Vec2[];
 }
 
 // ============================================================
@@ -92,6 +94,20 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
     let newTarget: Vec2 | null = null;
 
     if (env) {
+      // Σ-6-x: 優先建設指示（プレイヤー指示）がある場合、90% で最優先。
+      //   nonbiri でも 75%、zako>60 でも 80%（くそざこ味を残しつつ、指示は比較的守る）
+      if (!newTarget && env.priorityConstructionPositions.length > 0) {
+        const prChance = c.traits.includes('nonbiri') ? 0.75 : c.params.zako > 60 ? 0.80 : 0.90;
+        if (Math.random() < prChance) {
+          const ranked = env.priorityConstructionPositions
+            .slice()
+            .sort((a, b) => distance(c.pos, a) - distance(c.pos, b))
+            .slice(0, 3);
+          const pp = ranked[Math.floor(Math.random() * ranked.length)]!;
+          newTarget = { x: pp.x + (Math.random() - 0.5) * 10, y: pp.y + (Math.random() - 0.5) * 10 };
+          announcementKey = 'work';
+        }
+      }
       // Σ-5-a: terraform ジョブが最優先（70% 確率でこちらに向かう、のんびりは 40%、zako>60 は 50%）
       const tfChance = c.traits.includes('nonbiri') ? 0.40 : c.params.zako > 60 ? 0.50 : 0.70;
       if (!newTarget && env.terraformJobPositions.length > 0 && Math.random() < tfChance) {

@@ -51,7 +51,7 @@ import { CONFIG, type TimeScale } from './config';
 import { DEATH_CAUSES } from './sim/deaths';
 import type { Difficulty } from './types';
 import { BUILDINGS } from './city/buildings';
-import { CONSTRUCTION_SEC } from './sim/world';
+import { CONSTRUCTION_SEC, isConstructionPriority, setConstructionPriority } from './sim/world';
 
 const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   beginner: '初心者',
@@ -882,7 +882,18 @@ async function start() {
     }
     if (detail.target?.kind === 'feature') {
       const f = world.features.find((x) => x.id === detail.target!.id);
-      if (f) { showFeatureModal(f, () => cancelConstruction(f.id)); return; }
+      if (f) {
+        showFeatureModal(
+          f,
+          () => cancelConstruction(f.id),
+          () => {
+            setConstructionPriority(f.id, 300);
+            flashToast('📣 優先建設にしたわふ（5 分間）', 'info');
+          },
+          isConstructionPriority(f.id),
+        );
+        return;
+      }
     }
     if (detail.target?.kind === 'building') {
       const parts = detail.target.id.split(':');
@@ -1636,7 +1647,7 @@ function closeChibiModal() {
   document.getElementById('chibi-modal')!.classList.add('hidden');
 }
 
-function showFeatureModal(f: Feature, onCancelBuild?: () => void) {
+function showFeatureModal(f: Feature, onCancelBuild?: () => void, onSetPriority?: () => void, isPriority?: boolean) {
   const modal = document.getElementById('chibi-modal')!;
   modal.classList.remove('hidden');
   const FEAT_EMOJI: Partial<Record<string, string>> = {
@@ -1701,17 +1712,32 @@ function showFeatureModal(f: Feature, onCancelBuild?: () => void) {
   document.getElementById('modal-flavors')!.innerHTML = `<li>${escapeHtml(FEAT_EFFECT[f.kind] ?? '説明なし')}</li>`;
   const lifeEl = document.getElementById('modal-life')!;
   lifeEl.innerHTML = `<li style="color:#a89060">t=${Math.round(f.workSec)}s 経過</li>`;
-  // 建設中のみ「解体」ボタンを追加（半額返金、1 クリック即実行）
-  if (!isBuilding && onCancelBuild) {
-    const btn = document.createElement('button');
-    btn.textContent = '❌ 解体（半額返金）';
-    btn.className = 'danger';
-    btn.style.cssText = 'margin-top:8px;padding:6px 12px;cursor:pointer;';
-    btn.addEventListener('click', () => {
-      onCancelBuild();
-      closeChibiModal();
-    });
-    lifeEl.appendChild(btn);
+  // 建設中のみ「優先建設」「解体」ボタンを追加
+  if (!isBuilding) {
+    // 📣 優先建設（5 分間、ちびわふが 90% でここを選ぶ）
+    if (onSetPriority) {
+      const pbtn = document.createElement('button');
+      pbtn.textContent = isPriority ? '📣 優先中（5 分）' : '📣 優先建設（5 分間）';
+      pbtn.style.cssText = `margin-top:8px;margin-right:8px;padding:6px 12px;cursor:pointer;background:${isPriority?'#d89040':'#8ac05a'};color:#fff;border:none;border-radius:3px;font-weight:700`;
+      if (isPriority) pbtn.disabled = true;
+      pbtn.addEventListener('click', () => {
+        onSetPriority();
+        closeChibiModal();
+      });
+      lifeEl.appendChild(pbtn);
+    }
+    // ❌ 解体（80% 返金）
+    if (onCancelBuild) {
+      const btn = document.createElement('button');
+      btn.textContent = '❌ 解体（80% 返金）';
+      btn.className = 'danger';
+      btn.style.cssText = 'margin-top:8px;padding:6px 12px;cursor:pointer;';
+      btn.addEventListener('click', () => {
+        onCancelBuild();
+        closeChibiModal();
+      });
+      lifeEl.appendChild(btn);
+    }
   }
 }
 
