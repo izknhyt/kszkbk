@@ -349,7 +349,7 @@ export const DIFFICULTY_MODS: Record<Difficulty, DifficultyMods> = {
     fatigueMul: 1.0,
     obstacleCount: 90,
     eventIntervalMul: 1.0,
-    initialResources: { food: 20, water: 0, wood: 15, stone: 10, plank: 2, power: 5, brick: 2, wool: 2, cloth: 1, soil: 40 },
+    initialResources: { food: 25, water: 0, wood: 20, stone: 15, plank: 4, power: 5, brick: 2, wool: 2, cloth: 1, soil: 40 },
   },
   hell: {
     hazardMul: 1.8,
@@ -1041,8 +1041,8 @@ export function worldToTile(x: number, y: number): { tx: number; ty: number } {
 
 const RAISE_COST_SOIL = 10;
 const RAISE_ELEV_AMOUNT = 5;
-const LOWER_SOIL_GAIN = 14;
-const LOWER_STONE_GAIN = 5;  // rock タイルから
+export const LOWER_SOIL_GAIN = 18;
+export const LOWER_STONE_GAIN = 7;  // rock タイルから
 
 // 盛り土ジョブをキューに追加。soil 消費は即時（ジョブ登録時点で予約）。
 export function enqueueTerraformRaise(w: WorldState, tx: number, ty: number): boolean {
@@ -3566,9 +3566,9 @@ const OBSTACLE_DROPS: Record<ObstacleKind, 'wood' | 'stone'> = {
   bush: 'wood',
 };
 const OBSTACLE_DROP_AMOUNT: Record<ObstacleKind, number> = {
-  rock: 2,
-  stump: 2,
-  bush: 1,
+  rock: 3,
+  stump: 3,
+  bush: 2,
 };
 function updateLabor(w: WorldState, dt: number) {
   if (w.obstacles.length === 0) return;

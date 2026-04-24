@@ -691,6 +691,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const tfDivs = new Map<string, HTMLDivElement>();
   // jobId → last worker が居た時刻（秒）
   const tfLastWorkerSec = new Map<string, number>();
+  // jobId → job type（完了検知のため前フレームの状態を保持）
+  const tfPrevJobIds = new Map<string, 'raise' | 'lower'>();
 
   // --- Σ-5-e-c: 建設進捗オーバーレイ ---
   const cnOverlay = document.createElement('div');
@@ -723,13 +725,16 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const bubbleDivs = new Map<number, HTMLDivElement>();
 
   // --- terraform / stability — InstancedMesh（毎フレーム dispose を廃止）---
-  const _tfGeo = new THREE.BoxGeometry(TERRAIN_TILE_SIZE*0.88,4,TERRAIN_TILE_SIZE*0.88);
+  const _tfGeo = new THREE.BoxGeometry(TERRAIN_TILE_SIZE*0.88,8,TERRAIN_TILE_SIZE*0.88);
   const tfRaiseIM = new THREE.InstancedMesh(_tfGeo,
-    new THREE.MeshBasicMaterial({color:0xc89650,transparent:true,opacity:0.5}), 50);
+    new THREE.MeshBasicMaterial({color:0xffb040,transparent:true,opacity:0.65}), 50);
   const tfLowerIM = new THREE.InstancedMesh(_tfGeo,
-    new THREE.MeshBasicMaterial({color:0x1e1e1e,transparent:true,opacity:0.5}), 50);
+    new THREE.MeshBasicMaterial({color:0x40a0ff,transparent:true,opacity:0.65}), 50);
   tfRaiseIM.count=0; tfLowerIM.count=0;
   fxGrp.add(tfRaiseIM,tfLowerIM);
+
+  // terraform タイル境界アウトライン（白線、毎フレーム再構築）
+  let tfOutlineLines: THREE.LineSegments | null = null;
 
   const _stGeo = new THREE.BoxGeometry(TERRAIN_TILE_SIZE*0.94,3,TERRAIN_TILE_SIZE*0.94);
   const stWarnIM = new THREE.InstancedMesh(_stGeo,
@@ -1120,17 +1125,68 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
     }
 
-    // ---- Terraform オーバーレイ（InstancedMesh）----
-    let tfRI=0, tfLI=0;
-    for(const job of world.terraformJobs){
-      const wx=(job.tx+0.5)*TERRAIN_TILE_SIZE, wz=(job.ty+0.5)*TERRAIN_TILE_SIZE;
-      _imDummy.position.set(wx,elevAt(world.terrain,wx,wz)+2,wz); _imDummy.updateMatrix();
-      if(job.target==='raise') tfRaiseIM.setMatrixAt(tfRI++,_imDummy.matrix);
-      else tfLowerIM.setMatrixAt(tfLI++,_imDummy.matrix);
+    // ---- Terraform オーバーレイ（InstancedMesh + 点滅 + 境界アウトライン）----
+    {
+      // 完了したジョブ検知（前フレームにあって今フレームにないもの = 完了）
+      const currentJobIds = new Set(world.terraformJobs.map(j=>j.id));
+      for(const [id, target] of tfPrevJobIds){
+        if(!currentJobIds.has(id)){
+          canvas.dispatchEvent(new CustomEvent('kszk-terraform-complete',{detail:{target}}));
+        }
+      }
+      tfPrevJobIds.clear();
+      for(const job of world.terraformJobs) tfPrevJobIds.set(job.id, job.target);
+
+      // 作業者有無を判定（raise / lower 別に any-worker フラグ）
+      const WORKER_R2 = 28;
+      let raiseHasWorker = false, lowerHasWorker = false;
+      for(const job of world.terraformJobs){
+        const cx=(job.tx+0.5)*TERRAIN_TILE_SIZE, cy=(job.ty+0.5)*TERRAIN_TILE_SIZE;
+        for(const c of world.chibis){
+          if(c.state==='dead'||c.flight) continue;
+          if(Math.hypot(c.pos.x-cx,c.pos.y-cy)<=WORKER_R2){
+            if(job.target==='raise') raiseHasWorker=true; else lowerHasWorker=true;
+            break;
+          }
+        }
+      }
+
+      // 1Hz パルス（作業者あり）または静止暗色（作業者なし）
+      const pulse = Math.sin(world.timeSec*2*Math.PI)*0.5+0.5; // 0→1
+      (tfRaiseIM.material as THREE.MeshBasicMaterial).opacity = raiseHasWorker ? 0.50+pulse*0.20 : 0.38;
+      (tfLowerIM.material as THREE.MeshBasicMaterial).opacity = lowerHasWorker ? 0.50+pulse*0.20 : 0.38;
+
+      let tfRI=0, tfLI=0;
+      const outlinePts:number[]=[];
+      const HS = TERRAIN_TILE_SIZE*0.5;
+      for(const job of world.terraformJobs){
+        const wx=(job.tx+0.5)*TERRAIN_TILE_SIZE, wz=(job.ty+0.5)*TERRAIN_TILE_SIZE;
+        const ey=elevAt(world.terrain,wx,wz);
+        _imDummy.position.set(wx,ey+4,wz); _imDummy.updateMatrix();
+        if(job.target==='raise') tfRaiseIM.setMatrixAt(tfRI++,_imDummy.matrix);
+        else tfLowerIM.setMatrixAt(tfLI++,_imDummy.matrix);
+        // タイル上面の白アウトライン（4辺）
+        const top=ey+8;
+        outlinePts.push(
+          wx-HS,top,wz-HS, wx+HS,top,wz-HS,
+          wx+HS,top,wz-HS, wx+HS,top,wz+HS,
+          wx+HS,top,wz+HS, wx-HS,top,wz+HS,
+          wx-HS,top,wz+HS, wx-HS,top,wz-HS,
+        );
+      }
+      tfRaiseIM.count=tfRI; tfLowerIM.count=tfLI;
+      tfRaiseIM.instanceMatrix.needsUpdate=true;
+      tfLowerIM.instanceMatrix.needsUpdate=true;
+
+      // アウトライン LineSegments 更新
+      if(tfOutlineLines){ fxGrp.remove(tfOutlineLines); tfOutlineLines.geometry.dispose(); tfOutlineLines=null; }
+      if(outlinePts.length){
+        const olg=new THREE.BufferGeometry();
+        olg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(outlinePts),3));
+        tfOutlineLines=new THREE.LineSegments(olg,new THREE.LineBasicMaterial({color:0xffffff,opacity:0.8,transparent:true}));
+        fxGrp.add(tfOutlineLines);
+      }
     }
-    tfRaiseIM.count=tfRI; tfLowerIM.count=tfLI;
-    tfRaiseIM.instanceMatrix.needsUpdate=true;
-    tfLowerIM.instanceMatrix.needsUpdate=true;
 
     // ---- stability 警告（3フレームごと、InstancedMesh）----
     if(frameCount%3===0){
@@ -1428,11 +1484,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         div.style.top=`${sc.y - 20}px`;
 
         const pct=Math.round(job.progress*100);
-        const label=job.target==='raise'?'▲盛':'▽切';
+        const label=job.target==='raise'?'⛰ 盛り土':'⛏ 切り土';
         const barFill=abandoned?'#ff8020':'#4ad870';
         const bg=abandoned?'rgba(200,80,0,0.85)':'rgba(20,10,5,0.75)';
         div.innerHTML=`<div style="background:${bg};border-radius:3px;padding:2px 4px;font-size:10px;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">` +
-          `${abandoned?'⚠ 誰も来ない':`${label} ${pct}% (${workers}人)`}` +
+          `${abandoned?'⚠ 作業者不在':`${label} ${pct}% (${workers}人)`}` +
           `</div><div style="width:40px;height:4px;background:#333;border-radius:2px;margin-top:1px">` +
           `<div style="width:${pct}%;height:100%;background:${barFill};border-radius:2px;transition:width 0.3s"></div></div>`;
       }
