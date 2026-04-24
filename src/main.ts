@@ -22,6 +22,7 @@ import { pushLife } from './sim/world';
 import { isAlive as isChibiAlive, setState } from './sim/chibiwafu';
 import { spawnBubble } from './sim/bubbles';
 import {
+  pickConstructionCancelLine,
   pickGodDefianceLine,
   pickGodPunchLine,
   pickGodShakeLine,
@@ -234,6 +235,41 @@ async function start() {
     generator: 'ペダル発電所', streetlamp: '街灯', powerline: '電線', kiln: '精錬所',
     pasture: '牧場', loom: '織機',
   };
+  // 建設キャンセル：devLevel<2 の feature を解体、半額返金。
+  // 既に投入済みの wood/stone/plank/soil を ceil(cost/2) で返す。
+  function cancelConstruction(fid: string) {
+    const fi = world.features.findIndex((f) => f.id === fid);
+    if (fi < 0) return;
+    const f = world.features[fi]!;
+    if (f.devLevel >= 2) return;  // 完成済みはキャンセル不可
+    const cost = plotBuildCosts[f.kind as BuildKind];
+    if (!cost) return;
+    const refundWood  = Math.ceil(cost.wood / 2);
+    const refundStone = Math.ceil(cost.stone / 2);
+    const refundPlank = Math.ceil((cost.plank ?? 0) / 2);
+    const refundSoil  = Math.ceil((cost.soil ?? 0) / 2);
+    world.resources.wood  += refundWood;
+    world.resources.stone += refundStone;
+    world.resources.plank += refundPlank;
+    world.resources.soil  += refundSoil;
+    // 近くのワーカーから嘆きセリフ
+    let nearestWorker = null as { pos: { x: number; y: number } } | null;
+    let nearestD = Infinity;
+    for (const c of world.chibis) {
+      if (!isChibiAlive(c)) continue;
+      const d = Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y);
+      if (d < 60 && d < nearestD) { nearestWorker = c; nearestD = d; }
+    }
+    const bubblePos = nearestWorker ? nearestWorker.pos : f.pos;
+    spawnBubble(world.bubbles, bubblePos, pickConstructionCancelLine(), 'speech', 2.0);
+    world.features.splice(fi, 1);
+    const parts: string[] = [];
+    if (refundWood  > 0) parts.push(`🪵${refundWood}`);
+    if (refundStone > 0) parts.push(`🪨${refundStone}`);
+    if (refundPlank > 0) parts.push(`🪚${refundPlank}`);
+    if (refundSoil  > 0) parts.push(`🌱${refundSoil}`);
+    flashToast(`🔨 建設キャンセル（返金 ${parts.join(' ')}）`, 'info');
+  }
   function setBuildMode(m: typeof buildMode) {
     buildMode = m;
     document.querySelectorAll<HTMLButtonElement>('.plot-build-btn').forEach((b) => {
@@ -413,7 +449,7 @@ async function start() {
     }
     if (detail.target?.kind === 'feature') {
       const f = world.features.find((x) => x.id === detail.target!.id);
-      if (f) { showFeatureModal(f); return; }
+      if (f) { showFeatureModal(f, () => cancelConstruction(f.id)); return; }
     }
     if (detail.target?.kind === 'building') {
       const parts = detail.target.id.split(':');
@@ -1124,7 +1160,7 @@ function closeChibiModal() {
   document.getElementById('chibi-modal')!.classList.add('hidden');
 }
 
-function showFeatureModal(f: Feature) {
+function showFeatureModal(f: Feature, onCancelBuild?: () => void) {
   const modal = document.getElementById('chibi-modal')!;
   modal.classList.remove('hidden');
   const FEAT_EMOJI: Partial<Record<string, string>> = {
@@ -1187,7 +1223,20 @@ function showFeatureModal(f: Feature) {
   }
   document.getElementById('modal-params')!.innerHTML = statusHtml;
   document.getElementById('modal-flavors')!.innerHTML = `<li>${escapeHtml(FEAT_EFFECT[f.kind] ?? '説明なし')}</li>`;
-  document.getElementById('modal-life')!.innerHTML = `<li style="color:#a89060">t=${Math.round(f.workSec)}s 経過</li>`;
+  const lifeEl = document.getElementById('modal-life')!;
+  lifeEl.innerHTML = `<li style="color:#a89060">t=${Math.round(f.workSec)}s 経過</li>`;
+  // 建設中のみ「解体」ボタンを追加（半額返金、1 クリック即実行）
+  if (!isBuilding && onCancelBuild) {
+    const btn = document.createElement('button');
+    btn.textContent = '❌ 解体（半額返金）';
+    btn.className = 'danger';
+    btn.style.cssText = 'margin-top:8px;padding:6px 12px;cursor:pointer;';
+    btn.addEventListener('click', () => {
+      onCancelBuild();
+      closeChibiModal();
+    });
+    lifeEl.appendChild(btn);
+  }
 }
 
 function showBuildingModal(b: { defId: string; level: number; pos: { x: number; y: number } }) {

@@ -712,3 +712,12 @@ const LU_CONSTRUCTION_ACCIDENT_LINES = [
 export function pickLuConstructionAccidentLine(): string {
   return LU_CONSTRUCTION_ACCIDENT_LINES[Math.floor(Math.random() * LU_CONSTRUCTION_ACCIDENT_LINES.length)]!;
 }
+
+// 建設キャンセル時（近くのワーカーの嘆き、8 種）
+const CONSTRUCTION_CANCEL_LINES = [
+  'やめるわふ？', 'もったいないわふ…', 'もうやらないわふ', 'あ、解体わふ',
+  'こわれちゃったわふ', 'ねえ、ほんとう？わふ', 'ぼくの作品わふ…', 'がんばったのに…わふ',
+];
+export function pickConstructionCancelLine(): string {
+  return CONSTRUCTION_CANCEL_LINES[Math.floor(Math.random() * CONSTRUCTION_CANCEL_LINES.length)]!;
+}
