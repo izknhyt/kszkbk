@@ -1239,22 +1239,26 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
     }
 
-    // ---- Σ-5-e-c: 建設進捗オーバーレイ ----
+    // ---- Σ-5-e-e: 建設進捗オーバーレイ（pt 数値表示）----
     {
       const FEAT_NAME_SHORT: Partial<Record<string,string>>={water:'水源',farm:'畑',channel:'水路',path:'道',house:'家',well:'井戸',firewatch:'火の見',sawmill:'製材所',shrine:'神社',generator:'発電所',streetlamp:'街灯',powerline:'電線',kiln:'精錬所',pasture:'牧場',loom:'織機'};
-      const CONSTRUCTION_SEC_LOCAL: Partial<Record<string,number>>={channel:15,path:15,streetlamp:15,powerline:15,water:25,farm:25,house:40,well:40,firewatch:40,pasture:40,sawmill:60,shrine:60,kiln:60,loom:60,generator:60};
+      // Σ-5-e-e: CONSTRUCTION_PTS に合わせた値（world.ts の CONSTRUCTION_PTS と同値）
+      const CONSTRUCTION_PTS_LOCAL: Partial<Record<string,number>>={channel:25,path:25,streetlamp:25,powerline:25,water:45,farm:45,house:80,well:80,firewatch:80,pasture:80,sawmill:120,shrine:120,kiln:120,loom:120,generator:120};
+      // 複数人ボーナス倍率（world.ts の CONSTRUCTION_BONUS_MUL と同値）
+      const BONUS_MUL=[0,1.0,1.8,2.5,3.0];
       const liveIds=new Set(world.features.filter(f=>f.devLevel<2).map(f=>f.id));
       // 完成した feature の div を削除
       for(const [id,div] of cnDivs){ if(!liveIds.has(id)){ cnOverlay.removeChild(div); cnDivs.delete(id); cnLastWorkerSec.delete(id); } }
       for(const f of world.features){
         if(f.devLevel>=2) continue;
-        const needed=CONSTRUCTION_SEC_LOCAL[f.kind]??30;
-        const pct=Math.min(100,Math.round((f.workSec/needed)*100));
+        const diffMul=world.difficulty==='beginner'?0.7:world.difficulty==='hell'?1.3:1.0;
+        const needed=Math.round((CONSTRUCTION_PTS_LOCAL[f.kind]??45)*diffMul);
+        const currentPt=Math.round(Math.min(f.workSec,needed));
         // worker 数（半径 28px）
         let workers=0;
         for(const c of world.chibis){
           if(c.state==='dead'||!c.pos) continue;
-          if(Math.hypot(c.pos.x-f.pos.x,c.pos.y-f.pos.y)<=32) workers++;
+          if(Math.hypot(c.pos.x-f.pos.x,c.pos.y-f.pos.y)<=28) workers++;
         }
         if(workers>0) cnLastWorkerSec.set(f.id,world.timeSec);
         const sinceWorker=world.timeSec-(cnLastWorkerSec.get(f.id)??-999);
@@ -1268,8 +1272,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         }
         const div=cnDivs.get(f.id)!;
         const name=FEAT_NAME_SHORT[f.kind]??f.kind;
-        const workerStr=workers>0?` (${workers}人)`:'';
-        div.textContent=stale?`⚠ ${name} 無人`:`🔨 ${name} ${pct}%${workerStr}`;
+        const mul=BONUS_MUL[Math.min(4,workers)]??3.0;
+        const workerStr=workers>0?` (${workers}人 → ${mul.toFixed(1)}x)`:'';
+        div.textContent=stale?`⚠ ${name} 誰も来ない`:`🔨 ${name} ${currentPt}/${needed} pt${workerStr}`;
         div.style.color=stale?'#ff8888':'#ffd580';
         // worldToScreen でラベル位置を更新
         const ey=elevAt(world.terrain,f.pos.x,f.pos.y);
