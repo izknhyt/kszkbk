@@ -76,6 +76,8 @@ interface WanderEnv {
   farmPositions: Vec2[];
   // terraform ジョブ位置リスト（Σ-5-a：最優先の労働先）
   terraformJobPositions: Vec2[];
+  // 建設中 feature 位置リスト（Σ-5-e-b：terraform に次ぐ労働先）
+  constructionPositions: Vec2[];
 }
 
 // ============================================================
@@ -99,6 +101,17 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
           .slice(0, 3);
         const tp = ranked[Math.floor(Math.random() * ranked.length)]!;
         newTarget = { x: tp.x + (Math.random() - 0.5) * 10, y: tp.y + (Math.random() - 0.5) * 10 };
+        announcementKey = 'work';
+      }
+      // Σ-5-e-b: 建設ジョブ（terraform と同等確率、constructionPositions）
+      const cnChance = c.traits.includes('nonbiri') ? 0.40 : c.params.zako > 60 ? 0.50 : 0.70;
+      if (!newTarget && env.constructionPositions.length > 0 && Math.random() < cnChance) {
+        const ranked = env.constructionPositions
+          .slice()
+          .sort((a, b) => distance(c.pos, a) - distance(c.pos, b))
+          .slice(0, 3);
+        const cp = ranked[Math.floor(Math.random() * ranked.length)]!;
+        newTarget = { x: cp.x + (Math.random() - 0.5) * 10, y: cp.y + (Math.random() - 0.5) * 10 };
         announcementKey = 'work';
       }
       // --- パラメータ駆動：ママ依存が高いほどフラナ近くに留まる ---

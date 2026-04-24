@@ -321,9 +321,45 @@ function makeLvLabel(lv: number): THREE.Mesh {
   return m;
 }
 
+// 建設中オーバーレイ：足場 4 本 + 半透明本体を返す
+function makeScaffoldGroup(opacity: number): THREE.Group {
+  const g = new THREE.Group();
+  // 4隅に細い足場柱
+  for (const [sx, sz] of [[-14,-14],[14,-14],[-14,14],[14,14]] as [number,number][]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.5,36,4), toonMat(0x8b6030, 0.9));
+    pole.position.set(sx, 18, sz); g.add(pole);
+  }
+  // 横板
+  const plank = new THREE.Mesh(new THREE.BoxGeometry(32,3,4), toonMat(0xa07840, 0.85));
+  plank.position.set(0, 22, 0); g.add(plank);
+  // 🔨 絵文字ビルボード
+  const cv = document.createElement('canvas'); cv.width=48; cv.height=48;
+  const ctx = cv.getContext('2d')!;
+  ctx.font='32px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('🔨', 24, 26);
+  const t = new THREE.CanvasTexture(cv); t.minFilter = THREE.LinearFilter;
+  const hammer = new THREE.Mesh(new THREE.PlaneGeometry(20,20),
+    new THREE.MeshBasicMaterial({map:t,transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+  hammer.position.set(0, 44, 0); g.add(hammer);
+  void opacity;
+  return g;
+}
+
 function makeFeatureGroup(f: import('../types').Feature): THREE.Group {
   const g = new THREE.Group();
   const lv = f.devLevel;
+
+  // 建設中（devLevel < 2）は足場オーバーレイ + 半透明本体
+  if (lv < 2) {
+    const opac = lv === 0 ? 0.30 : 0.60;
+    // 簡略プレースホルダー（茶色の土台）
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(18,18,4,8), toonMat(0x7a5230, opac));
+    base.position.y = 2; g.add(base);
+    const scaffold = makeScaffoldGroup(opac);
+    g.add(scaffold);
+    g.userData.underConstruction = true;
+    return g;
+  }
 
   switch(f.kind) {
     case 'water': {
@@ -655,6 +691,35 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const tfDivs = new Map<string, HTMLDivElement>();
   // jobId → last worker が居た時刻（秒）
   const tfLastWorkerSec = new Map<string, number>();
+
+  // --- Σ-5-e-c: 建設進捗オーバーレイ ---
+  const cnOverlay = document.createElement('div');
+  Object.assign(cnOverlay.style,{position:'absolute',top:'0',left:'0',width:'100%',height:'100%',pointerEvents:'none',overflow:'hidden'});
+  host.appendChild(cnOverlay);
+  const cnDivs = new Map<string, HTMLDivElement>();
+  const cnLastWorkerSec = new Map<string, number>();
+
+  // --- Σ-5-e-d: UV スクロール水流テクスチャ（channel 用）---
+  function makeWaterFlowTex(): THREE.DataTexture {
+    const W=64, H=8;
+    const data=new Uint8Array(W*H*4);
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+      const stripe = ((x + y*2) % 16) < 6;
+      const i=(y*W+x)*4;
+      data[i]  = stripe ? 0xaa : 0x40;
+      data[i+1]= stripe ? 0xdd : 0x80;
+      data[i+2]= stripe ? 0xff : 0xcc;
+      data[i+3]= stripe ? 200 : 120;
+    }
+    const t=new THREE.DataTexture(data,W,H); t.needsUpdate=true;
+    t.wrapS=t.wrapT=THREE.RepeatWrapping;
+    return t;
+  }
+  const waterFlowTex=makeWaterFlowTex();
+  // feature id → UV scroll mesh（channel の水流アニメ）
+  const channelFlowMeshes = new Map<string, THREE.Mesh>();
+  // feature id → ripple mesh（water の波紋）
+  const waterRippleMeshes = new Map<string, { torus: THREE.Mesh; mat: THREE.MeshBasicMaterial; phase: number }>();
   const bubbleDivs = new Map<number, HTMLDivElement>();
 
   // --- terraform / stability — InstancedMesh（毎フレーム dispose を廃止）---
@@ -766,7 +831,31 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     if(wh.length){ for(const [id,m] of wolfViews) if(m===wh[0]!.object) return {kind:'wolf',id}; }
     // CPU fallback
     const wp=stwXZ(cx,cy);
-    return hitFn?hitFn(wp.x,wp.y):null;
+    const cpuHit = hitFn?hitFn(wp.x,wp.y):null;
+    if(cpuHit) return cpuHit;
+    // feature（生体より優先度低い）— 全子メッシュを recursive で当たり判定
+    const fh=rc.intersectObjects([...featViews.values()].map(v=>v.grp),true);
+    if(fh.length){
+      let hitGrp: THREE.Group|null=null;
+      let minD=fh[0]!.distance;
+      for(const hit of fh){
+        if(hit.distance>minD+5) break;
+        let obj: THREE.Object3D|null=hit.object;
+        while(obj&&obj.parent!==featGrp) obj=obj.parent;
+        if(obj){ hitGrp=obj as THREE.Group; break; }
+      }
+      if(hitGrp){ for(const [id,v] of featViews) if(v.grp===hitGrp) return {kind:'feature',id}; }
+    }
+    // building
+    const bh=rc.intersectObjects([...bldViews.values()],true);
+    if(bh.length){
+      let hitGrp2: THREE.Group|null=null;
+      let obj2: THREE.Object3D|null=bh[0]!.object;
+      while(obj2&&obj2.parent!==bldGrp) obj2=obj2.parent;
+      if(obj2) hitGrp2=obj2 as THREE.Group;
+      if(hitGrp2){ for(const [id,g] of bldViews) if(g===hitGrp2) return {kind:'building',id}; }
+    }
+    return null;
   }
 
   canvas.addEventListener('wheel',(e)=>{
@@ -1100,6 +1189,93 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
           wireLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:lit?0xffd870:0x6a5848,transparent:true,opacity:lit?0.7:0.5}));
           fxGrp.add(wireLines);
         }
+      }
+    }
+
+    // ---- Σ-5-e-d: UV スクロール水流 + 水源波紋（毎フレーム） ----
+    {
+      const fset=new Set(world.features.map(f=>f.id));
+      // 消えた feature の流れメッシュをクリーンアップ
+      for(const [id,m] of channelFlowMeshes){
+        if(!fset.has(id)){ featGrp.remove(m); m.geometry.dispose(); channelFlowMeshes.delete(id); }
+      }
+      for(const [id,r] of waterRippleMeshes){
+        if(!fset.has(id)){ fxGrp.remove(r.torus); r.torus.geometry.dispose(); waterRippleMeshes.delete(id); }
+      }
+      for(const f of world.features){
+        // channel UV スクロール（devLevel >= 2 かつ saturated）
+        if(f.kind==='channel' && f.devLevel>=2 && f.saturated){
+          if(!channelFlowMeshes.has(f.id)){
+            const flow=new THREE.Mesh(
+              new THREE.PlaneGeometry(34,8),
+              new THREE.MeshBasicMaterial({map:waterFlowTex,transparent:true,opacity:0.65,depthWrite:false,side:THREE.DoubleSide})
+            );
+            flow.rotation.x=-Math.PI/2;
+            featGrp.add(flow); channelFlowMeshes.set(f.id,flow);
+          }
+          const flow=channelFlowMeshes.get(f.id)!;
+          (flow.material as THREE.MeshBasicMaterial).map!.offset.x -= dt*0.8;
+          flow.position.set(f.pos.x, elevAt(world.terrain,f.pos.x,f.pos.y)+6.5, f.pos.y);
+        } else if(channelFlowMeshes.has(f.id)){
+          const m=channelFlowMeshes.get(f.id)!; featGrp.remove(m); m.geometry.dispose(); channelFlowMeshes.delete(f.id);
+        }
+        // water 波紋（devLevel >= 2）
+        if(f.kind==='water' && f.devLevel>=2){
+          if(!waterRippleMeshes.has(f.id)){
+            const mat=new THREE.MeshBasicMaterial({color:0x80d8ff,transparent:true,opacity:0.6,side:THREE.DoubleSide,depthWrite:false});
+            const torus=new THREE.Mesh(new THREE.TorusGeometry(18,2,6,16),mat);
+            torus.rotation.x=-Math.PI/2;
+            fxGrp.add(torus); waterRippleMeshes.set(f.id,{torus,mat,phase:Math.random()*Math.PI*2});
+          }
+          const r=waterRippleMeshes.get(f.id)!;
+          r.phase=(r.phase+dt*Math.PI)%(Math.PI*2);
+          const s=0.5+r.phase/(Math.PI*2);
+          r.torus.scale.setScalar(s);
+          r.mat.opacity=0.6*(1-r.phase/(Math.PI*2));
+          r.torus.position.set(f.pos.x, elevAt(world.terrain,f.pos.x,f.pos.y)+5, f.pos.y);
+        } else if(waterRippleMeshes.has(f.id)){
+          const r=waterRippleMeshes.get(f.id)!; fxGrp.remove(r.torus); r.torus.geometry.dispose(); waterRippleMeshes.delete(f.id);
+        }
+      }
+    }
+
+    // ---- Σ-5-e-c: 建設進捗オーバーレイ ----
+    {
+      const FEAT_NAME_SHORT: Partial<Record<string,string>>={water:'水源',farm:'畑',channel:'水路',path:'道',house:'家',well:'井戸',firewatch:'火の見',sawmill:'製材所',shrine:'神社',generator:'発電所',streetlamp:'街灯',powerline:'電線',kiln:'精錬所',pasture:'牧場',loom:'織機'};
+      const CONSTRUCTION_SEC_LOCAL: Partial<Record<string,number>>={channel:15,path:15,streetlamp:15,powerline:15,water:25,farm:25,house:40,well:40,firewatch:40,pasture:40,sawmill:60,shrine:60,kiln:60,loom:60,generator:60};
+      const liveIds=new Set(world.features.filter(f=>f.devLevel<2).map(f=>f.id));
+      // 完成した feature の div を削除
+      for(const [id,div] of cnDivs){ if(!liveIds.has(id)){ cnOverlay.removeChild(div); cnDivs.delete(id); cnLastWorkerSec.delete(id); } }
+      for(const f of world.features){
+        if(f.devLevel>=2) continue;
+        const needed=CONSTRUCTION_SEC_LOCAL[f.kind]??30;
+        const pct=Math.min(100,Math.round((f.workSec/needed)*100));
+        // worker 数（半径 28px）
+        let workers=0;
+        for(const c of world.chibis){
+          if(c.state==='dead'||!c.pos) continue;
+          if(Math.hypot(c.pos.x-f.pos.x,c.pos.y-f.pos.y)<=32) workers++;
+        }
+        if(workers>0) cnLastWorkerSec.set(f.id,world.timeSec);
+        const sinceWorker=world.timeSec-(cnLastWorkerSec.get(f.id)??-999);
+        const stale=sinceWorker>60;
+        if(!cnDivs.has(f.id)){
+          const div=document.createElement('div');
+          Object.assign(div.style,{position:'absolute',transform:'translateX(-50%)',background:'rgba(42,26,10,0.85)',
+            color:'#ffd580',borderRadius:'4px',padding:'2px 6px',fontSize:'11px',fontWeight:'700',
+            whiteSpace:'nowrap',pointerEvents:'none',zIndex:'110',border:'1px solid #8b6030'});
+          cnOverlay.appendChild(div); cnDivs.set(f.id,div);
+        }
+        const div=cnDivs.get(f.id)!;
+        const name=FEAT_NAME_SHORT[f.kind]??f.kind;
+        const workerStr=workers>0?` (${workers}人)`:'';
+        div.textContent=stale?`⚠ ${name} 無人`:`🔨 ${name} ${pct}%${workerStr}`;
+        div.style.color=stale?'#ff8888':'#ffd580';
+        // worldToScreen でラベル位置を更新
+        const ey=elevAt(world.terrain,f.pos.x,f.pos.y);
+        const sp=worldToScreen(f.pos.x,f.pos.y,ey+50);
+        div.style.left=`${sp.x-renderer.domElement.getBoundingClientRect().left}px`;
+        div.style.top=`${sp.y-renderer.domElement.getBoundingClientRect().top-18}px`;
       }
     }
 

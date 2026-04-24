@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FeatureKind, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
 import { seedFromRunId } from './terrain/noise';
 import { generateTerrain } from './terrain/generators';
 import { findDryTile, isSeaAt, setQueryTerrain } from './terrain/query';
@@ -144,6 +144,7 @@ export interface WorldState {
   dex: Record<DeathCauseId, DexEntry>;
   recentDeaths: DeathLogEntry[];
   newDiscoveries: DeathCauseId[]; // 前フレームで新規発見された図鑑ID
+  newConstructions: { id: string; kind: FeatureKind }[]; // 建設完了キュー（main.ts が drainしてトースト）
   villageRank: VillageRank; // 4段階のランク。tickWorld で計算される
   nameSet: Set<string>;
   bounds: { w: number; h: number };
@@ -359,18 +360,42 @@ const WATER_LINK_RADIUS = 70;
 // 畑が water/channel の効果を受ける最大距離
 const FARM_IRRIGATION_RADIUS = 65;
 
+// Σ-5-e-b: 建設に必要な作業秒（devLevel 0 → 2 への総秒、標準難度基準）
+export const CONSTRUCTION_SEC: Partial<Record<FeatureKind, number>> = {
+  channel:    15,
+  path:       15,
+  streetlamp: 15,
+  powerline:  15,
+  water:      25,
+  farm:       25,
+  house:      40,
+  well:       40,
+  firewatch:  40,
+  pasture:    40,
+  sawmill:    60,
+  shrine:     60,
+  kiln:       60,
+  loom:       60,
+  generator:  60,
+};
+
+const CONSTRUCTION_WORKER_RADIUS = 28;
+
 // 水が届いている feature id 集合を flood fill で計算する。
 // water を種にして、channel/water 同士が WATER_LINK_RADIUS 以内なら伝播。
+// devLevel < 2 の水源/水路は未完成のため水を供給しない。
 export function computeWateredFeatureIds(w: WorldState): Set<string> {
   const watered = new Set<string>();
   const queue: Feature[] = [];
   for (const f of w.features) {
+    if (f.devLevel < 2) continue;
     if (f.kind === 'water' || f.kind === 'well') { watered.add(f.id); queue.push(f); }
   }
   while (queue.length > 0) {
     const cur = queue.shift()!;
     for (const f of w.features) {
       if (watered.has(f.id)) continue;
+      if (f.devLevel < 2) continue;
       if (f.kind !== 'channel' && f.kind !== 'water' && f.kind !== 'well') continue;
       if (Math.hypot(f.pos.x - cur.pos.x, f.pos.y - cur.pos.y) <= WATER_LINK_RADIUS) {
         watered.add(f.id);
@@ -465,6 +490,7 @@ export function updateInfra(w: WorldState, dt: number) {
   const weatherMul = weatherFarmMul(w.weather.kind);
   for (const f of w.features) {
     if (f.kind !== 'farm') continue;
+    if (f.devLevel < 2) continue; // 建設中は生産しない
     const irrigated = wateredFeatures.some(
       (wf) => Math.hypot(wf.pos.x - f.pos.x, wf.pos.y - f.pos.y) <= FARM_IRRIGATION_RADIUS,
     );
@@ -482,6 +508,7 @@ export function updateInfra(w: WorldState, dt: number) {
   // 神社：たまに ✨ バブルを発生させて祝福感を演出（5秒に1回程度）
   for (const f of w.features) {
     if (f.kind !== 'shrine') continue;
+    if (f.devLevel < 2) continue;
     if (Math.random() < dt / 5) {
       spawnBubble(w.bubbles, { x: f.pos.x + (Math.random() - 0.5) * 40, y: f.pos.y - 10 }, '✨', 'speech', 1.5);
     }
@@ -489,6 +516,7 @@ export function updateInfra(w: WorldState, dt: number) {
   // 製材所：近くのちびわふが働くと wood→plank 変換。
   for (const f of w.features) {
     if (f.kind !== 'sawmill') continue;
+    if (f.devLevel < 2) continue;
     // worker 数（alive, idle 以外の「移動可能」状態のみカウント）
     let workers = 0;
     for (const c of w.chibis) {
@@ -511,6 +539,7 @@ export function updateInfra(w: WorldState, dt: number) {
   // 精錬所（kiln）：近くのちびわふが働くと stone→brick 変換。製材所と同じ労働ループ。
   for (const f of w.features) {
     if (f.kind !== 'kiln') continue;
+    if (f.devLevel < 2) continue;
     let workers = 0;
     for (const c of w.chibis) {
       if (!isAlive(c) || c.flight) continue;
@@ -531,11 +560,13 @@ export function updateInfra(w: WorldState, dt: number) {
   const pastureMul = (w.weather.kind === 'snow' || w.weather.kind === 'drought') ? 0.5 : 1.0;
   for (const f of w.features) {
     if (f.kind !== 'pasture') continue;
+    if (f.devLevel < 2) continue;
     w.resources.wool += dt * PASTURE_WOOL_PER_SEC * pastureMul;
   }
   // 織機：近くのちびわふが wool→cloth 変換。
   for (const f of w.features) {
     if (f.kind !== 'loom') continue;
+    if (f.devLevel < 2) continue;
     let workers = 0;
     for (const c of w.chibis) {
       if (!isAlive(c) || c.flight) continue;
@@ -555,6 +586,7 @@ export function updateInfra(w: WorldState, dt: number) {
   // 発電所：ワーカーがペダルを漕いで power を生成、ワーカーは追加疲労。
   for (const f of w.features) {
     if (f.kind !== 'generator') continue;
+    if (f.devLevel < 2) continue;
     let workers = 0;
     for (const c of w.chibis) {
       if (!isAlive(c) || c.flight) continue;
@@ -1042,6 +1074,38 @@ export function lowerTile(terrain: TerrainTile[][], tx: number, ty: number, amou
 const TERRAFORM_WORKER_RADIUS = 28;
 const TERRAFORM_PROGRESS_PER_WORKER_SEC = 0.05;  // 1 worker で 20 秒完了
 
+// Σ-5-e-b: 建設中の feature を進める（ちびわふが近くにいれば workSec が貯まる）
+export function updateConstructions(w: WorldState, dt: number): void {
+  const diffMul = w.difficulty === 'beginner' ? 0.7 : w.difficulty === 'hell' ? 1.3 : 1.0;
+  const DONE_LINES = ['できたわふ〜！', '完成わふ！', 'つかれたわふ…', 'やっとできたわふ', 'どうわふ？きれいわふ！'];
+  for (const f of w.features) {
+    if (f.devLevel >= 2) continue;
+    const needed = (CONSTRUCTION_SEC[f.kind] ?? 30) * diffMul;
+    let workers = 0;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight || c.state === 'sleep' || c.state === 'dead') continue;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= CONSTRUCTION_WORKER_RADIUS) workers++;
+    }
+    if (workers > 0) f.workSec += dt * Math.min(4, workers);
+    if (f.devLevel < 1 && f.workSec >= needed * 0.5) f.devLevel = 1;
+    if (f.devLevel < 2 && f.workSec >= needed) {
+      f.devLevel = 2;
+      f.workSec = 0;
+      // 最寄りのワーカーから完成バブル
+      let bestWorker: Chibiwafu | null = null;
+      let bestD = Infinity;
+      for (const c of w.chibis) {
+        if (!isAlive(c) || c.flight) continue;
+        const d = Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y);
+        if (d <= CONSTRUCTION_WORKER_RADIUS + 10 && d < bestD) { bestWorker = c; bestD = d; }
+      }
+      const pos = bestWorker ? bestWorker.pos : f.pos;
+      spawnBubble(w.bubbles, pos, DONE_LINES[Math.floor(Math.random() * DONE_LINES.length)]!, 'speech', 2.0);
+      w.newConstructions.push({ id: f.id, kind: f.kind });
+    }
+  }
+}
+
 export function updateTerraformJobs(w: WorldState, dt: number): void {
   if (w.terraformJobs.length === 0) return;
   for (let i = w.terraformJobs.length - 1; i >= 0; i--) {
@@ -1435,6 +1499,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     dex: createDex(),
     recentDeaths: [],
     newDiscoveries: [],
+    newConstructions: [],
     villageRank: 'mura',
     nameSet: new Set(),
     bounds,
@@ -1495,6 +1560,7 @@ export function ensurePlots(w: WorldState) {
     w.terrain = initTerrain(w.bounds, w.difficulty, w.terrainSeed);
   }
   if (!w.terraformJobs) w.terraformJobs = [];
+  if (!w.newConstructions) w.newConstructions = []; // Σ-5-e-b: transient キュー
   // buryTimer は transient なのでロード後リセット
   for (const row of w.terrain) for (const tile of row) tile.buryTimer = 0;
   activateTerrain(w.terrain);
@@ -2202,15 +2268,18 @@ interface WanderEnvCache {
   obstaclePositions: Vec2[];
   shrinePositions: Vec2[];
   terraformJobPositions: Vec2[];
+  constructionPositions: Vec2[]; // Σ-5-e-b: 建設中 feature（devLevel < 2）の位置
 }
 let _wanderEnvCache: WanderEnvCache | null = null;
 function getWanderEnv(w: WorldState): WanderEnvCache {
   if (_wanderEnvCache && _wanderEnvCache.tick === w.tick) return _wanderEnvCache;
   const farmPositions: Vec2[] = [];
   const shrinePositions: Vec2[] = [];
+  const constructionPositions: Vec2[] = [];
   for (const f of w.features) {
     if (f.kind === 'farm') farmPositions.push(f.pos);
     else if (f.kind === 'shrine') shrinePositions.push(f.pos);
+    if (f.devLevel < 2) constructionPositions.push(f.pos);
   }
   const noukouPositions: Vec2[] = [];
   const taikoPositions: Vec2[] = [];
@@ -2227,7 +2296,7 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
     x: (j.tx + 0.5) * TERRAIN_TILE_SIZE,
     y: (j.ty + 0.5) * TERRAIN_TILE_SIZE,
   }));
-  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions, terraformJobPositions };
+  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions, terraformJobPositions, constructionPositions };
   return _wanderEnvCache;
 }
 
@@ -2599,6 +2668,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       obstaclePositions: env.obstaclePositions,
       farmPositions: env.farmPositions,
       terraformJobPositions: env.terraformJobPositions,
+      constructionPositions: env.constructionPositions,
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {
@@ -3503,6 +3573,7 @@ export function tickWorld(w: WorldState, dt: number) {
   updateThunderstrike(w, dt);
   updateFloodZones(w, dt);
   updateWolves(w, dt);
+  updateConstructions(w, dt);
   updateTerraformJobs(w, dt);
   updateTerrainStability(w, dt);
   updateStomps(w, dt);
