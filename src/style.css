@@ -290,7 +290,7 @@ html, body {
 .minimap {
   position: fixed;
   right: 8px;
-  bottom: 8px;
+  bottom: 48px; /* action-bar の高さ分だけ上にずらす */
   width: 240px;
   height: 135px;
   border: 2px solid #3a2a1a;
@@ -300,6 +300,9 @@ html, body {
   cursor: crosshair;
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
   image-rendering: pixelated;
+}
+@media (max-width: 900px), (orientation: portrait) {
+  .minimap { right: 8px; bottom: 56px; }
 }
 .camera-help {
   position: fixed;
@@ -432,9 +435,11 @@ html, body {
   overflow-y: auto;
   flex: 1;
   padding: 12px;
+  padding-bottom: 16px;
   -webkit-overflow-scrolling: touch;
 }
 .tab-panel.active { display: block; }
+/* HUD は action-bar の影響を受けない（#hud は右側 grid セル） */
 
 button {
   font-family: inherit;
