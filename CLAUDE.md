@@ -311,13 +311,29 @@ https://claude.ai/code/session_XXXXXX
 | レビュー修正 | InstancedMesh / キー重複削除 / TODO | 964c669 |
 | merge | sigma-4-main-xhp2Y → idle-village へ統合 | c252374 |
 | render fix | elevAt bilinear / stwXZ raycast / 夜ティント漏れ | 3fa80c9 |
-| Σ-4-f 完了 | stage.ts + sprites.ts 削除、Pixi 依存撤去、StageHandle 移設 | （本コミット） |
+| Σ-4-f 完了 | stage.ts + sprites.ts 削除、Pixi 依存撤去、StageHandle 移設 | eba53e5 |
 
-### ロードマップ v2（地形・3D 化）【Σ-4 まで完了、Σ-5 着手予定】
+#### ✅ Σ-5 開発ゲーム体感化（2026-04-23 に本流 merge）
 
-**方針**：Σ-0〜Σ-4 で 3D 地形・描画基盤は完成。ただし実プレイで「開発ゲームとして成立してない」
-（terraform ジョブ置いても労働者が来ない／水路作っても見た目が円盤／feature が全体的に小さい円盤のまま）
-という課題が 2026-04-23 に浮上、次フェーズ Σ-5 で解消する。
+| Phase | 内容 | Commit |
+|---|---|---|
+| Σ-5-a | 労働 AI：terraform ジョブ自発移動（70%、nonbiri 40%）、trait バイアス、ChibiState 'scared' 型追加、fled_to_exhaustion 死因型定義 | ff26376 |
+| Σ-5-b | feature 3D モデル化：water=池 / channel=溝（saturated で青く） / farm=作物成長段階 / house/well/firewatch/sawmill/shrine/kiln/pasture/loom などを建物形状に | 1ff36fa |
+| Σ-5-c | HUD フィードバック：terraform 進捗バー HTML overlay（▲盛 45% (2人) 表示、60s 無人で警告）、farm/channel/powerline 孤立時 toast | a3019d8 |
+| Σ-5-d | 狼 flee：80px 検知 → scared、1.3 倍速逃走、家/火の見やぐら 40px sanctuary、疲労 60+ で collapse → fled_to_exhaustion | 4b3604d |
+| 型修正 | stage3d traverse callback 型注釈 | ceb973d |
+| Σ-5-d balance | flee 疲労 +18/sec / collapse 60、wolf_bite : fled_to_exhaustion = 5:1 で安定 | 7f88057 |
+| merge | sigma-5-main → idle-village 統合 | （本 merge） |
+| 後処理 | dead code `pickWorkTarget` 削除（70 行） | （本コミット） |
+
+**追加された ChibiState**：`scared`
+**追加された死因**：`fled_to_exhaustion`
+
+### ロードマップ v2（地形・3D 化）【Σ-5 まで完了】
+
+**方針**：Σ-0〜Σ-5 で 3D 地形・描画基盤 + 開発ゲーム体感（労働 AI / feature 3D 化 /
+HUD 進捗 / 狼 flee）が完成。次は Σ-6 歩行アニメ or Ω-12 神罰など
+（HANDOFF.md §6 参照）。
 **ビジョン**：巨人のドシン × ピクミン × Don't Starve × Elona。なめらかな 3D 地形で
 神様が盛り土切り土を指示、ちびわふ 200+ がわちゃわちゃ動き回り、**改変がズボラで土砂崩れ事故で全滅**。
 **マインクラフト要素**＝**ブロック見た目ではなく破壊/創造の自由度**（既に Σ-2 で実装済み）。
@@ -331,7 +347,7 @@ https://claude.ai/code/session_XXXXXX
 | **Σ-2.5** | **地形可視化 + 素材バランス**（Σ-3 後追い）：stage.ts に標高色分け + 崖線 + terraform ジョブ UI + stability 警告パルスを追加。初期資源と建築コストを実プレイ向けに再調整。Σ-3 まででデータは生成されるが 2D 描画に出ないので、Σ-4 Three.js を待たず 2D Pixi のまま見せて遊べる状態にする | 2-3 日 | ✅ 完了 |
 | **Σ-4-proto** | **Three.js 検証プロト**（`prototypes/three-terrain/`、`origin/claude/sigma-4-proto` 保管）。5 項目実測 GO | 1 週 | ✅ 完了（**fps=75 / drawCalls=5 / DOM sync=0.01ms (0.1%)**、5 項目全 GO） |
 | **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag `VITE_RENDER=3d` で `stage.ts` と並行、parity 達成後に Pixi 削除。elev×5 displace、45° 固定俯瞰、Y 軸ビルボード、盛り土切り土の 3D 反映、土砂崩れアニメ、わちゃわちゃキャラ（歩行 pose animation） | 2 週 | ✅ 完了（Σ-4-a/b/c/d/e/f 全て本流統合、Pixi 削除済み）|
-| **Σ-5** | **開発ゲーム体感化**：ちびわふ労働 AI（自発ターゲット選択＋trait バイアス＋サボり）、feature 視覚アップグレード（water=池/channel=溝流れ/farm=作物/house/sawmill/shrine 等を建物化）、HUD 進捗バー（terraform 進捗/作業者数/saturated 表示）、狼 flee 行動（検知 → 退避 → sanctuary）。実装済みだが体感できない 3 要素（terraform 稼働・水路 saturated・労働ループ）を「見える化＋自発化」で蘇らせる | 1-2 週 | 🚧 着手予定（最優先） |
+| **Σ-5** | **開発ゲーム体感化**：ちびわふ労働 AI（terraform ジョブ自発移動 70%、trait バイアス、nonbiri 40%）、feature 3D モデル化（water=池/channel=溝/farm=作物成長/house/firewatch/sawmill/shrine/kiln/loom 等が建物として識別可能）、HUD terraform 進捗バー + 連鎖ヒント toast、狼 flee（80px 検知 → 1.3 倍速逃走 → 疲労 collapse → fled_to_exhaustion 新死因、家 / 火の見やぐら sanctuary） | 1-2 週 | ✅ 完了（Σ-5-a/b/c/d + バランス調整、48 死因到達、wolf_bite : fled_to_exhaustion = 5:1）|
 
 ### Σ-5 完走後の予定（優先度順）
 

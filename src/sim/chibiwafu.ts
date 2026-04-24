@@ -1,4 +1,4 @@
-import type { ChibiState, Chibiwafu, Feature, TerraformJob, TraitId, Vec2 } from '../types';
+import type { ChibiState, Chibiwafu, TraitId, Vec2 } from '../types';
 import {
   derivedMamaRadius,
   derivedRiverTrespass,
@@ -7,7 +7,6 @@ import {
 } from './personality';
 import type { Season } from '../types';
 import { isSeaAt } from './terrain/query';
-import type { Obstacle } from '../types';
 
 let nextId = 1;
 
@@ -80,89 +79,9 @@ interface WanderEnv {
 }
 
 // ============================================================
-// Σ-5-a 労働 AI：自発的に仕事を探すターゲット選択
+// Σ-5-a 労働 AI：terraform ジョブへの自発移動は wanderStep 内に
+// inline で実装してある（terraformJobPositions を最優先で参照）。
 // ============================================================
-export interface WorkTarget {
-  kind: 'terraform' | 'obstacle' | 'farm';
-  pos: Vec2;
-}
-
-/**
- * 近くの仕事を探してターゲットを返す。見つからなければ null。
- * - terraform ジョブ最優先
- * - trait バイアスあり
- * - 30%（zako>60 なら 50%）でサボってその場ポイント返し
- * - nonbiri trait は追加 20% で選ばない
- */
-export function pickWorkTarget(
-  c: Chibiwafu,
-  terraformJobs: TerraformJob[],
-  obstacles: Obstacle[],
-  features: Feature[],
-  tileSize: number,
-): WorkTarget | null {
-  const WORK_RADIUS = 130;
-
-  // nonbiri はさらに 20% 余分にサボる
-  if (c.traits.includes('nonbiri') && Math.random() < 0.20) return null;
-
-  // 候補収集（距離 WORK_RADIUS 以内）
-  interface Candidate { kind: WorkTarget['kind']; pos: Vec2; score: number }
-  const candidates: Candidate[] = [];
-
-  // terraform ジョブ（最優先）
-  for (const job of terraformJobs) {
-    const jx = (job.tx + 0.5) * tileSize;
-    const jy = (job.ty + 0.5) * tileSize;
-    const d = Math.hypot(c.pos.x - jx, c.pos.y - jy);
-    if (d > WORK_RADIUS) continue;
-    let score = 2.0 - d / WORK_RADIUS;  // 近いほど高得点
-    // 農民気質は 畑作業（terraform も含む）好き
-    if (c.traits.includes('noumin')) score *= 1.5;
-    candidates.push({ kind: 'terraform', pos: { x: jx, y: jy }, score });
-  }
-
-  // 障害物
-  for (const obs of obstacles) {
-    const d = Math.hypot(c.pos.x - obs.pos.x, c.pos.y - obs.pos.y);
-    if (d > WORK_RADIUS) continue;
-    let score = 1.0 - d / WORK_RADIUS;
-    if (obs.kind === 'rock') {
-      if (c.traits.includes('bo_suki')) score *= 2.0;
-      if (c.traits.includes('noumin')) score *= 0.5;
-    } else if (obs.kind === 'stump') {
-      if (c.traits.includes('bo_suki')) score *= 1.0;
-    }
-    candidates.push({ kind: 'obstacle', pos: obs.pos, score });
-  }
-
-  // 潤水不足の farm（水がなくて育ってない）
-  for (const f of features) {
-    if (f.kind !== 'farm') continue;
-    if (f.saturated) continue;  // 既に watered ならパス
-    const d = Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y);
-    if (d > WORK_RADIUS) continue;
-    let score = 0.6 - d / WORK_RADIUS * 0.3;
-    if (c.traits.includes('noumin')) score *= 2.0;
-    candidates.push({ kind: 'farm', pos: f.pos, score });
-  }
-
-  if (candidates.length === 0) return null;
-
-  // gunsuki：他が既にいる場所のスコアを上げる（未実装: 簡易版として terraformJobs 先頭優遇）
-  // hitoribochi：既に処理済みなのでスコアに影響しない（distanceベースで自然にばらける）
-
-  // スコア降順で上位 3 候補から重み付きランダム抽選
-  candidates.sort((a, b) => b.score - a.score);
-  const pool = candidates.slice(0, 3);
-  const total = pool.reduce((s, c2) => s + c2.score, 0);
-  let r = Math.random() * total;
-  for (const cand of pool) {
-    r -= cand.score;
-    if (r <= 0) return { kind: cand.kind, pos: cand.pos };
-  }
-  return { kind: pool[0]!.kind, pos: pool[0]!.pos };
-}
 
 export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: number }, env?: WanderEnv): string | null {
   let announcementKey: string | null = null;
