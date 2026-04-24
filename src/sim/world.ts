@@ -67,6 +67,15 @@ import {
   pickCollisionVictimLine,
   pickComfortLine,
   pickCopyCryLine,
+  pickConstructionAbandonLine,
+  pickConstructionDeathReactionLine,
+  pickConstructionDoneLine,
+  pickConstructionFightLine,
+  pickConstructionSabotageLine,
+  pickCocoonConstructionFightLine,
+  pickFuranaConstructionAccidentLine,
+  pickSuzuConstructionAccidentLine,
+  pickLuConstructionAccidentLine,
   pickMorashiDisgustLine,
   pickMorashiWipeLine,
   pickOshaberiLine,
@@ -360,24 +369,31 @@ const WATER_LINK_RADIUS = 70;
 // 畑が water/channel の効果を受ける最大距離
 const FARM_IRRIGATION_RADIUS = 65;
 
-// Σ-5-e-b: 建設に必要な作業秒（devLevel 0 → 2 への総秒、標準難度基準）
-export const CONSTRUCTION_SEC: Partial<Record<FeatureKind, number>> = {
-  channel:    15,
-  path:       15,
-  streetlamp: 15,
-  powerline:  15,
-  water:      25,
-  farm:       25,
-  house:      40,
-  well:       40,
-  firewatch:  40,
-  pasture:    40,
-  sawmill:    60,
-  shrine:     60,
-  kiln:       60,
-  loom:       60,
-  generator:  60,
+// Σ-5-e-e: 建設に必要な pt（1 worker = 1 pt/sec、複数人ボーナスで加速）
+export const CONSTRUCTION_PTS: Partial<Record<FeatureKind, number>> = {
+  channel:    25,
+  path:       25,
+  streetlamp: 25,
+  powerline:  25,
+  water:      45,
+  farm:       45,
+  house:      80,
+  well:       80,
+  firewatch:  80,
+  pasture:    80,
+  sawmill:    120,
+  shrine:     120,
+  kiln:       120,
+  loom:       120,
+  generator:  120,
 };
+
+// 後方互換のエイリアス（stage3d.ts の外部コードが参照している場合に備え）
+/** @deprecated CONSTRUCTION_PTS を使うこと */
+export const CONSTRUCTION_SEC = CONSTRUCTION_PTS;
+
+// 複数人ボーナス倍率 [worker 数 0-4+]
+export const CONSTRUCTION_BONUS_MUL = [0, 1.0, 1.8, 2.5, 3.0];
 
 const CONSTRUCTION_WORKER_RADIUS = 28;
 
@@ -1074,19 +1090,47 @@ export function lowerTile(terrain: TerrainTile[][], tx: number, ty: number, amou
 const TERRAFORM_WORKER_RADIUS = 28;
 const TERRAFORM_PROGRESS_PER_WORKER_SEC = 0.05;  // 1 worker で 20 秒完了
 
-// Σ-5-e-b: 建設中の feature を進める（ちびわふが近くにいれば workSec が貯まる）
+// Σ-5-e-e: 建設進行を数値 pt ベースに変更。
+//   1 人 = 1.0 pt/sec、2 人 = 1.8x、3 人 = 2.5x、4+ 人 = 3.0x
+//   喧嘩・事故で pt が戻る演出は applyConstruction*Penalty() を参照。
 export function updateConstructions(w: WorldState, dt: number): void {
   const diffMul = w.difficulty === 'beginner' ? 0.7 : w.difficulty === 'hell' ? 1.3 : 1.0;
-  const DONE_LINES = ['できたわふ〜！', '完成わふ！', 'つかれたわふ…', 'やっとできたわふ', 'どうわふ？きれいわふ！'];
   for (const f of w.features) {
     if (f.devLevel >= 2) continue;
-    const needed = (CONSTRUCTION_SEC[f.kind] ?? 30) * diffMul;
+    const needed = (CONSTRUCTION_PTS[f.kind] ?? 45) * diffMul;
     let workers = 0;
+    const workerList: Chibiwafu[] = [];
     for (const c of w.chibis) {
       if (!isAlive(c) || c.flight || c.state === 'sleep' || c.state === 'dead') continue;
-      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= CONSTRUCTION_WORKER_RADIUS) workers++;
+      if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) <= CONSTRUCTION_WORKER_RADIUS) {
+        workers++;
+        workerList.push(c);
+      }
     }
-    if (workers > 0) f.workSec += dt * Math.min(4, workers);
+    if (workers > 0) {
+      const mul = CONSTRUCTION_BONUS_MUL[Math.min(4, workers)] ?? 3.0;
+      f.workSec += dt * mul;
+      // ランダムサボり：ワーカー一人あたり ~40 秒に 1 回の頻度でぼやく
+      for (const c of workerList) {
+        if (Math.random() < dt / 40) {
+          spawnBubble(w.bubbles, c.pos, pickConstructionSabotageLine(), 'speech', 1.8);
+        }
+      }
+    }
+    // 離脱ペナルティ：focus<35 のちびわふが建設サイト付近（28-80px）に漂っている時、
+    // 低確率で進捗を少し削る（注意散漫で邪魔をする演出）
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight || c.state === 'sleep' || c.state === 'dead') continue;
+      if (c.params.focus >= 35) continue;
+      const d = Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y);
+      if (d <= CONSTRUCTION_WORKER_RADIUS || d > 80) continue;
+      if (Math.random() < dt / 80) {
+        f.workSec = Math.max(0, f.workSec - 2);
+        if (Math.random() < 0.3) {
+          spawnBubble(w.bubbles, c.pos, pickConstructionAbandonLine(), 'speech', 1.8);
+        }
+      }
+    }
     if (f.devLevel < 1 && f.workSec >= needed * 0.5) f.devLevel = 1;
     if (f.devLevel < 2 && f.workSec >= needed) {
       f.devLevel = 2;
@@ -1100,8 +1144,60 @@ export function updateConstructions(w: WorldState, dt: number): void {
         if (d <= CONSTRUCTION_WORKER_RADIUS + 10 && d < bestD) { bestWorker = c; bestD = d; }
       }
       const pos = bestWorker ? bestWorker.pos : f.pos;
-      spawnBubble(w.bubbles, pos, DONE_LINES[Math.floor(Math.random() * DONE_LINES.length)]!, 'speech', 2.0);
+      spawnBubble(w.bubbles, pos, pickConstructionDoneLine(), 'speech', 2.0);
       w.newConstructions.push({ id: f.id, kind: f.kind });
+    }
+  }
+}
+
+// 建設現場の死亡ペナルティ：死んだちびわふの近く（40px）の未完成 feature の workSec を -15。
+// kill() から呼ぶ。
+function applyConstructionDeathPenalty(w: WorldState, c: Chibiwafu): void {
+  for (const f of w.features) {
+    if (f.devLevel >= 2) continue;
+    if (Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y) > 40) continue;
+    f.workSec = Math.max(0, f.workSec - 15);
+    // 最寄りのワーカーから死亡反応バブル
+    let bestWorker: Chibiwafu | null = null;
+    let bestD = Infinity;
+    for (const wk of w.chibis) {
+      if (!isAlive(wk) || wk === c) continue;
+      const d = Math.hypot(wk.pos.x - f.pos.x, wk.pos.y - f.pos.y);
+      if (d <= CONSTRUCTION_WORKER_RADIUS && d < bestD) { bestWorker = wk; bestD = d; }
+    }
+    if (bestWorker) {
+      spawnBubble(w.bubbles, bestWorker.pos, pickConstructionDeathReactionLine(c.name), 'speech', 2.5);
+    }
+    // 近くにいる NPC（フラナ/スズ/ルー）も反応（80px 内、1体ランダム）
+    const nearNpcs = w.npcs.filter(
+      (n) => !n.dead && Math.hypot(n.pos.x - f.pos.x, n.pos.y - f.pos.y) <= 80,
+    );
+    if (nearNpcs.length > 0 && Math.random() < 0.5) {
+      const n = nearNpcs[Math.floor(Math.random() * nearNpcs.length)]!;
+      if (n.id === 'furana') spawnBubble(w.bubbles, n.pos, pickFuranaConstructionAccidentLine(), 'npc-speech', 2.0);
+      else if (n.id === 'suzu') spawnBubble(w.bubbles, n.pos, pickSuzuConstructionAccidentLine(c.name), 'npc-speech', 2.0);
+      else if (n.id === 'lou') spawnBubble(w.bubbles, n.pos, pickLuConstructionAccidentLine(), 'npc-speech', 2.0);
+    }
+  }
+}
+
+// 建設現場の喧嘩ペナルティ：戦闘発生座標（40px）の未完成 feature の workSec を -5。
+// updateCocoonAbuse など喧嘩イベントから呼ぶ。
+function applyConstructionFightPenalty(w: WorldState, fightPos: Vec2): void {
+  for (const f of w.features) {
+    if (f.devLevel >= 2) continue;
+    if (Math.hypot(fightPos.x - f.pos.x, fightPos.y - f.pos.y) > 40) continue;
+    f.workSec = Math.max(0, f.workSec - 5);
+    // ワーカーが喧嘩セリフを吐く
+    let bestWorker: Chibiwafu | null = null;
+    let bestD = Infinity;
+    for (const c of w.chibis) {
+      if (!isAlive(c) || c.flight) continue;
+      const d = Math.hypot(c.pos.x - f.pos.x, c.pos.y - f.pos.y);
+      if (d <= CONSTRUCTION_WORKER_RADIUS && d < bestD) { bestWorker = c; bestD = d; }
+    }
+    if (bestWorker) {
+      spawnBubble(w.bubbles, bestWorker.pos, pickConstructionFightLine(), 'speech', 1.8);
     }
   }
 }
@@ -1806,6 +1902,7 @@ export function kill(w: WorldState, c: Chibiwafu, causeId: DeathCauseId) {
   logDeath(w, c, causeId);
   reactNpcsToDeath(w, c);
   chibiSchadenfreude(w, c);
+  applyConstructionDeathPenalty(w, c);
 }
 
 // HP を減らす。0 以下で causeId で死亡。戻り値 = 死んだか。
@@ -3370,8 +3467,14 @@ function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
   setState(target, 'cry', 1);
   pushLife(target, Math.floor(target.ageSec), 'ココンに棒で突かれた');
   pushNpcLife(n, Math.floor(w.timeSec), `${target.name} を棒で突いた`);
+  // 喧嘩ペナルティ：近くの建設現場で workSec -5 + ワーカーがぼやく
+  applyConstructionFightPenalty(w, n.pos);
+  // ココン 本人も建設現場喧嘩セリフ（30% で）
+  if (Math.random() < 0.3) {
+    spawnBubble(w.bubbles, n.pos, pickCocoonConstructionFightLine(), 'npc-speech', 1.5);
+  }
 
-  // 包囲カウンター：ココン周辺に 4匹以上いると 20% で逆襲され死亡
+  // 包囲カウンター：ココン 周辺に 4匹以上いると 20% で逆襲され死亡
   if (candidates.length >= 4 && Math.random() < 0.2) {
     killCocoon(w, n);
     for (const c of candidates.slice(0, 5)) {
@@ -3380,7 +3483,7 @@ function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
     return;
   }
 
-  // 戦闘狂相手：70% で絡みが発生。そのうち 25% はココンが負けて死ぬ。
+  // 戦闘狂相手：70% で絡みが発生。そのうち 25% はココン が負けて死ぬ。
   if (target.traits.includes('ikusa') && Math.random() < 0.7) {
     if (Math.random() < 0.25) {
       killCocoon(w, n);

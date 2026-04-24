@@ -1158,21 +1158,22 @@ function showFeatureModal(f: Feature) {
   };
   const emoji = FEAT_EMOJI[f.kind] ?? '🔧';
   const name = FEAT_NAME[f.kind] ?? f.kind;
-  const needed = CONSTRUCTION_SEC[f.kind as keyof typeof CONSTRUCTION_SEC] ?? 30;
-  const pct = f.devLevel >= 2 ? 100 : Math.min(99, Math.round((f.workSec / needed) * 100));
+  const needed = CONSTRUCTION_SEC[f.kind as keyof typeof CONSTRUCTION_SEC] ?? 45;
+  const currentPt = f.devLevel >= 2 ? needed : Math.round(Math.min(f.workSec, needed));
+  const barPctVal = f.devLevel >= 2 ? 100 : Math.min(99, Math.round((f.workSec / needed) * 100));
   const isBuilding = f.devLevel >= 2;
   document.getElementById('modal-name')!.textContent = `${emoji} ${name}`;
-  document.getElementById('modal-age')!.textContent = isBuilding ? `Lv${f.devLevel}` : `建設中 ${pct}%`;
+  document.getElementById('modal-age')!.textContent = isBuilding ? `Lv${f.devLevel}` : `建設中 ${currentPt}/${needed} pt`;
   document.getElementById('modal-traits')!.innerHTML = '';
   const epitaphEl = document.getElementById('modal-epitaph')!;
   epitaphEl.classList.remove('show');
   epitaphEl.textContent = '';
   let statusHtml = '';
   if (!isBuilding) {
-    const barPct = Math.min(100, pct);
+    const barPct = Math.min(100, barPctVal);
     statusHtml += `<div class="param-row"><span class="label">建設</span>`
       + `<span class="bar"><span class="fill" style="width:${barPct}%;background:#c89650"></span></span>`
-      + `<span class="value">${pct}%</span></div>`;
+      + `<span class="value">${currentPt}/${needed} pt</span></div>`;
   } else {
     statusHtml += `<div class="param-row"><span class="label">状態</span>`
       + `<span class="bar"><span class="fill" style="width:100%;background:#4a9a5a"></span></span>`
