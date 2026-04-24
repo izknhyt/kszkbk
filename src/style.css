@@ -773,3 +773,434 @@ button:active { transform: translateY(1px); }
   .stat { padding: 2px 4px; font-size: 9px; }
   .stat b { font-size: 11px; }
 }
+
+/* ========================================================================
+   Σ-6-UI: Resource bar with trend arrows
+   ======================================================================== */
+.resource-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 6px;
+}
+.res-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.52), rgba(255,255,255,0.1)),
+    rgba(248,240,223,0.9);
+  border: 1px solid rgba(111,83,52,0.16);
+  border-radius: 10px;
+  padding: 3px 6px;
+  font-size: 11px;
+  min-width: 44px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.32);
+}
+.res-item .res-icon { font-size: 12px; line-height: 1; }
+.res-item b {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--ink);
+  font-weight: 700;
+}
+.res-item b.low { color: #c84040; }
+.res-trend {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.res-trend.up   { color: #4a9a4a; }
+.res-trend.down { color: #c84040; }
+.res-trend.flat { color: #aaa; }
+
+/* ========================================================================
+   Σ-6-UI: 3-day weather forecast row
+   ======================================================================== */
+.forecast-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 5px 8px;
+  background: rgba(30,20,8,0.65);
+  color: #fff3d8;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.fc-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  flex: 1;
+  text-align: center;
+}
+.fc-today { opacity: 1; }
+.fc-icon  { font-size: 16px; line-height: 1; }
+.fc-label { font-size: 9px; color: #ffd580; }
+.fc-day.danger .fc-icon  { animation: fc-pulse 0.8s ease-in-out infinite alternate; }
+.fc-day.danger .fc-label { color: #ff8080; }
+@keyframes fc-pulse { from { opacity: 0.6 } to { opacity: 1 } }
+.fc-arrow { color: #ffd58088; font-size: 10px; }
+
+/* ========================================================================
+   Σ-6-UI-a: Build panel — category tabs
+   ======================================================================== */
+.build-mode-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: linear-gradient(135deg, #c7633a, #e0a952);
+  color: #fff;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(180,80,30,0.3);
+}
+.build-mode-indicator.hidden { display: none; }
+.build-mode-cancel {
+  background: rgba(255,255,255,0.22);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: auto;
+  box-shadow: none;
+}
+.build-mode-cancel:hover { background: rgba(255,255,255,0.35); filter: none; }
+
+.build-cat-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 6px;
+  background: rgba(111,83,52,0.08);
+  border-radius: 8px;
+  padding: 3px;
+}
+.build-cat-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 2px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ink);
+  min-height: auto;
+  box-shadow: none;
+  transition: background 0.15s;
+}
+.build-cat-tab small {
+  font-size: 8px;
+  color: #7a6650;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.build-cat-tab:hover { background: rgba(255,255,255,0.5); filter: none; }
+.build-cat-tab.active {
+  background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.6));
+  box-shadow: 0 1px 4px rgba(111,83,52,0.18);
+  color: var(--accent);
+}
+.build-cat-tab.active small { color: var(--accent); }
+
+/* ========================================================================
+   Σ-6-UI-a: Build cards
+   ======================================================================== */
+.build-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.build-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 8px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.7), rgba(255,255,255,0.3)),
+    rgba(248,240,220,0.9);
+  border: 1.5px solid rgba(111,83,52,0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
+  position: relative;
+}
+.build-card:hover:not(.cant-afford) {
+  border-color: var(--accent-soft);
+  box-shadow: 0 2px 8px rgba(180,80,30,0.15);
+}
+.build-card.active {
+  background: linear-gradient(135deg, #fff3cc, #ffe0a0);
+  border-color: #c7633a;
+  border-width: 2px;
+  box-shadow: 0 0 0 2px rgba(199,99,58,0.2);
+}
+.build-card.cant-afford {
+  opacity: 0.42;
+  cursor: not-allowed;
+  filter: grayscale(0.3);
+}
+.build-card-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.build-card-cost {
+  font-size: 10px;
+  color: #7a5830;
+  font-weight: 600;
+}
+.build-card-cost .short { color: #c84040; font-weight: 700; }
+.build-card-effect {
+  font-size: 9px;
+  color: #6a5840;
+  line-height: 1.3;
+}
+
+/* ========================================================================
+   Σ-6-UI-a: Terraform section
+   ======================================================================== */
+.terraform-section {
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  background: rgba(111,83,52,0.06);
+  border-radius: 6px;
+  border: 1px dashed rgba(111,83,52,0.18);
+}
+.terraform-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #7a5830;
+  margin-bottom: 5px;
+  letter-spacing: 0.04em;
+}
+.terraform-row {
+  display: flex;
+  gap: 4px;
+}
+.terraform-btn {
+  flex: 1;
+  padding: 6px 4px;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  line-height: 1;
+  background: linear-gradient(180deg, #d4c4a0, #b89a70);
+  border: 1px solid rgba(111,83,52,0.3);
+  border-radius: 6px;
+  color: #3a2a1a;
+  font-weight: 700;
+}
+.terraform-btn small { font-size: 9px; color: #6a5020; }
+.terraform-btn.active {
+  background: linear-gradient(135deg, #e8d080, #d4a040);
+  border-color: #a87830;
+  box-shadow: 0 0 0 2px rgba(180,120,40,0.25);
+}
+
+/* ========================================================================
+   Σ-6-UI-b: Tooltip
+   ======================================================================== */
+.kszk-tooltip {
+  position: fixed;
+  z-index: 9000;
+  background: rgba(28,18,8,0.97);
+  color: #f4e8d0;
+  border: 1px solid rgba(200,155,80,0.45);
+  border-radius: 10px;
+  padding: 10px 13px;
+  font-size: 11px;
+  max-width: 230px;
+  line-height: 1.55;
+  pointer-events: none;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+  font-family: "Hiragino Mincho ProN","Yu Mincho","Times New Roman",serif;
+}
+.kszk-tooltip.hidden { display: none; }
+.kszk-tooltip b { color: #ffd580; font-size: 13px; display: block; margin-bottom: 4px; }
+.tt-rule { border: none; border-top: 1px solid rgba(200,155,80,0.3); margin: 6px 0; }
+.tt-row { display: flex; gap: 6px; margin-bottom: 2px; }
+.tt-row .tt-k { color: #c0a070; min-width: 52px; flex-shrink: 0; }
+.tt-row .tt-v { color: #f4e8d0; }
+.tt-note { font-size: 9.5px; color: #c0a870; margin-top: 4px; font-style: italic; }
+.tt-short { color: #ff7070 !important; }
+
+/* ========================================================================
+   Σ-6-UI-c: Action bar (bottom of stage area)
+   ======================================================================== */
+.action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 340px;
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  background:
+    linear-gradient(180deg, rgba(30,20,8,0) 0%, rgba(30,20,8,0.82) 30%),
+    rgba(24,16,6,0.88);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.1);
+  color: #f4e8d0;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 32px;
+  white-space: nowrap;
+  box-shadow: none;
+  transition: background 0.15s;
+}
+.action-btn:hover { background: rgba(255,255,255,0.2); filter: none; }
+.action-btn:active { transform: translateY(1px); }
+.action-btn kbd {
+  font-size: 8px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: inherit;
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #ffd580;
+}
+.action-btn-mode.active {
+  background: rgba(199,99,58,0.6);
+  border-color: rgba(224,169,82,0.5);
+  color: #fff;
+}
+.action-bar-divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(255,255,255,0.15);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+/* ========================================================================
+   Σ-6-UI-c: Warning panel (top-left of stage area)
+   ======================================================================== */
+.warning-panel {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 800;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 280px;
+  pointer-events: none;
+}
+.warning-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 7px 10px;
+  background: rgba(26,16,6,0.92);
+  color: #f4e8d0;
+  border: 1px solid rgba(200,120,40,0.4);
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.4);
+  pointer-events: auto;
+  animation: warn-slide-in 0.25s ease;
+}
+@keyframes warn-slide-in { from { opacity:0; transform:translateX(-10px) } to { opacity:1; transform:none } }
+.warning-item.warn-critical { border-color: rgba(220,60,60,0.6); }
+.warning-item .warn-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.warning-item .warn-text { flex: 1; }
+.warning-item .warn-dismiss {
+  background: transparent;
+  color: rgba(255,255,255,0.4);
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 2px;
+  min-height: auto;
+  box-shadow: none;
+  line-height: 1;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+.warning-item .warn-dismiss:hover { color: #fff; filter: none; }
+
+/* ========================================================================
+   Σ-6-UI-d: Responsive adjustments
+   ======================================================================== */
+/* Desktop: 1280px or narrower — compact build cards */
+@media (max-width: 1280px) {
+  .build-cards { grid-template-columns: repeat(2, 1fr); gap: 4px; }
+  .build-card { padding: 6px 7px; }
+  .build-card-effect { display: none; }
+}
+
+/* Tablet/narrow: action bar goes full width */
+@media (max-width: 900px), (orientation: portrait) {
+  .action-bar { right: 0; }
+  .warning-panel { max-width: 240px; }
+  #hud-header { padding: 8px 10px 6px; }
+  .hud-title { font-size: 14px; }
+  .tab { padding: 12px 4px; font-size: 11px; }
+  button { min-height: 38px; }
+  .build-row .name { font-size: 11px; }
+  .forecast-row { padding: 4px 6px; }
+  .resource-bar { gap: 2px; }
+  .res-item { padding: 2px 5px; min-width: 38px; }
+}
+
+/* Very narrow / stage bottom area */
+@media (max-width: 640px) {
+  .action-bar { gap: 2px; padding: 4px 6px; }
+  .action-btn  { padding: 5px 7px; font-size: 10px; }
+  .action-btn kbd { display: none; }
+  .build-cards { grid-template-columns: 1fr; }
+  .build-card-effect { display: block; }
+}
+
+/* ========================================================================
+   Σ-6-UI misc: build hint text update
+   ======================================================================== */
+.plot-build-hint {
+  font-size: 10px;
+  color: #6a5020;
+  margin-top: 4px;
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  background: rgba(255,248,220,0.5);
+  border-radius: 4px;
+  min-height: 20px;
+}
+
+/* stat-grid used for points/pop/deaths/season row */
+.stat-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 4px; }
+/* resource-row is replaced by resource-bar; hide if still present for safety */
+.stat-grid.resource-row { display: none; }
+

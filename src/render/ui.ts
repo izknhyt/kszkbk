@@ -64,29 +64,45 @@ export function refreshUI(world: WorldState, cb: UICallbacks) {
   renderDex(world);
 }
 
+// 危険天候（赤マーカー対象）
+const DANGEROUS_WEATHER = new Set(['storm', 'heatwave', 'blizzard', 'drought']);
+
 function renderStats(w: WorldState, cb: UICallbacks) {
   byId('stat-points').textContent = String(w.points);
   byId('stat-pop').textContent = String(w.chibis.length);
   byId('stat-cap').textContent = String(populationCap(w));
   byId('stat-deaths').textContent = String(w.totalDeaths);
   byId('stat-season').textContent = `${SEASON_LABEL[w.season]} ${w.dayCount}日目 ${DAY_PHASE_LABEL[w.dayPhase]}`;
-  byId('stat-food').textContent = String(Math.floor(w.resources.food));
-  byId('stat-water').textContent = String(Math.floor(w.resources.water));
-  byId('stat-wood').textContent = String(Math.floor(w.resources.wood));
-  byId('stat-stone').textContent = String(Math.floor(w.resources.stone));
-  const plankEl = document.getElementById('stat-plank');
-  if (plankEl) plankEl.textContent = String(Math.floor(w.resources.plank ?? 0));
-  const powerEl = document.getElementById('stat-power');
-  if (powerEl) powerEl.textContent = String(Math.floor(w.resources.power ?? 0));
-  const brickEl = document.getElementById('stat-brick');
-  if (brickEl) brickEl.textContent = String(Math.floor(w.resources.brick ?? 0));
-  const woolEl = document.getElementById('stat-wool');
-  if (woolEl) woolEl.textContent = String(Math.floor(w.resources.wool ?? 0));
-  const clothEl = document.getElementById('stat-cloth');
-  if (clothEl) clothEl.textContent = String(Math.floor(w.resources.cloth ?? 0));
-  const soilEl = document.getElementById('stat-soil');
-  if (soilEl) soilEl.textContent = String(Math.floor(w.resources.soil ?? 0));
-  // 天気 + 予報
+
+  // 資源は updateResourceBar() (main.ts) で管理するが、
+  // fallback として stat-* の値も保持（ui.ts が先に呼ばれる場合）
+  const resIds = ['food','water','wood','stone'] as const;
+  for (const k of resIds) {
+    const el = document.getElementById(`stat-${k}`);
+    if (el) el.textContent = String(Math.floor(w.resources[k]));
+  }
+  const optIds: Array<[string, keyof typeof w.resources]> = [
+    ['plank','plank'],['power','power'],['brick','brick'],
+    ['wool','wool'],['cloth','cloth'],['soil','soil'],
+  ];
+  for (const [id, key] of optIds) {
+    const el = document.getElementById(`stat-${id}`);
+    if (el) el.textContent = String(Math.floor(w.resources[key] ?? 0));
+  }
+
+  // 3日予報（forecast-row の各セル）
+  const DANGER = DANGEROUS_WEATHER;
+  const forecast = [w.weather, ...w.weatherForecast.filter((e) => e.dayOffset > 0)].slice(0, 3);
+  for (let i = 0; i < 3; i++) {
+    const fc = forecast[i];
+    const iconEl = document.getElementById(`fc-icon-${i}`);
+    const dayEl = iconEl?.closest('.fc-day');
+    if (fc && iconEl) {
+      iconEl.textContent = WEATHER_ICON[fc.kind] ?? '?';
+      dayEl?.classList.toggle('danger', DANGER.has(fc.kind));
+    }
+  }
+  // 旧 weather-row（後方互換、HTML から削除済みだが null セーフで保持）
   const weatherNow = document.getElementById('weather-now');
   if (weatherNow) weatherNow.textContent = `${WEATHER_ICON[w.weather.kind]} ${WEATHER_LABEL[w.weather.kind]}`;
   const weatherFc = document.getElementById('weather-fc');
