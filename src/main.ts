@@ -236,6 +236,415 @@ async function start() {
     generator: 'ペダル発電所', streetlamp: '街灯', powerline: '電線', kiln: '精錬所',
     pasture: '牧場', loom: '織機',
   };
+  const FEAT_EMOJI_MAP: Record<BuildKind, string> = {
+    water:'💧', farm:'🌾', channel:'🌊', path:'🛤', house:'🏠',
+    well:'⛲', firewatch:'🔥', sawmill:'🪚', shrine:'⛩',
+    generator:'⚡', streetlamp:'💡', powerline:'🪜', kiln:'🧱',
+    pasture:'🐑', loom:'🧶',
+  };
+  const FEAT_EFFECT_DESC: Record<BuildKind, string> = {
+    water:      '周囲 70px の水路に水を供給',
+    farm:       'watered で 🍞 0.08/秒生産',
+    channel:    '水源↔畑 70px 以内で通水',
+    path:       '移動ルート（将来実装）',
+    house:      '定員 4 人、夜間野宿ペナルティ回避',
+    well:       '乾燥でも畑が 0.4 倍生産を維持',
+    firewatch:  '半径 180px の火事ダメージ ×0.25',
+    sawmill:    '🪵×2 → 🪚×1（ちびわふ労働）',
+    shrine:     '半径 200px で空腹・疲労 −30%',
+    generator:  'ちびわふが漕いで ⚡ を生産',
+    streetlamp: '夜間照明、⚡ 消費、🐺 忌避',
+    powerline:  '発電所↔街灯を 90px で中継',
+    kiln:       '🪨×3 → 🧱×1（ちびわふ労働）',
+    pasture:    '🐑 0.03/秒 自動生産',
+    loom:       '🐑×2 → 🧶×1（ちびわふ労働）',
+  };
+  // ツールチップ詳細説明
+  function buildTooltipHtml(kind: BuildKind): string {
+    const cost = plotBuildCosts[kind];
+    const pts = CONSTRUCTION_SEC[kind as keyof typeof CONSTRUCTION_SEC] ?? 45;
+    const parts: string[] = [];
+    if (cost.wood  > 0) parts.push(`🪵×${cost.wood}`);
+    if (cost.stone > 0) parts.push(`🪨×${cost.stone}`);
+    if ((cost.plank ?? 0) > 0) parts.push(`🪚×${cost.plank}`);
+    if ((cost.soil  ?? 0) > 0) parts.push(`🟫×${cost.soil}`);
+    const costStr = parts.join(' ') || 'なし';
+    const have = {
+      wood: Math.floor(world.resources.wood),
+      stone: Math.floor(world.resources.stone),
+      plank: Math.floor(world.resources.plank),
+      soil: Math.floor(world.resources.soil),
+    };
+    const shortage: string[] = [];
+    if (cost.wood  > have.wood)  shortage.push(`🪵あと${cost.wood - have.wood}`);
+    if (cost.stone > have.stone) shortage.push(`🪨あと${cost.stone - have.stone}`);
+    if ((cost.plank ?? 0) > have.plank) shortage.push(`🪚あと${(cost.plank ?? 0) - have.plank}`);
+    if ((cost.soil  ?? 0) > have.soil)  shortage.push(`🟫あと${(cost.soil  ?? 0) - have.soil}`);
+    const shortageHtml = shortage.length > 0
+      ? `<div class="tt-rule"></div><div class="tt-row"><span class="tt-k tt-short">不足</span><span class="tt-v">${shortage.join('、')}ほしいわふ</span></div>`
+      : '';
+    return `<b>${FEAT_EMOJI_MAP[kind]} ${buildModeLabel[kind]}</b>` +
+      `<div class="tt-rule"></div>` +
+      `<div class="tt-row"><span class="tt-k">コスト</span><span class="tt-v">${escapeHtml(costStr)}</span></div>` +
+      `<div class="tt-row"><span class="tt-k">建設目安</span><span class="tt-v">1人で約${pts}秒、4人で約${Math.ceil(pts/3)}秒</span></div>` +
+      `<div class="tt-row"><span class="tt-k">効果</span><span class="tt-v">${escapeHtml(FEAT_EFFECT_DESC[kind])}</span></div>` +
+      shortageHtml;
+  }
+  function terraformTooltipHtml(mode: 'raise' | 'lower'): string {
+    if (mode === 'raise') {
+      return `<b>⛰ 盛り土</b>` +
+        `<div class="tt-rule"></div>` +
+        `<div class="tt-row"><span class="tt-k">コスト</span><span class="tt-v">🟫×10（即時消費）</span></div>` +
+        `<div class="tt-row"><span class="tt-k">作業</span><span class="tt-v">ちびわふが 28px 内で進行</span></div>` +
+        `<div class="tt-row"><span class="tt-k">効果</span><span class="tt-v">タイル elev +5</span></div>` +
+        `<div class="tt-note">⚠ stability 低下 → 土砂崩れで死人が出るわふ</div>`;
+    }
+    return `<b>⛏ 切り土</b>` +
+      `<div class="tt-rule"></div>` +
+      `<div class="tt-row"><span class="tt-k">コスト</span><span class="tt-v">なし（報酬あり）</span></div>` +
+      `<div class="tt-row"><span class="tt-k">作業</span><span class="tt-v">ちびわふが 28px 内で進行</span></div>` +
+      `<div class="tt-row"><span class="tt-k">報酬</span><span class="tt-v">🟫 soil +18、岩なら 🪨 stone +7</span></div>` +
+      `<div class="tt-row"><span class="tt-k">効果</span><span class="tt-v">タイル elev −5</span></div>`;
+  }
+
+  // ========= Σ-6-UI-a: カテゴリタブ + ビルドカード ========================
+  const BUILD_CATEGORIES: Array<{ id: string; kinds: BuildKind[] }> = [
+    { id: 'water',    kinds: ['water', 'channel', 'path'] },
+    { id: 'food',     kinds: ['farm', 'pasture'] },
+    { id: 'home',     kinds: ['house', 'well'] },
+    { id: 'defense',  kinds: ['firewatch'] },
+    { id: 'industry', kinds: ['sawmill', 'kiln', 'loom'] },
+    { id: 'power',    kinds: ['generator', 'streetlamp', 'powerline'] },
+    { id: 'faith',    kinds: ['shrine'] },
+  ];
+  let activeBuildCategory = 'water';
+
+  function costHtml(kind: BuildKind): string {
+    const cost = plotBuildCosts[kind];
+    const have = {
+      wood: world.resources.wood, stone: world.resources.stone,
+      plank: world.resources.plank, soil: world.resources.soil,
+    };
+    const fmt = (emoji: string, need: number, cur: number) => {
+      if (need <= 0) return '';
+      const short = cur < need;
+      return `<span${short ? ' class="short"' : ''}>${emoji}×${need}</span>`;
+    };
+    const parts = [
+      fmt('🪵', cost.wood, have.wood),
+      fmt('🪨', cost.stone, have.stone),
+      fmt('🪚', cost.plank ?? 0, have.plank),
+      fmt('🟫', cost.soil ?? 0, have.soil),
+    ].filter(Boolean);
+    return parts.join(' ') || 'なし';
+  }
+
+  function canAffordBuild(kind: BuildKind): boolean {
+    const cost = plotBuildCosts[kind];
+    return world.resources.wood  >= cost.wood &&
+           world.resources.stone >= cost.stone &&
+           world.resources.plank >= (cost.plank ?? 0) &&
+           world.resources.soil  >= (cost.soil  ?? 0);
+  }
+
+  function renderBuildCards() {
+    const host = document.getElementById('build-cards');
+    if (!host) return;
+    host.innerHTML = '';
+    const cat = BUILD_CATEGORIES.find((c) => c.id === activeBuildCategory);
+    if (!cat) return;
+    for (const kind of cat.kinds) {
+      const affordable = canAffordBuild(kind);
+      const isActive = buildMode === kind;
+      const card = document.createElement('div');
+      card.className = `build-card${!affordable ? ' cant-afford' : ''}${isActive ? ' active' : ''}`;
+      card.dataset.plotKind = kind;
+      card.innerHTML =
+        `<div class="build-card-name">${FEAT_EMOJI_MAP[kind]} ${buildModeLabel[kind]}</div>` +
+        `<div class="build-card-cost">${costHtml(kind)}</div>` +
+        `<div class="build-card-effect">${escapeHtml(FEAT_EFFECT_DESC[kind])}</div>`;
+      host.appendChild(card);
+    }
+  }
+
+  // カテゴリタブ切替
+  document.getElementById('build-cat-tabs')?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('.build-cat-tab');
+    if (!btn?.dataset.cat) return;
+    activeBuildCategory = btn.dataset.cat;
+    document.querySelectorAll('.build-cat-tab').forEach((b) => b.classList.toggle('active', b === btn));
+    renderBuildCards();
+  });
+
+  // ビルドカードクリック（イベント委譲）
+  document.getElementById('build-cards')?.addEventListener('click', (e) => {
+    const card = (e.target as HTMLElement).closest<HTMLElement>('.build-card');
+    if (!card) return;
+    if (card.classList.contains('cant-afford')) {
+      const kind = card.dataset.plotKind as BuildKind;
+      const cost = plotBuildCosts[kind];
+      const shortage: string[] = [];
+      if (cost.wood  > world.resources.wood)  shortage.push(`🪵あと${Math.ceil(cost.wood - world.resources.wood)}本ほしいわふ`);
+      if (cost.stone > world.resources.stone) shortage.push(`🪨あと${Math.ceil(cost.stone - world.resources.stone)}個ほしいわふ`);
+      if ((cost.plank ?? 0) > world.resources.plank) shortage.push(`🪚あと${Math.ceil((cost.plank ?? 0) - world.resources.plank)}枚ほしいわふ`);
+      if ((cost.soil  ?? 0) > world.resources.soil)  shortage.push(`🟫あと${Math.ceil((cost.soil  ?? 0) - world.resources.soil)}ほしいわふ`);
+      flashToast(shortage.join(' '), 'info');
+      return;
+    }
+    const kind = card.dataset.plotKind as BuildKind;
+    setTerraformMode(null);
+    setBuildMode(buildMode === kind ? null : kind);
+    renderBuildCards();
+  });
+
+  // リソース変動でカードの disabled 状態を更新
+  function updateBuildCards() {
+    document.querySelectorAll<HTMLElement>('.build-card').forEach((card) => {
+      const kind = card.dataset.plotKind as BuildKind;
+      if (!kind) return;
+      const affordable = canAffordBuild(kind);
+      card.classList.toggle('cant-afford', !affordable);
+      // コスト表示も更新（不足/充足の色変わり）
+      const costEl = card.querySelector('.build-card-cost');
+      if (costEl) costEl.innerHTML = costHtml(kind);
+    });
+  }
+
+  // ========= Σ-6-UI-b: ツールチップ =======================================
+  const tooltipEl = document.getElementById('kszk-tooltip')!;
+  let tooltipTimer: ReturnType<typeof setTimeout> | null = null;
+  let tooltipMouseX = 0;
+  let tooltipMouseY = 0;
+
+  function showTooltip(html: string) {
+    tooltipEl.innerHTML = html;
+    tooltipEl.classList.remove('hidden');
+    positionTooltip(tooltipMouseX, tooltipMouseY);
+  }
+  function hideTooltip() {
+    if (tooltipTimer !== null) { clearTimeout(tooltipTimer); tooltipTimer = null; }
+    tooltipEl.classList.add('hidden');
+  }
+  function positionTooltip(x: number, y: number) {
+    const margin = 14;
+    const tw = Math.min(tooltipEl.scrollWidth + 2, 240);
+    const th = tooltipEl.scrollHeight + 2;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = x + margin;
+    let top  = y + margin;
+    if (left + tw > vw - 4) left = x - tw - margin;
+    if (top  + th > vh - 4) top  = y - th - margin;
+    tooltipEl.style.left = `${Math.max(4, left)}px`;
+    tooltipEl.style.top  = `${Math.max(4, top)}px`;
+  }
+
+  // マウス移動でトラッキング
+  document.addEventListener('mousemove', (e) => {
+    tooltipMouseX = e.clientX;
+    tooltipMouseY = e.clientY;
+    if (!tooltipEl.classList.contains('hidden')) {
+      positionTooltip(tooltipMouseX, tooltipMouseY);
+    }
+  });
+
+  // HUD パネルにホバーイベント（委譲）
+  document.getElementById('build-cards')?.addEventListener('mouseover', (e) => {
+    const card = (e.target as HTMLElement).closest<HTMLElement>('.build-card');
+    if (!card?.dataset.plotKind) { hideTooltip(); return; }
+    if (tooltipTimer) clearTimeout(tooltipTimer);
+    tooltipTimer = setTimeout(() => showTooltip(buildTooltipHtml(card.dataset.plotKind as BuildKind)), 420);
+  });
+  document.getElementById('build-cards')?.addEventListener('mouseleave', hideTooltip);
+
+  document.querySelectorAll<HTMLElement>('.terraform-btn').forEach((btn) => {
+    btn.addEventListener('mouseover', () => {
+      if (tooltipTimer) clearTimeout(tooltipTimer);
+      const mode = btn.dataset.terraform as 'raise' | 'lower';
+      tooltipTimer = setTimeout(() => showTooltip(terraformTooltipHtml(mode)), 420);
+    });
+    btn.addEventListener('mouseleave', hideTooltip);
+  });
+
+  // ========= Σ-6-UI-c: 警告パネル =========================================
+  type WarnId = 'food-low' | 'wolf-near' | 'construction-stalled';
+  const dismissedWarnings = new Set<WarnId>();
+
+  function updateWarningPanel() {
+    const panel = document.getElementById('warning-panel');
+    if (!panel) return;
+    const warnings: Array<{ id: WarnId; icon: string; text: string; critical?: boolean }> = [];
+
+    // 食料残量と消費速度から余命を計算
+    const food = world.resources.food;
+    // 食料消費をざっくり推定: ちびわふ数 × 0.04/sec (hunger tick ベース概算)
+    const foodConsRate = world.chibis.length * 0.04;
+    if (food < 15) {
+      const lifetimeSec = foodConsRate > 0 ? Math.floor(food / foodConsRate) : 999;
+      warnings.push({
+        id: 'food-low',
+        icon: '🍞',
+        text: `おなかすいたわふ…！食料あと約${lifetimeSec}秒分 (${Math.floor(food)})`,
+        critical: food < 5,
+      });
+    }
+
+    // オオカミ出現
+    const wolfCount = world.wolves.filter((w) => w.state !== 'dead').length;
+    if (wolfCount > 0) {
+      warnings.push({ id: 'wolf-near', icon: '🐺', text: `オオカミ出現！${wolfCount}匹いるわふ！逃げてー！` });
+    }
+
+    // 建設滞留：devLevel < 2 で workSec が 60 秒以上停止している feature
+    const stalledCount = world.features.filter((f) => f.devLevel < 2 && (f.workSec ?? 0) === 0).length;
+    if (stalledCount > 0) {
+      warnings.push({ id: 'construction-stalled', icon: '🔨', text: `建設が${stalledCount}件止まってるわふ…ちびわふ近くに呼んでね` });
+    }
+
+    // DOM 更新：既存 item を保持しつつ差分更新
+    const existing = new Map<WarnId, HTMLElement>();
+    panel.querySelectorAll<HTMLElement>('[data-warn-id]').forEach((el) => {
+      existing.set(el.dataset.warnId as WarnId, el);
+    });
+
+    for (const [id, el] of existing) {
+      if (!warnings.find((w) => w.id === id) || dismissedWarnings.has(id)) {
+        el.style.opacity = '0';
+        el.style.transition = 'opacity 0.3s';
+        setTimeout(() => el.remove(), 310);
+        existing.delete(id);
+      }
+    }
+
+    for (const w of warnings) {
+      if (dismissedWarnings.has(w.id)) continue;
+      let el = existing.get(w.id);
+      const isNew = !el;
+      if (!el) {
+        el = document.createElement('div');
+        el.className = `warning-item${w.critical ? ' warn-critical' : ''}`;
+        el.dataset.warnId = w.id;
+        el.innerHTML =
+          `<span class="warn-icon">${w.icon}</span>` +
+          `<span class="warn-text"></span>` +
+          `<button class="warn-dismiss" title="閉じる">×</button>`;
+        el.querySelector('.warn-dismiss')!.addEventListener('click', () => {
+          dismissedWarnings.add(w.id);
+          el!.style.opacity = '0';
+          el!.style.transition = 'opacity 0.3s';
+          setTimeout(() => el!.remove(), 310);
+        });
+        panel.appendChild(el);
+        // non-critical は 8 秒後に自動フェードアウト（条件が続いていれば次の refresh で再表示）
+        if (!w.critical && isNew) {
+          setTimeout(() => {
+            if (el && el.isConnected) {
+              el.style.opacity = '0';
+              el.style.transition = 'opacity 0.4s';
+              setTimeout(() => el?.remove(), 410);
+            }
+          }, 8000);
+        }
+      }
+      el.querySelector<HTMLElement>('.warn-text')!.textContent = w.text;
+      el.classList.toggle('warn-critical', !!w.critical);
+    }
+    // dismissed セットは 60 秒でリセット（food が回復したら再警告）
+    if (world.tick % 3600 === 0) dismissedWarnings.clear();
+  }
+
+  // ========= Σ-6-UI-c: リソース傾向（trend arrows） =======================
+  interface ResSnapshot {
+    t: number;
+    food: number; water: number; wood: number; stone: number;
+    plank: number; power: number; brick: number; wool: number; cloth: number; soil: number;
+  }
+  const resHistory: ResSnapshot[] = [];
+
+  function updateResHistory() {
+    const r = world.resources;
+    resHistory.push({
+      t: world.timeSec,
+      food: r.food, water: r.water, wood: r.wood, stone: r.stone,
+      plank: r.plank ?? 0, power: r.power ?? 0, brick: r.brick ?? 0,
+      wool: r.wool ?? 0, cloth: r.cloth ?? 0, soil: r.soil ?? 0,
+    });
+    while (resHistory.length > 1 && world.timeSec - resHistory[0]!.t > 30) resHistory.shift();
+  }
+
+  function resTrend(key: keyof ResSnapshot): string {
+    if (key === 't') return '';
+    if (resHistory.length < 2) return '';
+    const now = resHistory[resHistory.length - 1]!;
+    const old = resHistory[0]!;
+    if (world.timeSec - old.t < 5) return '';
+    const diff = (now[key] as number) - (old[key] as number);
+    if (diff > 1)  return '▲';
+    if (diff < -1) return '▼';
+    return '';
+  }
+
+  function updateResourceBar() {
+    updateResHistory();
+    const r = world.resources;
+    const entries: Array<{ id: string; val: number; trend: keyof ResSnapshot; low?: number; critical?: number }> = [
+      { id: 'food',  val: r.food,         trend: 'food',  low: 10, critical: 5 },
+      { id: 'water', val: r.water,        trend: 'water' },
+      { id: 'wood',  val: r.wood,         trend: 'wood',  low: 3 },
+      { id: 'stone', val: r.stone,        trend: 'stone', low: 3 },
+      { id: 'plank', val: r.plank ?? 0,   trend: 'plank' },
+      { id: 'power', val: r.power ?? 0,   trend: 'power' },
+      { id: 'brick', val: r.brick ?? 0,   trend: 'brick' },
+      { id: 'wool',  val: r.wool ?? 0,    trend: 'wool' },
+      { id: 'cloth', val: r.cloth ?? 0,   trend: 'cloth' },
+      { id: 'soil',  val: r.soil ?? 0,    trend: 'soil',  low: 5 },
+    ];
+    for (const e of entries) {
+      const valEl = document.getElementById(`stat-${e.id}`);
+      if (valEl) {
+        valEl.textContent = String(Math.floor(e.val));
+        valEl.classList.toggle('low',      e.low      != null && e.val < e.low);
+        valEl.classList.toggle('critical', e.critical != null && e.val < e.critical);
+      }
+      const resItem = document.getElementById(`stat-${e.id}`)?.closest('.res-item');
+      if (resItem) {
+        resItem.classList.toggle('res-critical', e.critical != null && e.val < e.critical);
+      }
+      const trendEl = document.getElementById(`trend-${e.id}`);
+      if (trendEl) {
+        const t = resTrend(e.trend);
+        trendEl.textContent = t;
+        trendEl.className = `res-trend ${t === '▲' ? 'up' : t === '▼' ? 'down' : 'flat'}`;
+      }
+    }
+  }
+
+  // ========= Σ-6-UI-c: アクションバー =====================================
+  document.getElementById('ab-build')?.addEventListener('click', () => {
+    // build タブを開く
+    const buildTab = document.querySelector<HTMLButtonElement>('.tab[data-tab="build"]');
+    buildTab?.click();
+  });
+  document.getElementById('ab-terrain')?.addEventListener('click', () => {
+    // build タブを開いてから terraform mode を toggle
+    const buildTab = document.querySelector<HTMLButtonElement>('.tab[data-tab="build"]');
+    buildTab?.click();
+    setTerraformMode(terraformMode === 'raise' ? null : 'raise');
+  });
+  document.getElementById('ab-ondo')?.addEventListener('click', () => triggerOndo(world));
+  document.getElementById('ab-bokai')?.addEventListener('click', () => triggerBokaigi(world));
+  document.getElementById('ab-fire')?.addEventListener('click', () => triggerFire(world));
+
+  // build mode indicator の解除ボタン
+  document.getElementById('build-mode-cancel')?.addEventListener('click', () => {
+    setBuildMode(null);
+    setTerraformMode(null);
+    renderBuildCards();
+  });
+
+  // ビルドカードを初期描画（全クロージャ定義後）
+  renderBuildCards();
+
   // 建設キャンセル：devLevel<2 の feature を解体、半額返金。
   // 既に投入済みの wood/stone/plank/soil を ceil(cost/2) で返す。
   function cancelConstruction(fid: string) {
@@ -273,16 +682,31 @@ async function start() {
   }
   function setBuildMode(m: typeof buildMode) {
     buildMode = m;
-    document.querySelectorAll<HTMLButtonElement>('.plot-build-btn').forEach((b) => {
-      b.classList.toggle('active', b.dataset.plotKind === m);
+    // ビルドカードのアクティブ状態を更新
+    document.querySelectorAll<HTMLElement>('.build-card').forEach((card) => {
+      card.classList.toggle('active', card.dataset.plotKind === m);
     });
+    // mode indicator バー
+    const indicator = document.getElementById('build-mode-indicator');
+    const modeText  = document.getElementById('build-mode-text');
+    if (indicator && modeText) {
+      if (m) {
+        indicator.classList.remove('hidden');
+        modeText.textContent = `${FEAT_EMOJI_MAP[m]} ${buildModeLabel[m]} 配置中`;
+      } else {
+        indicator.classList.add('hidden');
+      }
+    }
+    // アクションバーの建設ボタン active 状態
+    document.getElementById('ab-build')?.classList.toggle('active', m !== null);
     const hint = document.getElementById('plot-build-hint');
     if (hint) {
       hint.textContent = m
         ? `${buildModeLabel[m]} モード：地面を左クリックで設置／再押下で解除`
-        : 'ボタンを押してから地面の好きな場所を左クリック';
+        : 'ボタンを押してから地面の好きな場所を左クリックわふ';
     }
   }
+  // 旧 .plot-build-btn リスナー（後方互換；HTML からは削除済みだがセーフガード）
   document.querySelectorAll<HTMLButtonElement>('.plot-build-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const kind = btn.dataset.plotKind as BuildKind;
@@ -303,10 +727,18 @@ async function start() {
     document.querySelectorAll<HTMLButtonElement>('.terraform-btn').forEach((b) => {
       b.classList.toggle('active', b.dataset.terraform === m);
     });
+    // アクションバーの地形ボタン active 状態
+    document.getElementById('ab-terrain')?.classList.toggle('active', m !== null);
     if (m) {
       setBuildMode(null);
       const hint = document.getElementById('plot-build-hint');
       if (hint) hint.textContent = `${terraformLabel[m]} モード：地面を左クリックでタイル選択（ちびわふが作業）`;
+    } else {
+      // terraform 解除時は mode indicator も消す
+      const indicator = document.getElementById('build-mode-indicator');
+      indicator?.classList.add('hidden');
+      const hint = document.getElementById('plot-build-hint');
+      if (hint && !buildMode) hint.textContent = 'ボタンを押してから地面の好きな場所を左クリックわふ';
     }
   }
   document.querySelectorAll<HTMLButtonElement>('.terraform-btn').forEach((btn) => {
@@ -721,6 +1153,36 @@ async function start() {
     } else if (k === 'r') {
       stage.resetCamera();
     }
+    // --- Σ-6-UI-d キーボードショートカット ---
+    // B: 建設パネルを開く（build タブへ）
+    else if (k === 'b' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      const buildTab = document.querySelector<HTMLButtonElement>('.tab[data-tab="build"]');
+      buildTab?.click();
+    }
+    // T: terraform raise/lower 切替
+    else if (k === 't' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      const buildTab = document.querySelector<HTMLButtonElement>('.tab[data-tab="build"]');
+      buildTab?.click();
+      setTerraformMode(terraformMode === 'raise' ? null : 'raise');
+    }
+    // Esc: 全モード解除
+    else if (k === 'escape') {
+      setBuildMode(null);
+      setTerraformMode(null);
+      renderBuildCards();
+    }
+    // 1-7: build パネルが開いている時にカテゴリ切替
+    else if (k >= '1' && k <= '7') {
+      const buildPanel = document.querySelector<HTMLElement>('.tab-panel[data-panel="build"]');
+      if (buildPanel?.classList.contains('active')) {
+        const catIdx = parseInt(k) - 1;
+        const catTabs = document.querySelectorAll<HTMLButtonElement>('.build-cat-tab');
+        const target = catTabs[catIdx];
+        if (target) target.click();
+      }
+    }
   });
   window.addEventListener('keyup', (e) => {
     heldKeys.delete(e.key.toLowerCase());
@@ -853,6 +1315,9 @@ async function start() {
     uiTimer += dtReal;
     if (uiTimer >= CONFIG.UI_REFRESH_SEC) {
       refreshUI(world, cb);
+      updateBuildCards();
+      updateWarningPanel();
+      updateResourceBar();
       uiTimer = 0;
     }
     lastSave += dtReal;

@@ -32,8 +32,23 @@
 
     <div id="app">
       <div id="stage"></div>
+
+      <!-- Warning panel: top-left of stage area -->
+      <div id="warning-panel" class="warning-panel"></div>
+
+      <!-- Action bar: bottom of stage area -->
+      <div id="action-bar" class="action-bar">
+        <button class="action-btn action-btn-mode" id="ab-build" title="建設パネル (B)">🔨 建設<kbd>B</kbd></button>
+        <button class="action-btn action-btn-mode" id="ab-terrain" title="地形編集 (T)">⛰ 地形<kbd>T</kbd></button>
+        <div class="action-bar-divider"></div>
+        <button class="action-btn" id="ab-ondo" title="くそざこ音頭をかける">🎵 音頭</button>
+        <button class="action-btn" id="ab-bokai" title="棒会議を開催する">🪄 棒会議</button>
+        <button class="action-btn" id="ab-fire" title="火事を発生させる">🔥 火事</button>
+      </div>
+
       <canvas id="minimap" class="minimap" width="240" height="135"></canvas>
-      <div id="camera-help" class="camera-help">WASD: パン ・ F: フラナ ・ R: リセット</div>
+      <div id="camera-help" class="camera-help">WASD: パン ・ F: フラナ ・ R: リセット ・ B: 建設 ・ T: 地形 ・ Esc: 解除</div>
+
       <aside id="hud">
         <header id="hud-header">
           <div class="hud-title-row">
@@ -50,21 +65,26 @@
             <div class="stat"><span>死</span><b id="stat-deaths">0</b></div>
             <div class="stat"><span>季節</span><b id="stat-season">春</b></div>
           </div>
-          <div class="stat-grid resource-row">
-            <div class="stat"><span>🍞</span><b id="stat-food">0</b></div>
-            <div class="stat"><span>💧</span><b id="stat-water">0</b></div>
-            <div class="stat"><span>🪵</span><b id="stat-wood">0</b></div>
-            <div class="stat"><span>🪨</span><b id="stat-stone">0</b></div>
-            <div class="stat"><span>🪚</span><b id="stat-plank">0</b></div>
-            <div class="stat"><span>⚡</span><b id="stat-power">0</b></div>
-            <div class="stat"><span>🧱</span><b id="stat-brick">0</b></div>
-            <div class="stat"><span>🐑</span><b id="stat-wool">0</b></div>
-            <div class="stat"><span>🧶</span><b id="stat-cloth">0</b></div>
-            <div class="stat"><span>🟫</span><b id="stat-soil">0</b></div>
+          <!-- Resource bar with trend indicators -->
+          <div class="resource-bar" id="resource-bar">
+            <div class="res-item"><span class="res-icon">🍞</span><b id="stat-food">0</b><span class="res-trend" id="trend-food"></span></div>
+            <div class="res-item"><span class="res-icon">💧</span><b id="stat-water">0</b><span class="res-trend" id="trend-water"></span></div>
+            <div class="res-item"><span class="res-icon">🪵</span><b id="stat-wood">0</b><span class="res-trend" id="trend-wood"></span></div>
+            <div class="res-item"><span class="res-icon">🪨</span><b id="stat-stone">0</b><span class="res-trend" id="trend-stone"></span></div>
+            <div class="res-item"><span class="res-icon">🪚</span><b id="stat-plank">0</b><span class="res-trend" id="trend-plank"></span></div>
+            <div class="res-item"><span class="res-icon">⚡</span><b id="stat-power">0</b><span class="res-trend" id="trend-power"></span></div>
+            <div class="res-item"><span class="res-icon">🧱</span><b id="stat-brick">0</b><span class="res-trend" id="trend-brick"></span></div>
+            <div class="res-item"><span class="res-icon">🐑</span><b id="stat-wool">0</b><span class="res-trend" id="trend-wool"></span></div>
+            <div class="res-item"><span class="res-icon">🧶</span><b id="stat-cloth">0</b><span class="res-trend" id="trend-cloth"></span></div>
+            <div class="res-item"><span class="res-icon">🟫</span><b id="stat-soil">0</b><span class="res-trend" id="trend-soil"></span></div>
           </div>
-          <div class="weather-row">
-            <span class="weather-now" id="weather-now">☀ 快晴</span>
-            <span class="weather-fc" id="weather-fc">→ ☁ → 🌦</span>
+          <!-- 3-day weather forecast (always visible) -->
+          <div class="forecast-row" id="forecast-row">
+            <div class="fc-day fc-today"><span class="fc-icon" id="fc-icon-0">☀</span><span class="fc-label">今日</span></div>
+            <div class="fc-arrow">→</div>
+            <div class="fc-day"><span class="fc-icon" id="fc-icon-1">☁</span><span class="fc-label">明日</span></div>
+            <div class="fc-arrow">→</div>
+            <div class="fc-day"><span class="fc-icon" id="fc-icon-2">🌦</span><span class="fc-label">明後日</span></div>
           </div>
         </header>
 
@@ -76,37 +96,40 @@
         </nav>
 
         <section class="tab-panel active" data-panel="build">
-          <div class="build-section">
-            <div class="build-section-title">開拓（プロット）</div>
-            <div class="plot-build-row">
-              <button class="plot-build-btn" data-plot-kind="water" title="水源 (stone×5) — 周囲の水路に水を送る起点">💧 水源<small>🪨×5</small></button>
-              <button class="plot-build-btn" data-plot-kind="farm" title="畑 (wood×2)">🌾 畑<small>🪵×2</small></button>
-              <button class="plot-build-btn" data-plot-kind="channel" title="水路 (stone×1)">🌊 水路<small>🪨×1</small></button>
-              <button class="plot-build-btn" data-plot-kind="path" title="道 (stone×1)">🛤 道<small>🪨×1</small></button>
-              <button class="plot-build-btn" data-plot-kind="house" title="家 (wood×6 + stone×3, 定員4)">🏠 家<small>🪵×6 🪨×3</small></button>
-              <button class="plot-build-btn" data-plot-kind="well" title="井戸 (wood×1 + stone×8) — 干魃でも水供給">⛲ 井戸<small>🪵×1 🪨×8</small></button>
-              <button class="plot-build-btn" data-plot-kind="firewatch" title="火の見やぐら (wood×10 + stone×2) — 半径180pxの火事ダメージ×0.25">🔥 火の見<small>🪵×10 🪨×2</small></button>
-              <button class="plot-build-btn" data-plot-kind="sawmill" title="製材所 (wood×8 + stone×4) — 近くのちびわふが wood 2 → plank 1 に変換">🪚 製材所<small>🪵×8 🪨×4</small></button>
-              <button class="plot-build-btn" data-plot-kind="shrine" title="神社 (wood×3 + stone×5 + plank×2) — 半径200px以内のちびわふの空腹・疲労が-30%">⛩ 神社<small>🪵×3 🪨×5 🪚×2</small></button>
-              <button class="plot-build-btn" data-plot-kind="generator" title="ペダル発電所 (wood×6 + stone×4 + plank×3) — 近くのちびわふが漕いで電力を生む（疲労+）">⚡ 発電所<small>🪵×6 🪨×4 🪚×3</small></button>
-              <button class="plot-build-btn" data-plot-kind="streetlamp" title="街灯 (wood×2 + stone×1 + plank×1) — 夜に電力を消費して半径140を照らす。オオカミ忌避＋野宿のHPドレイン半減">💡 街灯<small>🪵×2 🪨×1 🪚×1</small></button>
-              <button class="plot-build-btn" data-plot-kind="powerline" title="電線 (wood×1 + plank×1) — 発電所と街灯を距離90px以内で繋ぐ中継。未接続の街灯は光らない">🪜 電線<small>🪵×1 🪚×1</small></button>
-              <button class="plot-build-btn" data-plot-kind="kiln" title="精錬所 (wood×4 + stone×8) — 近くのちびわふが stone×3 を brick×1 に変換。建材として将来の建物に使用">🧱 精錬所<small>🪵×4 🪨×8</small></button>
-              <button class="plot-build-btn" data-plot-kind="pasture" title="牧場 (wood×3 + stone×2) — 放置で wool を 0.03/sec 自動生産。雪/乾燥で半減。">🐑 牧場<small>🪵×3 🪨×2</small></button>
-              <button class="plot-build-btn" data-plot-kind="loom" title="織機 (wood×6 + plank×2) — 近くのちびわふが wool×2 を cloth×1 に変換">🧶 織機<small>🪵×6 🪚×2</small></button>
-            </div>
-            <div class="plot-build-row" style="margin-top:4px">
-              <button class="terraform-btn" data-terraform="raise" title="盛り土 (soil×20 消費、+5 elev) — ちびわふが近くに寄って作業">⛰ 盛り土<small>🟫×20</small></button>
-              <button class="terraform-btn" data-terraform="lower" title="切り土 (soil 獲得、-5 elev) — ちびわふが近くに寄って作業">⛏ 切り土<small>→🟫</small></button>
-            </div>
-            <div id="plot-build-hint" class="plot-build-hint">ボタンを押してから地面の好きな場所を左クリック</div>
+          <!-- Build mode indicator bar -->
+          <div id="build-mode-indicator" class="build-mode-indicator hidden">
+            <span id="build-mode-text">配置モード</span>
+            <button id="build-mode-cancel" class="build-mode-cancel" title="モード解除 (Esc)">✕ 解除</button>
           </div>
+
+          <!-- Category tabs (7 categories) -->
+          <div class="build-cat-tabs" id="build-cat-tabs">
+            <button class="build-cat-tab active" data-cat="water" title="水利 [1]">💧<small>水利</small></button>
+            <button class="build-cat-tab" data-cat="food" title="食料 [2]">🌾<small>食料</small></button>
+            <button class="build-cat-tab" data-cat="home" title="住居 [3]">🏠<small>住居</small></button>
+            <button class="build-cat-tab" data-cat="defense" title="防災 [4]">🔥<small>防災</small></button>
+            <button class="build-cat-tab" data-cat="industry" title="工業 [5]">🏭<small>工業</small></button>
+            <button class="build-cat-tab" data-cat="power" title="電力 [6]">⚡<small>電力</small></button>
+            <button class="build-cat-tab" data-cat="faith" title="信仰 [7]">⛩<small>信仰</small></button>
+          </div>
+
+          <!-- Build cards (dynamically populated by JS) -->
+          <div id="build-cards" class="build-cards"></div>
+
+          <!-- Terraform section -->
+          <div class="terraform-section">
+            <div class="terraform-section-title">⛏ 地形編集</div>
+            <div class="terraform-row">
+              <button class="terraform-btn" data-terraform="raise" title="盛り土：soil×10 消費、elev+5、ちびわふ労働">⛰ 盛り土<small>🟫×10</small></button>
+              <button class="terraform-btn" data-terraform="lower" title="切り土：soil獲得、elev-5、ちびわふ労働">⛏ 切り土<small>→🟫</small></button>
+            </div>
+          </div>
+
+          <!-- Hint text -->
+          <div id="plot-build-hint" class="plot-build-hint">ボタンを押してから地面の好きな場所を左クリックわふ</div>
+
+          <!-- Existing buildings list -->
           <div id="build-list"></div>
-          <div class="actions">
-            <button id="btn-ondo" title="くそざこ音頭をかける">音頭</button>
-            <button id="btn-bokai" title="棒会議を開催する">棒会議</button>
-            <button id="btn-fire" title="火事を発生させる">火事</button>
-          </div>
         </section>
 
         <section class="tab-panel" data-panel="dex">
@@ -140,9 +163,19 @@
             <span>tick <b id="stat-tick">0</b></span>
             <span>時刻 <b id="stat-time">0s</b></span>
           </div>
+          <!-- Legacy action buttons kept for debug panel -->
+          <div class="debug-row" style="border-top:1px dashed #c0a87a;margin-top:6px;padding-top:6px">
+            <button id="btn-ondo" title="くそざこ音頭">🎵 音頭</button>
+            <button id="btn-bokai" title="棒会議">🪄 棒会議</button>
+            <button id="btn-fire" title="火事">🔥 火事</button>
+          </div>
         </section>
       </aside>
     </div>
+
+    <!-- Tooltip overlay -->
+    <div id="kszk-tooltip" class="kszk-tooltip hidden"></div>
+
     <div id="chibi-modal" class="chibi-modal hidden">
       <div class="chibi-modal-backdrop"></div>
       <div class="chibi-modal-card">
