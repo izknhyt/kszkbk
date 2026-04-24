@@ -370,8 +370,8 @@ https://claude.ai/code/session_XXXXXX
 | Phase | 内容 | Commit |
 |---|---|---|
 | Σ-5-f-a | 3D 視認強化（明橙/明青、1Hz パルス、白アウトライン）+ HUD 文言改善 + 完了 toast + obstacle yields +50% + standard 初期資源 +33% + 切り土報酬 +28% + 解体返金 80% | 957c3a7 |
-| merge | fix-terraform-resources-w8azL → idle-village 統合 | （本 merge） |
-| 後処理 | docs 更新 | （本コミット） |
+| merge | fix-terraform-resources-w8azL → idle-village 統合 | 42ac81c |
+| 後処理 | docs 更新 | b078e53 |
 
 **バランス変更まとめ**：
 - 障害物産出：rock 2→3 stone、stump 2→3 wood、bush 1→2 wood
@@ -379,12 +379,21 @@ https://claude.ai/code/session_XXXXXX
 - 切り土報酬：LOWER_SOIL_GAIN 14→18、LOWER_STONE_GAIN 5→7
 - 解体返金：50% → 80%
 
-### ロードマップ v2（地形・3D 化）【Σ-5 〜 Σ-5-f まで完了】
+#### ✅ Σ-5-g 茂み自然再生（2026-04-23 に本流 merge、director patch）
 
-**方針**：Σ-0〜Σ-5-f で 3D 地形・描画基盤 + 開発ゲーム体感（労働 AI / feature 3D 化 /
+| 内容 | Commit |
+|---|---|
+| growBushes() 朝発火、難度別 spawn（beginner 2 / standard 1 / hell 1）、上限 = 初期 ×1.5、🌱 吹き出し通知。岩 respawn なし（計画性デザイン維持）、切株昇格は別フェーズ | ab6098e |
+
+**長期サステイナビリティ**：これにより wood 系の枯渇問題が緩和。standard で
+1 日 1 本ずつ bush が芽吹き、chibi 破壊と均衡する循環経済になった。
+
+### ロードマップ v2（地形・3D 化）【Σ-5 〜 Σ-5-g まで完了】
+
+**方針**：Σ-0〜Σ-5-g で 3D 地形・描画基盤 + 開発ゲーム体感（労働 AI / feature 3D 化 /
 HUD 進捗 / 狼 flee）+ 建設ゲームループ（数値 pt + 事故ペナルティ + 複数人ボーナス）+
 feature 識別モーダル + 水源建設 + 水流アニメ + 77 種くそざこセリフ + 建設キャンセル
-+ terraform 視認強化 + 資源バランス底上げが完成。
++ terraform 視認強化 + 資源バランス底上げ + 茂み自然再生が完成。
 次は Σ-6 歩行アニメ or Σ-6 水動力 or Ω-12 神罰など（HANDOFF.md §6 参照）。
 **ビジョン**：巨人のドシン × ピクミン × Don't Starve × Elona。なめらかな 3D 地形で
 神様が盛り土切り土を指示、ちびわふ 200+ がわちゃわちゃ動き回り、**改変がズボラで土砂崩れ事故で全滅**。
