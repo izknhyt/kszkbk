@@ -605,3 +605,110 @@ export function maybeStartChat(c1: Chibiwafu, c2: Chibiwafu): ChatAttempt | null
     duration: 2.2 + Math.random() * 1.3,
   };
 }
+
+// =========================================================================
+// 建設現場セリフ（Σ-5-e-e）
+//   くそざこが建設に取り組む「がやがや」感を演出するプール。
+//   純粋無垢・混乱・子どもっぽさが基本。悪意はなし（ただしコウン例外）。
+// =========================================================================
+
+// 完成時（12 種）
+const CONSTRUCTION_DONE_LINES = [
+  'できたわふ〜！', '完成わふ！', 'やっとできたわふ', 'どうわふ？きれいわふ！',
+  'みんなでつくったわふ！', 'すごいわふ、ぼくたちの作品わふ',
+  'つかれたわふ…でもうれしいわふ', 'ママに見せるわふ！',
+  'これでくらしがらくになるわふ〜', 'もう一個つくる？',
+  'ふぅ、ちからつかったわふ', 'やったぁわふ！',
+];
+export function pickConstructionDoneLine(): string {
+  return CONSTRUCTION_DONE_LINES[Math.floor(Math.random() * CONSTRUCTION_DONE_LINES.length)]!;
+}
+
+// 死亡反応（ワーカー側、建設現場で誰かが死んだ時、12 種 + name 入り 3 種）
+const CONSTRUCTION_DEATH_REACTION_LINES = [
+  'ああっわふ！', 'しんじゃったわふ…',
+  'だれかきてわふ！', 'もう動かないわふ…', 'ねぇ、起きてわふ？',
+  'かなしいわふ…', 'うわぁんわふ！', 'ママー！',
+  'すずちゃ〜ん！', 'ぼくたちこわい〜わふ', 'みんないっしょにこわれちゃうわふ…',
+  'だれかたすけてわふ！',
+];
+const CONSTRUCTION_DEATH_REACTION_NAMED = [
+  '{name}わふ…どうしたの', '{name}わふ…もう動かないよ', 'ねぇ、{name}、起きてわふ？',
+];
+export function pickConstructionDeathReactionLine(name: string): string {
+  const all = [
+    ...CONSTRUCTION_DEATH_REACTION_LINES,
+    ...CONSTRUCTION_DEATH_REACTION_NAMED.map((l) => l.replace('{name}', name)),
+  ];
+  return all[Math.floor(Math.random() * all.length)]!;
+}
+
+// 喧嘩セリフ（ワーカー側目撃者、12 種）
+const CONSTRUCTION_FIGHT_LINES = [
+  'ケンカしないでわふ！', 'もう…わふ', 'きれいに作ろうよわふ',
+  'いたいわふ！', 'そんなのやだわふ', 'ねぇ、やめてわふ〜',
+  'ぼく悪くないわふ！', 'みんなで作るんでしょ、わふ？', 'えーんえん、ちゃんと作ろうよわふ',
+  'もうやらないわふ、ぼく帰る', 'だれがやったわふ！', 'ケンカしたらこわれちゃうわふ',
+];
+export function pickConstructionFightLine(): string {
+  return CONSTRUCTION_FIGHT_LINES[Math.floor(Math.random() * CONSTRUCTION_FIGHT_LINES.length)]!;
+}
+
+// ококон 専用喧嘩セリフ（いじめっ子・強気、6 種）語尾は基本わふだが冷淡混じり可
+const COCOON_CONSTRUCTION_FIGHT_LINES = [
+  'へへっ、ざまあ！', 'もっとあそぼうぜ！', '弱いわふだなぁ！',
+  'もっと泣けよ〜', 'ぼくが一番うまいんだ！', 'どけどけ、ぼくの方が先わふ！',
+];
+export function pickCocoonConstructionFightLine(): string {
+  return COCOON_CONSTRUCTION_FIGHT_LINES[Math.floor(Math.random() * COCOON_CONSTRUCTION_FIGHT_LINES.length)]!;
+}
+
+// 離脱セリフ（focus 切れて建設を去る、本人、10 種）
+const CONSTRUCTION_ABANDON_LINES = [
+  'ちがうことしよわふ', 'あきちゃったわふ', 'おなかすいたわふ',
+  'つかれたわふ〜', 'ねむいわふ', 'ぼく、これむずかしいわふ…',
+  'ちょっと休むわふ', 'あ、ちょうちょわふ！', 'ママのとこ行くわふ', 'どこいくわふ？',
+];
+export function pickConstructionAbandonLine(): string {
+  return CONSTRUCTION_ABANDON_LINES[Math.floor(Math.random() * CONSTRUCTION_ABANDON_LINES.length)]!;
+}
+
+// ランダムサボりセリフ（建設中の雑談・気が散る、12 種）
+const CONSTRUCTION_SABOTAGE_LINES = [
+  'ねぇねぇ、これあとでいいよね？', 'おなかすいたわふ、ごはんたべよ？',
+  '眠いわふ〜', 'あの石なんかかわいいわふ、見にいこ',
+  'これでいいわふ？', 'だれが教えてくれるわふ？',
+  'みて、これじょうずわふ？', 'もっと木いるわふ…',
+  'ねぇ、これおもいわふ', 'えへへ、お土にうもれちゃった',
+  'ぼく、たいくつわふ…', 'あつい〜わふ',
+];
+export function pickConstructionSabotageLine(): string {
+  return CONSTRUCTION_SABOTAGE_LINES[Math.floor(Math.random() * CONSTRUCTION_SABOTAGE_LINES.length)]!;
+}
+
+// フラナ反応（建設現場での事故時、4 種）
+const FURANA_CONSTRUCTION_ACCIDENT_LINES = [
+  'あらあら、だいじょうぶわふ？', 'そんなにあわてなくていいわふよ',
+  'みんなでなかよくつくろうわふ', 'ケガしたら大変わふ…',
+];
+export function pickFuranaConstructionAccidentLine(): string {
+  return FURANA_CONSTRUCTION_ACCIDENT_LINES[Math.floor(Math.random() * FURANA_CONSTRUCTION_ACCIDENT_LINES.length)]!;
+}
+
+// スズ反応（事故時、4 種 + name 入り 1 種）
+const SUZU_CONSTRUCTION_ACCIDENT_LINES_BASE = [
+  'うえええん、ママ〜！', 'みんなぁ〜やめて〜！',
+  'ママ呼んでくるわふ！', 'だれかたすけてわふ！',
+];
+export function pickSuzuConstructionAccidentLine(deadName: string): string {
+  const lines = [...SUZU_CONSTRUCTION_ACCIDENT_LINES_BASE, `${deadName}わふ、起きて…？`];
+  return lines[Math.floor(Math.random() * lines.length)]!;
+}
+
+// ルー反応（事故時、3 種）
+const LU_CONSTRUCTION_ACCIDENT_LINES = [
+  '……', '……ぐぅ', '……（じっと見てる）',
+];
+export function pickLuConstructionAccidentLine(): string {
+  return LU_CONSTRUCTION_ACCIDENT_LINES[Math.floor(Math.random() * LU_CONSTRUCTION_ACCIDENT_LINES.length)]!;
+}
