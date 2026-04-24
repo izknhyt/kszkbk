@@ -2514,7 +2514,9 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   if (!isAlive(c)) return;
   c.ageSec += dt;
   c.chatCooldown -= dt;
-  if (c.ageSec >= c.maxAgeSec) {
+  // 寿命（maxAgeSec）による老衰は廃止。hunger / fatigue / 災害 / 事故で十分死ぬ。
+  // maxAgeSec フィールド自体は save 互換性のため残す（UI 表示「XX秒目」で参照される）。
+  if (false && c.ageSec >= c.maxAgeSec) {
     kill(w, c, 'roushuai');
     return;
   }
