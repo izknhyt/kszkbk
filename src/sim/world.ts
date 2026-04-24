@@ -240,6 +240,42 @@ function createInitialObstacles(bounds: { w: number; h: number }, target = 24): 
   return list;
 }
 
+// Σ-5-g: 朝に茂みが自然再生する。資源（特に wood）の枯渇対策として、
+// 障害物が初期数 × 1.5 を超えない範囲で 1-2 本/朝 spawn。
+// 既存障害物 / feature / 海タイル / フラナ拠点近辺は避ける。
+let _bushSeq = 100000;  // 既存 obs-N 系と被らない名前空間
+function growBushes(w: WorldState): void {
+  const initialCount = DIFFICULTY_MODS[w.difficulty].obstacleCount;
+  const cap = Math.floor(initialCount * 1.5);
+  if (w.obstacles.length >= cap) return;
+  // 難度別に毎朝何本生やすか：beginner 2, standard 1, hell 1
+  const target = w.difficulty === 'beginner' ? 2 : 1;
+  const bounds = w.bounds;
+  const centerX = bounds.w / 2;
+  const centerY = bounds.h * 0.35;
+  const minSpacing = 48;
+  let spawned = 0;
+  let attempts = 0;
+  while (spawned < target && attempts < 200) {
+    attempts++;
+    const x = 60 + Math.random() * (bounds.w - 120);
+    const y = 60 + Math.random() * (bounds.h - 120);
+    if (isSeaAt(x, y)) continue;
+    if (Math.hypot(x - centerX, y - centerY) < 120) continue;
+    if (w.obstacles.some((o) => Math.hypot(o.pos.x - x, o.pos.y - y) < minSpacing)) continue;
+    if (w.features.some((f) => Math.hypot(f.pos.x - x, f.pos.y - y) < 32)) continue;
+    w.obstacles.push({
+      id: `bush-${_bushSeq++}`,
+      pos: { x, y },
+      kind: 'bush',
+      hp: 15,
+      maxHp: 15,
+    });
+    spawnBubble(w.bubbles, { x, y: y - 16 }, '🌱', 'speech', 1.6);
+    spawned++;
+  }
+}
+
 // 初期 feature 配置：フラナ拠点近くに 水源 1 / 水路 2 / 畑 1 を横並びに
 // （広いマップの中央付近、ちびわふが最初からアクセスできる位置）
 function createInitialFeatures(bounds: { w: number; h: number }): Feature[] {
@@ -3704,6 +3740,9 @@ function onPhaseChange(w: WorldState, prev: DayPhase, next: DayPhase) {
         if (Math.random() < 0.3) spawnBubble(w.bubbles, c.pos, 'おはようわふ', 'speech', 1.2);
       }
     }
+    // Σ-5-g: 茂み自然再生。難度別に毎朝 1-2 本生やす（resource 枯渇対策）。
+    // 障害物上限 = 初期数 × 1.5 を超えない（無限増殖防止）。
+    growBushes(w);
   } else if (next === 'evening') {
     // 夕暮れ：お腹が空いた雰囲気
     if (suzu && !suzu.dead && Math.random() < 0.6) {
