@@ -1035,6 +1035,9 @@ button:active { transform: translateY(1px); }
   font-family: "Hiragino Mincho ProN","Yu Mincho","Times New Roman",serif;
 }
 .kszk-tooltip.hidden { display: none; }
+/* Tooltip fade-in via JS: remove hidden class → becomes visible */
+.kszk-tooltip:not(.hidden) { animation: tt-fadein 0.12s ease; }
+@keyframes tt-fadein { from { opacity: 0; transform: translateY(3px) } to { opacity: 1; transform: none } }
 .kszk-tooltip b { color: #ffd580; font-size: 13px; display: block; margin-bottom: 4px; }
 .tt-rule { border: none; border-top: 1px solid rgba(200,155,80,0.3); margin: 6px 0; }
 .tt-row { display: flex; gap: 6px; margin-bottom: 2px; }

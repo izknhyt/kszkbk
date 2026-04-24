@@ -159,13 +159,25 @@ function renderStats(w: WorldState, cb: UICallbacks) {
 
 function renderBuildList(w: WorldState, cb: UICallbacks) {
   const host = byId('build-list');
-  host.innerHTML = '';
+  if (host.children.length === 0) {
+    // セクションタイトルを一度だけ追加
+    const title = document.createElement('div');
+    title.className = 'build-section-title';
+    title.style.marginTop = '8px';
+    title.textContent = '🏛 建物（P コスト）';
+    host.appendChild(title);
+  }
+  // 既存 build-row だけクリアして再描画
+  Array.from(host.querySelectorAll('.build-row')).forEach((el) => el.remove());
+
   for (const def of Object.values(BUILDINGS)) {
     const cost = buildingCost(w, def.id);
     const owned = w.buildings.filter((b) => b.defId === def.id);
     const upgrade = getUpgradeInfo(w, def.id);
     const row = document.createElement('div');
     row.className = 'build-row';
+    // ツールチップ用にコストと効果を data 属性に持たせる
+    row.dataset.buildId = def.id;
 
     // Lv 表示（平均Lv or "Lv1,1,2" 列）
     let lvText = '';
@@ -174,7 +186,8 @@ function renderBuildList(w: WorldState, cb: UICallbacks) {
       lvText = ` <small>Lv ${lvs.join(',')}</small>`;
     }
 
-    const buildBtn = `<button class="build-btn" ${w.points < cost ? 'disabled' : ''}>建${cost}P</button>`;
+    const canBuild = w.points >= cost;
+    const buildBtn = `<button class="build-btn" ${canBuild ? '' : 'disabled'} title="${canBuild ? '' : 'P が足りないわふ'}">建${cost}P</button>`;
     let upgradeBtn = '';
     if (upgrade) {
       if (upgrade.capped) {
