@@ -804,7 +804,17 @@ button:active { transform: translateY(1px); }
   color: var(--ink);
   font-weight: 700;
 }
-.res-item b.low { color: #c84040; }
+.res-item b.low      { color: #c84040; }
+.res-item b.critical { color: #ff2020; font-size: 14px; }
+.res-item.res-critical {
+  background: linear-gradient(180deg, rgba(255,80,40,0.18), rgba(255,60,30,0.1));
+  border-color: rgba(220,60,40,0.4);
+  animation: res-crit-pulse 0.7s ease-in-out infinite alternate;
+}
+@keyframes res-crit-pulse {
+  from { border-color: rgba(220,60,40,0.3); }
+  to   { border-color: rgba(220,60,40,0.8); }
+}
 .res-trend {
   font-size: 9px;
   font-weight: 700;

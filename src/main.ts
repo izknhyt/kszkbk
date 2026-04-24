@@ -519,6 +519,7 @@ async function start() {
     for (const w of warnings) {
       if (dismissedWarnings.has(w.id)) continue;
       let el = existing.get(w.id);
+      const isNew = !el;
       if (!el) {
         el = document.createElement('div');
         el.className = `warning-item${w.critical ? ' warn-critical' : ''}`;
@@ -530,9 +531,20 @@ async function start() {
         el.querySelector('.warn-dismiss')!.addEventListener('click', () => {
           dismissedWarnings.add(w.id);
           el!.style.opacity = '0';
+          el!.style.transition = 'opacity 0.3s';
           setTimeout(() => el!.remove(), 310);
         });
         panel.appendChild(el);
+        // non-critical は 8 秒後に自動フェードアウト（条件が続いていれば次の refresh で再表示）
+        if (!w.critical && isNew) {
+          setTimeout(() => {
+            if (el && el.isConnected) {
+              el.style.opacity = '0';
+              el.style.transition = 'opacity 0.4s';
+              setTimeout(() => el?.remove(), 410);
+            }
+          }, 8000);
+        }
       }
       el.querySelector<HTMLElement>('.warn-text')!.textContent = w.text;
       el.classList.toggle('warn-critical', !!w.critical);
@@ -575,23 +587,28 @@ async function start() {
   function updateResourceBar() {
     updateResHistory();
     const r = world.resources;
-    const entries: Array<{ id: string; val: number; trend: keyof ResSnapshot; low?: number }> = [
-      { id: 'food',  val: r.food,         trend: 'food',  low: 10 },
+    const entries: Array<{ id: string; val: number; trend: keyof ResSnapshot; low?: number; critical?: number }> = [
+      { id: 'food',  val: r.food,         trend: 'food',  low: 10, critical: 5 },
       { id: 'water', val: r.water,        trend: 'water' },
-      { id: 'wood',  val: r.wood,         trend: 'wood' },
-      { id: 'stone', val: r.stone,        trend: 'stone' },
+      { id: 'wood',  val: r.wood,         trend: 'wood',  low: 3 },
+      { id: 'stone', val: r.stone,        trend: 'stone', low: 3 },
       { id: 'plank', val: r.plank ?? 0,   trend: 'plank' },
       { id: 'power', val: r.power ?? 0,   trend: 'power' },
       { id: 'brick', val: r.brick ?? 0,   trend: 'brick' },
       { id: 'wool',  val: r.wool ?? 0,    trend: 'wool' },
       { id: 'cloth', val: r.cloth ?? 0,   trend: 'cloth' },
-      { id: 'soil',  val: r.soil ?? 0,    trend: 'soil' },
+      { id: 'soil',  val: r.soil ?? 0,    trend: 'soil',  low: 5 },
     ];
     for (const e of entries) {
       const valEl = document.getElementById(`stat-${e.id}`);
       if (valEl) {
         valEl.textContent = String(Math.floor(e.val));
-        valEl.classList.toggle('low', e.low != null && e.val < e.low);
+        valEl.classList.toggle('low',      e.low      != null && e.val < e.low);
+        valEl.classList.toggle('critical', e.critical != null && e.val < e.critical);
+      }
+      const resItem = document.getElementById(`stat-${e.id}`)?.closest('.res-item');
+      if (resItem) {
+        resItem.classList.toggle('res-critical', e.critical != null && e.val < e.critical);
       }
       const trendEl = document.getElementById(`trend-${e.id}`);
       if (trendEl) {
