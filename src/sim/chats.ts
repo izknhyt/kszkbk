@@ -654,7 +654,7 @@ export function pickConstructionFightLine(): string {
   return CONSTRUCTION_FIGHT_LINES[Math.floor(Math.random() * CONSTRUCTION_FIGHT_LINES.length)]!;
 }
 
-// ококон 専用喧嘩セリフ（いじめっ子・強気、6 種）語尾は基本わふだが冷淡混じり可
+// ココン 専用喧嘩セリフ（いじめっ子・強気、6 種）語尾は基本わふだが冷淡混じり可
 const COCOON_CONSTRUCTION_FIGHT_LINES = [
   'へへっ、ざまあ！', 'もっとあそぼうぜ！', '弱いわふだなぁ！',
   'もっと泣けよ〜', 'ぼくが一番うまいんだ！', 'どけどけ、ぼくの方が先わふ！',
