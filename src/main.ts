@@ -211,8 +211,8 @@ async function start() {
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
   type BuildKind = 'water' | 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln' | 'pasture' | 'loom';
   let buildMode: BuildKind | null = null;
-  const plotBuildCosts: Record<BuildKind, { wood: number; stone: number; plank?: number }> = {
-    water:      { wood: 0, stone: 5 },
+  const plotBuildCosts: Record<BuildKind, { wood: number; stone: number; plank?: number; soil?: number }> = {
+    water:      { wood: 0, stone: 5, soil: 10 },
     farm:       { wood: 2, stone: 0 },
     channel:    { wood: 0, stone: 1 },
     path:       { wood: 0, stone: 1 },
@@ -312,17 +312,25 @@ async function start() {
     // くそざこ村としてむしろ正しい挙動（狭い土地にぎゅうぎゅう詰め可）。
     const cost = plotBuildCosts[buildMode];
     const plankCost = cost.plank ?? 0;
-    if (world.resources.wood < cost.wood || world.resources.stone < cost.stone || world.resources.plank < plankCost) {
+    const soilCost = cost.soil ?? 0;
+    if (
+      world.resources.wood < cost.wood ||
+      world.resources.stone < cost.stone ||
+      world.resources.plank < plankCost ||
+      world.resources.soil < soilCost
+    ) {
       const parts: string[] = [];
       if (cost.wood > 0) parts.push(`🪵${cost.wood}`);
       if (cost.stone > 0) parts.push(`🪨${cost.stone}`);
       if (plankCost > 0) parts.push(`🪚${plankCost}`);
+      if (soilCost > 0) parts.push(`🌱${soilCost}`);
       flashToast(`資源不足 (${parts.join(' ')})`, 'info');
       return;
     }
     world.resources.wood -= cost.wood;
     world.resources.stone -= cost.stone;
     world.resources.plank -= plankCost;
+    world.resources.soil -= soilCost;
     // feature 追加（id はランダム）。devLevel 0 でスポーン → ちびわふが建設して 2 に昇格
     const id = `feat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     world.features.push({ id, pos: { x, y }, kind: buildMode, devLevel: 0, workSec: 0 });

@@ -323,17 +323,34 @@ https://claude.ai/code/session_XXXXXX
 | Σ-5-d | 狼 flee：80px 検知 → scared、1.3 倍速逃走、家/火の見やぐら 40px sanctuary、疲労 60+ で collapse → fled_to_exhaustion | 4b3604d |
 | 型修正 | stage3d traverse callback 型注釈 | ceb973d |
 | Σ-5-d balance | flee 疲労 +18/sec / collapse 60、wolf_bite : fled_to_exhaustion = 5:1 で安定 | 7f88057 |
-| merge | sigma-5-main → idle-village 統合 | （本 merge） |
-| 後処理 | dead code `pickWorkTarget` 削除（70 行） | （本コミット） |
+| merge | sigma-5-main → idle-village 統合 | 9fb5b75 |
+| 後処理 | dead code `pickWorkTarget` 削除（70 行） | 449cb48 |
 
 **追加された ChibiState**：`scared`
 **追加された死因**：`fled_to_exhaustion`
 
-### ロードマップ v2（地形・3D 化）【Σ-5 まで完了】
+#### ✅ Σ-5-e 建設ゲームループ + feature 識別 + 水源建設（2026-04-23 に本流 merge）
 
-**方針**：Σ-0〜Σ-5 で 3D 地形・描画基盤 + 開発ゲーム体感（労働 AI / feature 3D 化 /
-HUD 進捗 / 狼 flee）が完成。次は Σ-6 歩行アニメ or Ω-12 神罰など
-（HANDOFF.md §6 参照）。
+| Phase | 内容 | Commit |
+|---|---|---|
+| 事前 fix | 建設時の 28px 最小間隔制約を撤廃、水路ぎゅうぎゅう詰めや建物重ね置きを許可 | a7f5448 |
+| Σ-5-e-a/b | HitTarget に feature/building 追加、updateConstructions + CONSTRUCTION_SEC テーブル、既存機能に devLevel<2 ガード 10 箇所 | 4a010ff |
+| Σ-5-e-a/b | main.ts：showFeatureModal / showBuildingModal、建設 spawn を devLevel 0 で、soil コスト対応 | 7c43325 |
+| Σ-5-e-a/c/d | stage3d：feature/building Raycaster picking、devLevel 別 3D（足場 + 半透明 + 🔨）、UV scroll 水流、水源波紋リング、HUD 建設進捗バー | dc93a75 |
+| Σ-5-e-d | index.html：💧 水源 建設ボタン追加 | cd161f8 |
+| merge | sigma-5-e-main → idle-village 統合 | 3e3be42 |
+| 後処理 | water コストに soil 10 追加（spec 通り）+ docs 更新 | （本コミット） |
+
+**追加された BuildKind**：`water`（プレイヤー新規水源建設、wood 0 / stone 5 / soil 10）
+**追加された feature lifecycle**：devLevel 0 = 建設中（機能なし） / 1 = 半完成 / 2 = 機能開始 / 3 = Lv アップ
+**追加された AI 行動**：構築中 feature への自発移動（`constructionPositions`）
+
+### ロードマップ v2（地形・3D 化）【Σ-5 / Σ-5-e まで完了】
+
+**方針**：Σ-0〜Σ-5-e で 3D 地形・描画基盤 + 開発ゲーム体感（労働 AI / feature 3D 化 /
+HUD 進捗 / 狼 flee）+ 建設ゲームループ（devLevel 労働駆動）+ feature 識別モーダル +
+水源建設 + 水流アニメが完成。次は Σ-5-e-e（建設を秒ベースから数値 pt ベースに変更、
+くそざこ事故で進捗マイナス）or Σ-6 歩行アニメ or Σ-6 水動力など（HANDOFF.md §6 参照）。
 **ビジョン**：巨人のドシン × ピクミン × Don't Starve × Elona。なめらかな 3D 地形で
 神様が盛り土切り土を指示、ちびわふ 200+ がわちゃわちゃ動き回り、**改変がズボラで土砂崩れ事故で全滅**。
 **マインクラフト要素**＝**ブロック見た目ではなく破壊/創造の自由度**（既に Σ-2 で実装済み）。
@@ -348,6 +365,7 @@ HUD 進捗 / 狼 flee）が完成。次は Σ-6 歩行アニメ or Ω-12 神罰�
 | **Σ-4-proto** | **Three.js 検証プロト**（`prototypes/three-terrain/`、`origin/claude/sigma-4-proto` 保管）。5 項目実測 GO | 1 週 | ✅ 完了（**fps=75 / drawCalls=5 / DOM sync=0.01ms (0.1%)**、5 項目全 GO） |
 | **Σ-4** | **Three.js 本移行**：`stage3d.ts` 新設、feature flag `VITE_RENDER=3d` で `stage.ts` と並行、parity 達成後に Pixi 削除。elev×5 displace、45° 固定俯瞰、Y 軸ビルボード、盛り土切り土の 3D 反映、土砂崩れアニメ、わちゃわちゃキャラ（歩行 pose animation） | 2 週 | ✅ 完了（Σ-4-a/b/c/d/e/f 全て本流統合、Pixi 削除済み）|
 | **Σ-5** | **開発ゲーム体感化**：ちびわふ労働 AI（terraform ジョブ自発移動 70%、trait バイアス、nonbiri 40%）、feature 3D モデル化（water=池/channel=溝/farm=作物成長/house/firewatch/sawmill/shrine/kiln/loom 等が建物として識別可能）、HUD terraform 進捗バー + 連鎖ヒント toast、狼 flee（80px 検知 → 1.3 倍速逃走 → 疲労 collapse → fled_to_exhaustion 新死因、家 / 火の見やぐら sanctuary） | 1-2 週 | ✅ 完了（Σ-5-a/b/c/d + バランス調整、48 死因到達、wolf_bite : fled_to_exhaustion = 5:1）|
+| **Σ-5-e** | **建設ゲームループ + feature 識別 + 水源建設**：プレイヤー建設は devLevel 0 で spawn → ちびわふ労働で workSec 蓄積 → devLevel 2 で機能開始、右クリックで feature / building の識別モーダル（効果説明 + 進捗表示）、BuildKind に 💧 水源追加、channel UV scroll 水流アニメ + water 波紋 | 1-1.5 週 | ✅ 完了（Σ-5-e-a/b/c/d + 28px 撤廃 + water soil コスト追加）|
 
 ### Σ-5 完走後の予定（優先度順）
 
