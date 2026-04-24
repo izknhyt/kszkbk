@@ -43,11 +43,13 @@ import {
   type NpcId,
   type NpcState,
 } from './sim/npcs';
-import type { Chibiwafu, HitTarget, VillageRank } from './types';
+import type { Chibiwafu, Feature, HitTarget, VillageRank } from './types';
 import { clearSave, listSlots, load, save, type SlotId } from './meta/save';
 import { CONFIG, type TimeScale } from './config';
 import { DEATH_CAUSES } from './sim/deaths';
 import type { Difficulty } from './types';
+import { BUILDINGS } from './city/buildings';
+import { CONSTRUCTION_SEC } from './sim/world';
 
 const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   beginner: '初心者',
@@ -207,9 +209,10 @@ async function start() {
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
-  type BuildKind = 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln' | 'pasture' | 'loom';
+  type BuildKind = 'water' | 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln' | 'pasture' | 'loom';
   let buildMode: BuildKind | null = null;
   const plotBuildCosts: Record<BuildKind, { wood: number; stone: number; plank?: number }> = {
+    water:      { wood: 0, stone: 5 },
     farm:       { wood: 2, stone: 0 },
     channel:    { wood: 0, stone: 1 },
     path:       { wood: 0, stone: 1 },
@@ -226,7 +229,7 @@ async function start() {
     loom:       { wood: 6, stone: 0, plank: 2 },
   };
   const buildModeLabel: Record<BuildKind, string> = {
-    farm: '畑', channel: '水路', path: '道', house: '家',
+    water: '水源', farm: '畑', channel: '水路', path: '道', house: '家',
     well: '井戸', firewatch: '火の見やぐら', sawmill: '製材所', shrine: '神社',
     generator: 'ペダル発電所', streetlamp: '街灯', powerline: '電線', kiln: '精錬所',
     pasture: '牧場', loom: '織機',
@@ -320,11 +323,11 @@ async function start() {
     world.resources.wood -= cost.wood;
     world.resources.stone -= cost.stone;
     world.resources.plank -= plankCost;
-    // feature 追加（id はランダム）
+    // feature 追加（id はランダム）。devLevel 0 でスポーン → ちびわふが建設して 2 に昇格
     const id = `feat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    world.features.push({ id, pos: { x, y }, kind: buildMode, devLevel: 2, workSec: 0 });
+    world.features.push({ id, pos: { x, y }, kind: buildMode, devLevel: 0, workSec: 0 });
     const emojiMap: Record<BuildKind, string> = {
-      farm: '🌾 畑', channel: '💧 水路', path: '🛤 道', house: '🏠 家',
+      water: '💧 水源', farm: '🌾 畑', channel: '🌊 水路', path: '🛤 道', house: '🏠 家',
       well: '⛲ 井戸', firewatch: '🔥 火の見やぐら', sawmill: '🪚 製材所', shrine: '⛩ 神社',
       generator: '⚡ ペダル発電所', streetlamp: '💡 街灯', powerline: '🪜 電線', kiln: '🧱 精錬所',
       pasture: '🐑 牧場', loom: '🧶 織機',
@@ -389,7 +392,7 @@ async function start() {
     return null;
   });
 
-  // 右クリック → 情報モーダル（ちびわふ: life log、NPC: 名前/HP、死体: epitaph）
+  // 右クリック → 情報モーダル（ちびわふ: life log、NPC: 名前/HP、死体: epitaph、feature/building: 情報）
   stage.canvas.addEventListener('kszk-inspect', (e) => {
     const detail = (e as CustomEvent).detail as { target: HitTarget | null; clientX: number; clientY: number };
     if (detail.target?.kind === 'chibi') {
@@ -399,6 +402,19 @@ async function start() {
     if (detail.target?.kind === 'npc') {
       const npc = world.npcs.find((n) => n.id === detail.target!.id);
       if (npc) { showNpcModal(npc); return; }
+    }
+    if (detail.target?.kind === 'feature') {
+      const f = world.features.find((x) => x.id === detail.target!.id);
+      if (f) { showFeatureModal(f); return; }
+    }
+    if (detail.target?.kind === 'building') {
+      const parts = detail.target.id.split(':');
+      const defId = parts[0];
+      const idx = parseInt(parts[2] ?? '0');
+      if (defId != null) {
+        const b = world.buildings[idx];
+        if (b && b.defId === defId) { showBuildingModal(b); return; }
+      }
     }
     // 生体ヒットなし → 死体からも探す
     const wp = stage.screenToWorld(detail.clientX, detail.clientY);
@@ -686,6 +702,27 @@ async function start() {
     stage.draw(world);
     drawMinimap();
 
+    // drain construction completions → toast
+    if (world.newConstructions.length > 0) {
+      const FEAT_EMOJI: Partial<Record<string, string>> = {
+        water:'💧', farm:'🌾', channel:'🌊', path:'🛤', house:'🏠',
+        well:'⛲', firewatch:'🔥', sawmill:'🪚', shrine:'⛩',
+        generator:'⚡', streetlamp:'💡', powerline:'🪜', kiln:'🧱',
+        pasture:'🐑', loom:'🧶',
+      };
+      const FEAT_NAME: Partial<Record<string, string>> = {
+        water:'水源', farm:'畑', channel:'水路', path:'道', house:'家',
+        well:'井戸', firewatch:'火の見やぐら', sawmill:'製材所', shrine:'神社',
+        generator:'発電所', streetlamp:'街灯', powerline:'電線', kiln:'精錬所',
+        pasture:'牧場', loom:'織機',
+      };
+      for (const c of world.newConstructions) {
+        const emoji = FEAT_EMOJI[c.kind] ?? '🔨';
+        const name = FEAT_NAME[c.kind] ?? c.kind;
+        flashToast(`${emoji} ${name} 完成！`, 'info');
+      }
+      world.newConstructions = [];
+    }
     // drain new dex discoveries → toast
     if (world.newDiscoveries.length > 0) {
       for (const id of world.newDiscoveries) {
@@ -1077,6 +1114,90 @@ function showChibiModal(c: Chibiwafu, isEpitaph: boolean) {
 
 function closeChibiModal() {
   document.getElementById('chibi-modal')!.classList.add('hidden');
+}
+
+function showFeatureModal(f: Feature) {
+  const modal = document.getElementById('chibi-modal')!;
+  modal.classList.remove('hidden');
+  const FEAT_EMOJI: Partial<Record<string, string>> = {
+    water:'💧', farm:'🌾', channel:'🌊', path:'🛤', house:'🏠',
+    well:'⛲', firewatch:'🔥', sawmill:'🪚', shrine:'⛩',
+    generator:'⚡', streetlamp:'💡', powerline:'🪜', kiln:'🧱',
+    pasture:'🐑', loom:'🧶',
+  };
+  const FEAT_NAME: Partial<Record<string, string>> = {
+    water:'水源', farm:'畑', channel:'水路', path:'道', house:'家',
+    well:'井戸', firewatch:'火の見やぐら', sawmill:'製材所', shrine:'神社',
+    generator:'ペダル発電所', streetlamp:'街灯', powerline:'電線', kiln:'精錬所',
+    pasture:'牧場', loom:'織機',
+  };
+  const FEAT_EFFECT: Partial<Record<string, string>> = {
+    water: '周囲 70px の水路に水を送る',
+    channel: '水源/水路から 70px 以内で通水、畑へ繋げる',
+    farm: '水源/水路から 65px 以内で 🍞 0.08/秒生産',
+    path: '移動ルート整備（将来実装予定）',
+    house: '定員 4 人。夜間睡眠場所、野宿ペナルティ回避',
+    well: '乾燥/雪でも畑が 0.4 倍生産を維持',
+    firewatch: '夜間オオカミ忌避＋火災検知半径 180px',
+    sawmill: '近くのちびわふが 🪵×2 → 🪚×1 変換',
+    shrine: '半径 200px でちびわふの空腹・疲労 -30%',
+    generator: 'ちびわふがペダルを漕いで ⚡ 生成（疲労+）',
+    streetlamp: '夜間 ⚡ 消費で照明（オオカミ忌避＋野宿ドレイン半減）',
+    powerline: '発電所と街灯を 90px 以内で接続',
+    kiln: '近くのちびわふが 🪨×3 → 🧱×1 変換',
+    pasture: '🐑 0.03/秒自動生産（雪/乾燥で半減）',
+    loom: '近くのちびわふが 🐑×2 → 🧶×1 変換',
+  };
+  const emoji = FEAT_EMOJI[f.kind] ?? '🔧';
+  const name = FEAT_NAME[f.kind] ?? f.kind;
+  const needed = CONSTRUCTION_SEC[f.kind as keyof typeof CONSTRUCTION_SEC] ?? 30;
+  const pct = f.devLevel >= 2 ? 100 : Math.min(99, Math.round((f.workSec / needed) * 100));
+  const isBuilding = f.devLevel >= 2;
+  document.getElementById('modal-name')!.textContent = `${emoji} ${name}`;
+  document.getElementById('modal-age')!.textContent = isBuilding ? `Lv${f.devLevel}` : `建設中 ${pct}%`;
+  document.getElementById('modal-traits')!.innerHTML = '';
+  const epitaphEl = document.getElementById('modal-epitaph')!;
+  epitaphEl.classList.remove('show');
+  epitaphEl.textContent = '';
+  let statusHtml = '';
+  if (!isBuilding) {
+    const barPct = Math.min(100, pct);
+    statusHtml += `<div class="param-row"><span class="label">建設</span>`
+      + `<span class="bar"><span class="fill" style="width:${barPct}%;background:#c89650"></span></span>`
+      + `<span class="value">${pct}%</span></div>`;
+  } else {
+    statusHtml += `<div class="param-row"><span class="label">状態</span>`
+      + `<span class="bar"><span class="fill" style="width:100%;background:#4a9a5a"></span></span>`
+      + `<span class="value">🎯 稼働中</span></div>`;
+    if (f.saturated != null) {
+      const satLabel = f.kind === 'channel' ? (f.saturated ? '✓ 通水中' : '✗ 未通水') : (f.saturated ? '✓ 点灯中' : '✗ 消灯');
+      statusHtml += `<div class="param-row"><span class="label">接続</span>`
+        + `<span class="bar"><span class="fill" style="width:${f.saturated?100:0}%;background:#3a7ab8"></span></span>`
+        + `<span class="value">${satLabel}</span></div>`;
+    }
+  }
+  document.getElementById('modal-params')!.innerHTML = statusHtml;
+  document.getElementById('modal-flavors')!.innerHTML = `<li>${escapeHtml(FEAT_EFFECT[f.kind] ?? '説明なし')}</li>`;
+  document.getElementById('modal-life')!.innerHTML = `<li style="color:#a89060">t=${Math.round(f.workSec)}s 経過</li>`;
+}
+
+function showBuildingModal(b: { defId: string; level: number; pos: { x: number; y: number } }) {
+  const modal = document.getElementById('chibi-modal')!;
+  modal.classList.remove('hidden');
+  const def = BUILDINGS[b.defId];
+  if (!def) return;
+  document.getElementById('modal-name')!.textContent = def.name;
+  document.getElementById('modal-age')!.textContent = `Lv${b.level}`;
+  document.getElementById('modal-traits')!.innerHTML = '';
+  const epitaphEl = document.getElementById('modal-epitaph')!;
+  epitaphEl.classList.remove('show');
+  epitaphEl.textContent = '';
+  document.getElementById('modal-params')!.innerHTML =
+    `<div class="param-row"><span class="label">状態</span>`
+    + `<span class="bar"><span class="fill" style="width:100%;background:#4a9a5a"></span></span>`
+    + `<span class="value">🎯 稼働中</span></div>`;
+  document.getElementById('modal-flavors')!.innerHTML = `<li>${escapeHtml(def.desc)}</li>`;
+  document.getElementById('modal-life')!.innerHTML = `<li style="color:#a89060">${escapeHtml(def.effect)}</li>`;
 }
 
 function escapeHtml(s: string): string {
