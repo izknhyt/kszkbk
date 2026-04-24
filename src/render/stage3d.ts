@@ -114,6 +114,7 @@ const STATE_IDX: Record<ChibiState, number> = {
   idle:0, cry:1, surprised:2, angry:3,
   sleep:4, dazed:5, hurt:6, exhausted:7, dead:8,
   chatting:0, staring:2, eating:3,
+  scared:2,  // Σ-5-d: 逃走中は surprised ポーズ流用
 };
 
 const CHIBI_URLS = [
@@ -297,27 +298,197 @@ const WEATHER_CHAR: Partial<Record<string,[number,number,number]>> = {
 };
 
 // ============================================================
-// feature・obstacle プロシージャルテクスチャ
+// feature 3D モデル（Σ-5-b）
 // ============================================================
-const FEAT_COLOR: Record<string,number> = {
-  water:0x3a6ea0, channel:0x5cc4f0, farm:0x6ea241, path:0x8b7048,
-  house:0xb85a3a, well:0x4a7898,    firewatch:0xb0553a, sawmill:0x8d6238,
-  shrine:0xc44a4a, generator:0x7a7088, streetlamp:0x5a5240, powerline:0x6a5848,
-  kiln:0xb86030,  pasture:0x7ab060, loom:0xa07858,
-};
-const FEAT_RAD: Record<string,number> = {
-  water:26, channel:18, farm:22, path:14, house:24, well:20,
-  firewatch:26, sawmill:24, shrine:26, generator:22, streetlamp:14,
-  powerline:10, kiln:24, pasture:26, loom:22,
-};
-function featTex(kind: string): THREE.Texture {
-  const r = FEAT_RAD[kind]??16;
-  const c = FEAT_COLOR[kind]??0x8b7048;
-  return makeCanvasTex((ctx,sz)=>{
-    ctx.beginPath(); ctx.arc(sz/2,sz/2,r,0,Math.PI*2);
-    ctx.fillStyle=`#${c.toString(16).padStart(6,'0')}`; ctx.fill();
-    ctx.strokeStyle='#2a1a0a'; ctx.lineWidth=2; ctx.stroke();
-  });
+function toonMat(color: number, opacity=1.0): THREE.MeshToonMaterial {
+  return new THREE.MeshToonMaterial({ color, opacity, transparent: opacity<1 });
+}
+function basicMat(color: number, opacity=1.0): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({ color, opacity, transparent: opacity<1, side: THREE.DoubleSide });
+}
+
+// Lv ビルボード（建物と同じ style、devLevel>=2 で表示）
+function makeLvLabel(lv: number): THREE.Mesh {
+  const cv = document.createElement('canvas'); cv.width=64; cv.height=32;
+  const ctx = cv.getContext('2d')!;
+  ctx.font='bold 20px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.strokeStyle='#2a1a0a'; ctx.lineWidth=4; ctx.strokeText(`Lv${lv}`,32,16);
+  ctx.fillStyle='#ffffff'; ctx.fillText(`Lv${lv}`,32,16);
+  const t=new THREE.CanvasTexture(cv); t.minFilter=THREE.LinearFilter;
+  const m=new THREE.Mesh(new THREE.PlaneGeometry(32,16),
+    new THREE.MeshBasicMaterial({map:t,transparent:true,depthWrite:false,side:THREE.DoubleSide}));
+  m.position.y=55;
+  return m;
+}
+
+function makeFeatureGroup(f: import('../types').Feature): THREE.Group {
+  const g = new THREE.Group();
+  const lv = f.devLevel;
+
+  switch(f.kind) {
+    case 'water': {
+      // 青い池（水平面 + 波紋リング）
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(26,26,4,12),toonMat(0x3a6ea0));
+      base.position.y=2; g.add(base);
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(24,24,2,12),
+        new THREE.MeshBasicMaterial({color:0x5cacf0,transparent:true,opacity:0.7}));
+      top.position.y=5; g.add(top);
+      break;
+    }
+    case 'channel': {
+      // 細長い溝（地面に埋め込む感じ）+ watered 時は内部を明青に
+      const box = new THREE.Mesh(new THREE.BoxGeometry(36,8,12),toonMat(f.saturated?0x5cc4f0:0x4a3018));
+      box.position.y=2; g.add(box);
+      if (f.saturated) {
+        const water = new THREE.Mesh(new THREE.BoxGeometry(32,4,8),
+          new THREE.MeshBasicMaterial({color:0x80d8ff,transparent:true,opacity:0.8}));
+        water.position.y=4; g.add(water);
+      }
+      break;
+    }
+    case 'farm': {
+      // 茶色の畑ベース + 成長段階に応じた作物ビルボード
+      const bed = new THREE.Mesh(new THREE.BoxGeometry(36,6,36),toonMat(0x7a5230));
+      bed.position.y=3; g.add(bed);
+      // 畦（grid lines）
+      for(let dx=-12;dx<=12;dx+=12){
+        const ridge=new THREE.Mesh(new THREE.BoxGeometry(2,8,32),toonMat(0x5a3820));
+        ridge.position.set(dx,4,0); g.add(ridge);
+      }
+      // 作物（devLevel で成長段階）
+      if(lv>=1){
+        const cropH = lv===1?8: lv===2?16:22;
+        const cropCol= lv===1?0x4a7a20: lv===2?0x5a9a30:0xc8a820;
+        for(let cx=-10;cx<=10;cx+=10) for(let cz=-10;cz<=10;cz+=10){
+          const crop=new THREE.Mesh(new THREE.PlaneGeometry(8,cropH),
+            new THREE.MeshBasicMaterial({color:cropCol,side:THREE.DoubleSide,transparent:true}));
+          crop.position.set(cx,cropH/2+6,cz); g.add(crop);
+        }
+      }
+      if(lv>=2) g.add(makeLvLabel(lv));
+      break;
+    }
+    case 'path': {
+      const box=new THREE.Mesh(new THREE.BoxGeometry(36,4,12),toonMat(0x8b7048));
+      box.position.y=2; g.add(box);
+      break;
+    }
+    case 'house': {
+      const wall=new THREE.Mesh(new THREE.BoxGeometry(32,24,32),toonMat(0xb85a3a));
+      wall.position.y=12; g.add(wall);
+      const roof=new THREE.Mesh(new THREE.ConeGeometry(24,16,4),toonMat(0x5a311d));
+      roof.position.y=32; g.add(roof);
+      if(lv>=2) g.add(makeLvLabel(lv));
+      break;
+    }
+    case 'well': {
+      const shaft=new THREE.Mesh(new THREE.CylinderGeometry(8,8,20,8),toonMat(0x7a6050));
+      shaft.position.y=10; g.add(shaft);
+      const rim=new THREE.Mesh(new THREE.TorusGeometry(8,2,6,12),toonMat(0x5a4030));
+      rim.rotation.x=Math.PI/2; rim.position.y=22; g.add(rim);
+      const roof2=new THREE.Mesh(new THREE.ConeGeometry(12,10,4),toonMat(0x5a311d));
+      roof2.position.y=32; g.add(roof2);
+      break;
+    }
+    case 'firewatch': {
+      const legs=new THREE.Mesh(new THREE.CylinderGeometry(3,5,48,4),toonMat(0x7a5030));
+      legs.position.y=24; g.add(legs);
+      const cabin=new THREE.Mesh(new THREE.BoxGeometry(20,12,20),toonMat(0x8d5030));
+      cabin.position.y=52; g.add(cabin);
+      const froof=new THREE.Mesh(new THREE.ConeGeometry(14,10,4),toonMat(0x4a2818));
+      froof.position.y=65; g.add(froof);
+      break;
+    }
+    case 'sawmill': {
+      const body=new THREE.Mesh(new THREE.BoxGeometry(44,24,36),toonMat(0x8d6238));
+      body.position.y=12; g.add(body);
+      const sroof=new THREE.Mesh(new THREE.ConeGeometry(28,20,4),toonMat(0x5a3820));
+      sroof.position.y=34; g.add(sroof);
+      const log=new THREE.Mesh(new THREE.CylinderGeometry(5,5,52,8),toonMat(0xa07040));
+      log.rotation.z=Math.PI/2; log.position.set(4,6,0); g.add(log);
+      break;
+    }
+    case 'shrine': {
+      // 赤鳥居（柱 2 本 + 横木 2 本）
+      for(const sx of [-14,14]){
+        const pillar=new THREE.Mesh(new THREE.CylinderGeometry(3,3,52,6),toonMat(0xd42020));
+        pillar.position.set(sx,26,0); g.add(pillar);
+      }
+      const beam1=new THREE.Mesh(new THREE.BoxGeometry(40,6,6),toonMat(0xd42020));
+      beam1.position.y=50; g.add(beam1);
+      const beam2=new THREE.Mesh(new THREE.BoxGeometry(36,5,5),toonMat(0xd42020));
+      beam2.position.y=42; g.add(beam2);
+      // 社
+      const honden=new THREE.Mesh(new THREE.BoxGeometry(28,20,24),toonMat(0x8b4c2c));
+      honden.position.set(0,10,28); g.add(honden);
+      const hroof=new THREE.Mesh(new THREE.ConeGeometry(20,14,4),toonMat(0x3a1a0a));
+      hroof.position.set(0,28,28); g.add(hroof);
+      break;
+    }
+    case 'generator': {
+      const body2=new THREE.Mesh(new THREE.CylinderGeometry(14,14,28,8),toonMat(0x6a6070));
+      body2.position.y=14; g.add(body2);
+      const chimney=new THREE.Mesh(new THREE.CylinderGeometry(4,4,20,6),toonMat(0x4a4040));
+      chimney.position.set(8,38,0); g.add(chimney);
+      const cap=new THREE.Mesh(new THREE.CylinderGeometry(6,4,4,6),toonMat(0x3a3030));
+      cap.position.set(8,50,0); g.add(cap);
+      break;
+    }
+    case 'streetlamp': {
+      const pole=new THREE.Mesh(new THREE.CylinderGeometry(2,2,44,6),toonMat(0x5a5040));
+      pole.position.y=22; g.add(pole);
+      const head=new THREE.Mesh(new THREE.IcosahedronGeometry(8,0),
+        new THREE.MeshBasicMaterial({color:f.saturated?0xffe880:0x888060}));
+      head.position.y=48; g.add(head);
+      break;
+    }
+    case 'powerline': {
+      const ppole=new THREE.Mesh(new THREE.CylinderGeometry(2,2,36,4),toonMat(0x6a5848));
+      ppole.position.y=18; g.add(ppole);
+      const xbar=new THREE.Mesh(new THREE.BoxGeometry(24,4,4),toonMat(0x5a4838));
+      xbar.position.y=36; g.add(xbar);
+      break;
+    }
+    case 'kiln': {
+      const kbody=new THREE.Mesh(new THREE.CylinderGeometry(16,20,28,8),toonMat(0x8a5025));
+      kbody.position.y=14; g.add(kbody);
+      const top2=new THREE.Mesh(new THREE.ConeGeometry(14,14,8),toonMat(0x6a3015));
+      top2.position.y=35; g.add(top2);
+      const opening=new THREE.Mesh(new THREE.BoxGeometry(12,12,4),toonMat(0x1a0a00));
+      opening.position.set(0,10,18); g.add(opening);
+      break;
+    }
+    case 'pasture': {
+      // 柵 4 本で囲む
+      const fenceH=10, fenceW=50;
+      for(const [fx,fz,rot] of [[0,25,0],[0,-25,0],[25,0,Math.PI/2],[-25,0,Math.PI/2]] as [number,number,number][]){
+        const fence=new THREE.Mesh(new THREE.BoxGeometry(fenceW,fenceH,3),toonMat(0xa08060));
+        fence.position.set(fx,fenceH/2,fz); fence.rotation.y=rot; g.add(fence);
+      }
+      // 地面
+      const floor2=new THREE.Mesh(new THREE.BoxGeometry(50,2,50),toonMat(0x7ab060,0.8));
+      floor2.position.y=1; g.add(floor2);
+      break;
+    }
+    case 'loom': {
+      const lbody=new THREE.Mesh(new THREE.BoxGeometry(30,20,24),toonMat(0x8a6040));
+      lbody.position.y=10; g.add(lbody);
+      const lroof=new THREE.Mesh(new THREE.ConeGeometry(20,12,4),toonMat(0x5a3820));
+      lroof.position.y=26; g.add(lroof);
+      // 縦糸の棒
+      for(let xi=-8;xi<=8;xi+=4){
+        const thread=new THREE.Mesh(new THREE.BoxGeometry(2,22,2),basicMat(0xf0d890,0.9));
+        thread.position.set(xi,20,0); g.add(thread);
+      }
+      break;
+    }
+    default: {
+      // 未知 feature: 旧来の円ディスク（フォールバック）
+      const fallback=new THREE.Mesh(new THREE.CylinderGeometry(16,16,4,12),toonMat(0x8b7048));
+      fallback.position.y=2; g.add(fallback);
+    }
+  }
+  return g;
 }
 function obsTex(kind: string): THREE.Texture {
   return makeCanvasTex((ctx,sz)=>{
@@ -438,7 +609,6 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     ['cocoon', npcCircleTex(NPC_DEFS.cocoon.color, 25)],
   ]);
 
-  const featTexMap  = new Map<string, THREE.Texture>();
   const obsTexMap   = new Map<string, THREE.Texture>();
 
   // --- ビュー キャッシュ ---
@@ -447,7 +617,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const npcViews    = new Map<NpcId,  MView>();
   const wolfViews   = new Map<number, THREE.Mesh>();
   const corpseViews = new Map<number, THREE.Mesh>();
-  const featViews   = new Map<string, THREE.Mesh>();
+  // Σ-5-b: feature は 3D Group + devLevel/saturated キャッシュキー
+  const featViews   = new Map<string, { grp: THREE.Group; key: string }>();
   const obsViews    = new Map<string, THREE.Mesh>();
   const bldViews    = new Map<string, THREE.Group>();
 
@@ -476,6 +647,14 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   Object.assign(bubbleOverlay.style,{position:'absolute',top:'0',left:'0',width:'100%',height:'100%',pointerEvents:'none',overflow:'hidden'});
   host.style.position = 'relative';
   host.appendChild(bubbleOverlay);
+
+  // --- Σ-5-c: terraform 進捗オーバーレイ ---
+  const tfOverlay = document.createElement('div');
+  Object.assign(tfOverlay.style,{position:'absolute',top:'0',left:'0',width:'100%',height:'100%',pointerEvents:'none',overflow:'hidden'});
+  host.appendChild(tfOverlay);
+  const tfDivs = new Map<string, HTMLDivElement>();
+  // jobId → last worker が居た時刻（秒）
+  const tfLastWorkerSec = new Map<string, number>();
   const bubbleDivs = new Map<number, HTMLDivElement>();
 
   // --- terraform / stability — InstancedMesh（毎フレーム dispose を廃止）---
@@ -791,7 +970,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       npcViews.forEach(v=>applyT(v.mesh));
       wolfViews.forEach(m=>applyT(m));
       corpseViews.forEach(m=>applyT(m));
-      featViews.forEach(m=>applyT(m));
+      featViews.forEach(v=>v.grp.traverse((o: THREE.Object3D)=>{ if((o as THREE.Mesh).isMesh) applyT(o as THREE.Mesh); }));
       obsViews.forEach(m=>applyT(m));
     }
 
@@ -883,20 +1062,24 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       stCritIM.instanceMatrix.needsUpdate=true;
     }
 
-    // ---- Features（3フレームごと）----
+    // ---- Features（3フレームごと — Σ-5-b 3D モデル）----
     if(frameCount%3===0){
       const fids=new Set(world.features.map(f=>f.id));
-      for(const [id,m] of featViews){ if(!fids.has(id)){ featGrp.remove(m); m.geometry.dispose(); featViews.delete(id); } }
+      for(const [id,v] of featViews){
+        if(!fids.has(id)){ featGrp.remove(v.grp); featViews.delete(id); }
+      }
       for(const f of world.features){
-        if(!featViews.has(f.id)){
-          if(!featTexMap.has(f.kind)) featTexMap.set(f.kind,featTex(f.kind));
-          const sz=(FEAT_RAD[f.kind]??16)*2;
-          const m=spriteMesh(sz,sz,featTexMap.get(f.kind)!);
-          (m.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
-          featGrp.add(m); featViews.set(f.id,m);
+        // キャッシュキー：id + devLevel + saturated（変化したら再構築）
+        const fkey=`${f.devLevel}:${f.saturated?1:0}`;
+        const existing=featViews.get(f.id);
+        if(!existing || existing.key!==fkey){
+          if(existing){ featGrp.remove(existing.grp); }
+          const grp=makeFeatureGroup(f);
+          featGrp.add(grp);
+          featViews.set(f.id,{grp,key:fkey});
         }
-        const m=featViews.get(f.id)!;
-        m.position.set(f.pos.x, elevAt(world.terrain,f.pos.x,f.pos.y)+5, f.pos.y);
+        const grp=featViews.get(f.id)!.grp;
+        grp.position.set(f.pos.x, elevAt(world.terrain,f.pos.x,f.pos.y), f.pos.y);
       }
 
       // 電線
@@ -1029,6 +1212,49 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const alpha=Math.min(1,b.ttl/Math.max(0.2,b.maxTtl*0.35));
       div.style.transform=`translate(-50%,-100%) translate(${sc.x}px,${sc.y}px)`;
       div.style.opacity=String(alpha);
+    }
+
+    // ---- Σ-5-c: terraform 進捗オーバーレイ ----
+    {
+      const activeIds = new Set(world.terraformJobs.map(j=>j.id));
+      for(const [id,div] of tfDivs){ if(!activeIds.has(id)){ tfOverlay.removeChild(div); tfDivs.delete(id); tfLastWorkerSec.delete(id); } }
+      const WORKER_R = 28;
+      for(const job of world.terraformJobs){
+        // 作業者数カウント
+        const cx=(job.tx+0.5)*TERRAIN_TILE_SIZE, cy=(job.ty+0.5)*TERRAIN_TILE_SIZE;
+        let workers=0;
+        for(const c of world.chibis){
+          if(c.state==='dead'||c.flight) continue;
+          if(Math.hypot(c.pos.x-cx,c.pos.y-cy)<=WORKER_R) workers++;
+        }
+        // 放置タイマー更新
+        if(workers>0) tfLastWorkerSec.set(job.id, world.timeSec);
+        const idleSec = world.timeSec - (tfLastWorkerSec.get(job.id) ?? world.timeSec);
+        const abandoned = idleSec >= 60;
+
+        let div = tfDivs.get(job.id);
+        if(!div){
+          div = document.createElement('div');
+          div.style.cssText='position:absolute;left:0;top:0;pointer-events:none;transform:translate(-50%,-50%);';
+          tfOverlay.appendChild(div);
+          tfDivs.set(job.id, div);
+        }
+        // 位置更新（terrain 高度に追従）
+        const ey=elevAt(world.terrain,cx,cy);
+        const sc=worldToScreen(cx,cy,ey);
+        div.style.transform=`translate(-50%,-50%) translate(${sc.x-Math.round(sc.x)+Math.round(sc.x)}px,${sc.y-Math.round(sc.y)+Math.round(sc.y)}px)`;
+        div.style.left=`${sc.x}px`;
+        div.style.top=`${sc.y - 20}px`;
+
+        const pct=Math.round(job.progress*100);
+        const label=job.target==='raise'?'▲盛':'▽切';
+        const barFill=abandoned?'#ff8020':'#4ad870';
+        const bg=abandoned?'rgba(200,80,0,0.85)':'rgba(20,10,5,0.75)';
+        div.innerHTML=`<div style="background:${bg};border-radius:3px;padding:2px 4px;font-size:10px;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">` +
+          `${abandoned?'⚠ 誰も来ない':`${label} ${pct}% (${workers}人)`}` +
+          `</div><div style="width:40px;height:4px;background:#333;border-radius:2px;margin-top:1px">` +
+          `<div style="width:${pct}%;height:100%;background:${barFill};border-radius:2px;transition:width 0.3s"></div></div>`;
+      }
     }
 
     renderer.render(scene, camera);

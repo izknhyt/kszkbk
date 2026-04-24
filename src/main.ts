@@ -336,6 +336,28 @@ async function start() {
       pasture: '🐑 牧場', loom: '🧶 織機',
     };
     flashToast(`${emojiMap[buildMode]} を建てた`, 'info');
+    // Σ-5-c: 連鎖ヒント toast（建設後 2 秒後に孤立チェック）
+    const builtX = x, builtY = y, builtKind = buildMode;
+    setTimeout(() => {
+      const CHAIN_R = 70;
+      if (builtKind === 'farm') {
+        const hasWater = world.features.some(
+          (f) => (f.kind === 'water' || f.kind === 'channel') && Math.hypot(f.pos.x - builtX, f.pos.y - builtY) <= CHAIN_R,
+        );
+        if (!hasWater) flashToast('💧 水源を繋ぐと食料生産開始わふ', 'info');
+      } else if (builtKind === 'channel') {
+        const connected = world.features.some(
+          (f) => f.id !== id && (f.kind === 'water' || f.kind === 'channel' || f.kind === 'farm') && Math.hypot(f.pos.x - builtX, f.pos.y - builtY) <= CHAIN_R,
+        );
+        if (!connected) flashToast('⚠ 孤立した水路（水源か畑と繋げてね）', 'info');
+      } else if (builtKind === 'powerline') {
+        const POWER_R = 200;
+        const connected2 = world.features.some(
+          (f) => f.id !== id && (f.kind === 'generator' || f.kind === 'streetlamp' || f.kind === 'powerline') && Math.hypot(f.pos.x - builtX, f.pos.y - builtY) <= POWER_R,
+        );
+        if (!connected2) flashToast('⚡ 電源・街灯と繋げてね', 'info');
+      }
+    }, 2000);
     // 建設モードは継続
   });
 

@@ -1342,7 +1342,12 @@ export function updateWolves(w: WorldState, dt: number) {
       wolf.targetChibiId = null;  // 次のターゲットを再選定
       spawnBubble(w.bubbles, target.pos, 'ぎゃわふー！！', 'speech', 2.0);
       pushLife(target, Math.floor(target.ageSec), 'オオカミに噛まれた');
-      damageChibi(w, target, WOLF_BITE_DAMAGE, 'wolf_bite');
+      // 逃げ疲れて倒れてた（scared/exhausted）ところを食われた → fled_to_exhaustion
+      const biteDeathCause: DeathCauseId =
+        (target.state === 'scared' || target.state === 'exhausted') && target.fatigue >= 50
+          ? 'fled_to_exhaustion'
+          : 'wolf_bite';
+      damageChibi(w, target, WOLF_BITE_DAMAGE, biteDeathCause);
       // 近くのちびわふが叫ぶ
       for (const c of w.chibis) {
         if (c === target || !isAlive(c)) continue;
@@ -2196,6 +2201,7 @@ interface WanderEnvCache {
   taikoPositions: Vec2[];
   obstaclePositions: Vec2[];
   shrinePositions: Vec2[];
+  terraformJobPositions: Vec2[];
 }
 let _wanderEnvCache: WanderEnvCache | null = null;
 function getWanderEnv(w: WorldState): WanderEnvCache {
@@ -2216,7 +2222,12 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   // obstaclePositions の近くへ歩く。sawmill も労働対象として混ぜておく）
   const obstaclePositions: Vec2[] = w.obstacles.map((o) => o.pos);
   for (const f of w.features) if (f.kind === 'sawmill' || f.kind === 'kiln' || f.kind === 'loom') obstaclePositions.push(f.pos);
-  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions };
+  // Σ-5-a: terraform ジョブのタイル中心座標
+  const terraformJobPositions: Vec2[] = w.terraformJobs.map((j) => ({
+    x: (j.tx + 0.5) * TERRAIN_TILE_SIZE,
+    y: (j.ty + 0.5) * TERRAIN_TILE_SIZE,
+  }));
+  _wanderEnvCache = { tick: w.tick, farmPositions, noukouPositions, taikoPositions, obstaclePositions, shrinePositions, terraformJobPositions };
   return _wanderEnvCache;
 }
 
@@ -2505,6 +2516,76 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   // 怒ってる子 → 怯える
   emergentPeerReactions(w, c);
 
+  // Σ-5-d: 狼検知と逃走 AI
+  if (!c.flight && c.state !== 'dead' && c.state !== 'sleep') {
+    const WOLF_DETECT_RADIUS = 80;
+    let nearestWolf: { pos: { x: number; y: number } } | null = null;
+    let nearestWolfDist = Infinity;
+    for (const wolf of w.wolves) {
+      if (wolf.state === 'dead') continue;
+      const wd = Math.hypot(wolf.pos.x - c.pos.x, wolf.pos.y - c.pos.y);
+      if (wd < WOLF_DETECT_RADIUS && wd < nearestWolfDist) {
+        nearestWolfDist = wd;
+        nearestWolf = wolf;
+      }
+    }
+
+    if (nearestWolf) {
+      // sanctuary（家・火の見やぐら 40px 以内）に居れば safe
+      const inSanctuary = w.features.some((f) =>
+        (f.kind === 'house' || f.kind === 'firewatch') && Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y) <= 40
+      );
+      if (!inSanctuary) {
+        // scared ステートに遷移
+        if (c.state !== 'scared') {
+          setState(c, 'scared', 0.6);
+          if (Math.random() < 0.4) {
+            const FLEE_LINES = ['ぎゃああわふ！', '狼こわいわふ！', 'むり！もうむり！', 'たすけてわふ〜！', 'ひぃぃぃわふ！'];
+            spawnBubble(w.bubbles, c.pos, FLEE_LINES[Math.floor(Math.random() * FLEE_LINES.length)]!, 'speech', 1.5);
+          }
+        }
+        // 狼から離れる方向に移動（1.3 倍速）
+        const fdx = c.pos.x - nearestWolf.pos.x;
+        const fdy = c.pos.y - nearestWolf.pos.y;
+        const fLen = Math.max(0.001, Math.hypot(fdx, fdy));
+        const fleeSpeed = c.speed * 1.3;
+
+        // sanctuary がある方向は優先して逃げ込む
+        let sx = fdx / fLen, sy = fdy / fLen;
+        for (const f of w.features) {
+          if (f.kind !== 'house' && f.kind !== 'firewatch') continue;
+          const sd = Math.hypot(f.pos.x - c.pos.x, f.pos.y - c.pos.y);
+          if (sd < 200) {
+            sx = (f.pos.x - c.pos.x) / Math.max(1, sd);
+            sy = (f.pos.y - c.pos.y) / Math.max(1, sd);
+            c.target = { x: f.pos.x, y: f.pos.y };
+            break;
+          }
+        }
+
+        c.pos.x += sx * fleeSpeed * dt;
+        c.pos.y += sy * fleeSpeed * dt;
+        c.faceLeft = sx < 0;
+        c.fatigue = Math.min(100, c.fatigue + dt * 18);  // 全力疾走で疲労 +18/sec
+
+        // 疲労 >= 60 で collapse → fled_to_exhaustion
+        if (c.fatigue >= 60) {
+          setState(c, 'exhausted', 2.0);
+          pushLife(c, Math.floor(c.ageSec), '狼に追われて走り疲れた');
+          // 近くに狼がいてかつ fatigue 高すぎ → 食われる
+          if (nearestWolfDist < 60 && Math.random() < 0.65) {
+            spawnBubble(w.bubbles, c.pos, 'もう……だめ……わふ', 'speech', 1.8);
+            kill(w, c, 'fled_to_exhaustion');
+            return;
+          }
+        }
+      }
+    } else if (c.state === 'scared') {
+      // 狼が去ったら idle に戻る
+      setState(c, 'idle', 0.3);
+    }
+  }
+
   // 移動（止まってるステート中は動かない）
   if (c.state === 'idle' || c.state === 'surprised' || c.state === 'angry') {
     const cocoon = w.npcs.find((n) => n.id === 'cocoon');
@@ -2517,6 +2598,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       taikoPositions: env.taikoPositions,
       obstaclePositions: env.obstaclePositions,
       farmPositions: env.farmPositions,
+      terraformJobPositions: env.terraformJobPositions,
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {

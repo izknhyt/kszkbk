@@ -369,6 +369,15 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 28,
     template: (n) => `${n}は崩れてきた土の中から「むぐ……わ……ふ……」という声だけを残し、そのまま出てこなかった。`,
   },
+  // --- Σ-5-d 狼 flee -------------------------------------------------------
+  fled_to_exhaustion: {
+    id: 'fled_to_exhaustion',
+    title: '逃げ疲れ食われ死',
+    rare: false,
+    uncommon: true,
+    points: 24,
+    template: (n) => `${n}は「むり！もうむり！」と叫びながら全力で逃げたが、疲れ果てて道端に倒れ込み、追いかけてきたオオカミにそのまま食われた。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;
