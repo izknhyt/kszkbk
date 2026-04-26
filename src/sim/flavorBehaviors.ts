@@ -33,6 +33,9 @@ export interface FlavorDuringState {
 // 普遍的に出る（条件なし）
 export const FLAVOR_AMBIENT: Record<string, FlavorAmbient> = {
   // --- 体質 ---
+  // Σ-7-f もらし系（足元タイル waterLevel + 専用ボコ処理は world.ts 側）
+  'おしっこもらし'      : { chance: 0.0008, bubble: 'しゃーわふ！' },
+  'うんこもらし'        : { chance: 0.0005, bubble: 'ぶりぶりわふ…' },
   '汗かき'              : { chance: 0.0012, bubble: '💦' },
   '鼻血出やすい'        : { chance: 0.0015, bubble: '🩸', state: 'hurt', duration: 0.6 },
   'しゃっくりが止まらない': { chance: 0.0025, bubble: 'ひっく' },
@@ -122,6 +125,10 @@ export const FLAVOR_DURING: Record<string, FlavorDuringState> = {
 // ambient で発火したら "くそざこ村の理不尽裁判" の対象になる粗相系フレーバー。
 // 屁・しゃっくり・よだれ・鼻血・泥舐め・手舐め・うんこ気にしなど、
 // 周囲がブチ切れても不思議じゃない（けど実際には理不尽）行動。
+// Σ-7-f もらし系：別途 maybePunishMorashi を呼び、bo_suki/ikusa/ココン参戦の専用ボコ。
+// EMBARRASSING_FLAVORS とは別管理（こちらは普通の理不尽ボコ）。
+export const MORASHI_FLAVORS = new Set<string>(['おしっこもらし', 'うんこもらし']);
+
 export const EMBARRASSING_FLAVORS = new Set<string>([
   '屁をこく',
   'しゃっくりが止まらない',

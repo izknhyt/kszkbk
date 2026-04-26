@@ -723,6 +723,60 @@ export function pickConstructionCancelLine(): string {
 }
 
 // =========================================================================
+// Σ-7-f もらし系セリフ（おしっこ／うんこ → 棒でボコ）
+// =========================================================================
+const PEE_MORASHI_LINES = [
+  'しゃーわふ！', 'もれたわふ…', 'でちゃったわふ！',
+  'ひえ、でてくわふ…', 'とまらないわふ！！',
+  'あったかいわふ…', 'うわーわふ！', 'きゃーわふ！',
+];
+const POOP_MORASHI_LINES = [
+  'ぶりぶりわふ…', 'でちゃったわふ…', 'においするわふ？',
+  'ほっかほかわふ…', 'ぐぅうっわふ', 'おなかがいたいわふ',
+  'もれちゃったわふ！', 'なんかでてきたわふ',
+];
+const BOKO_ATTACKER_LINES = [
+  'くさいわふ！！', 'ばっちいわふ！！', 'なにやってんわふ！',
+  'きたないわふ！', 'うわあわふ！！', 'もう！！わふ！！',
+  'ボコるわふ！！', 'どっかいけわふ！！', 'ゆるさんわふ！！',
+  'やめろわふ！！',
+];
+const BOKO_WITNESS_LINES = [
+  'うわあわふ！', 'みないようにするわふ…', 'おいのりするわふ…',
+  'こわいわふ…', 'きゃーわふ！', 'だれかたすけてわふ！',
+  'ドン引きわふ…', 'そっとするわふ',
+];
+const FURANA_SCOLD_LINES = [
+  'もー！！またやったわふ！', 'ちゃんとトイレいくわふ！',
+  'びっくりするわふ…', 'こらーわふ！', 'しっかりしてほしいわふ！',
+];
+const COCOON_BOKO_LINES = [
+  'きちゃないやつは村から追い出すわふ！',
+  'これでも食らえわふ！',
+  'ヘヘッ、ざまあ！わふ',
+  'もっとボコるわふ！',
+  'にげるなよ！わふ！',
+];
+export function pickPeeMorashiLine(): string {
+  return PEE_MORASHI_LINES[Math.floor(Math.random() * PEE_MORASHI_LINES.length)]!;
+}
+export function pickPoopMorashiLine(): string {
+  return POOP_MORASHI_LINES[Math.floor(Math.random() * POOP_MORASHI_LINES.length)]!;
+}
+export function pickBokoAttackerLine(): string {
+  return BOKO_ATTACKER_LINES[Math.floor(Math.random() * BOKO_ATTACKER_LINES.length)]!;
+}
+export function pickBokoWitnessLine(): string {
+  return BOKO_WITNESS_LINES[Math.floor(Math.random() * BOKO_WITNESS_LINES.length)]!;
+}
+export function pickFuranaScoldLine(): string {
+  return FURANA_SCOLD_LINES[Math.floor(Math.random() * FURANA_SCOLD_LINES.length)]!;
+}
+export function pickCocoonBokoLine(): string {
+  return COCOON_BOKO_LINES[Math.floor(Math.random() * COCOON_BOKO_LINES.length)]!;
+}
+
+// =========================================================================
 // Σ-7-d 水たまり・溺死関連
 // =========================================================================
 const WATER_SCARED_LINES = [

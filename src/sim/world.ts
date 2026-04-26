@@ -88,8 +88,14 @@ import {
   pickVictimHurtLine,
   pickWaterSteppedLine,
   pickDrownLastWords,
+  pickPeeMorashiLine,
+  pickPoopMorashiLine,
+  pickBokoAttackerLine,
+  pickBokoWitnessLine,
+  pickFuranaScoldLine,
+  pickCocoonBokoLine,
 } from './chats';
-import { EMBARRASSING_FLAVORS, FLAVOR_AMBIENT, FLAVOR_DURING, FLAVOR_SEASONAL, applyFlavorSpeedMod } from './flavorBehaviors';
+import { EMBARRASSING_FLAVORS, FLAVOR_AMBIENT, FLAVOR_DURING, FLAVOR_SEASONAL, MORASHI_FLAVORS, applyFlavorSpeedMod } from './flavorBehaviors';
 import { SpatialHash } from './spatialHash';
 import { TRAIT_DEFS } from './traits';
 import {
@@ -3023,8 +3029,20 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     if (amb && c.state === 'idle' && Math.random() < amb.chance) {
       if (amb.bubble) spawnBubble(w.bubbles, c.pos, amb.bubble, 'speech', 1.2);
       if (amb.state) setState(c, amb.state, amb.duration ?? 1);
-      // 粗相系フレーバー：周囲から理不尽にボコられる可能性
-      if (EMBARRASSING_FLAVORS.has(f)) maybePunishRifujin(w, c, f);
+      // Σ-7-f もらし系：足元タイルに waterLevel +0.2、専用ボコ
+      if (MORASHI_FLAVORS.has(f)) {
+        if (f === 'おしっこもらし') {
+          const { tx, ty } = worldToTile(c.pos.x, c.pos.y);
+          const tile = w.terrain[ty]?.[tx];
+          if (tile && !isSeaAt(c.pos.x, c.pos.y)) {
+            tile.waterLevel = Math.min(1.0, tile.waterLevel + 0.2);
+          }
+        }
+        maybePunishMorashi(w, c, f);
+      } else if (EMBARRASSING_FLAVORS.has(f)) {
+        // 粗相系フレーバー：周囲から理不尽にボコられる可能性
+        maybePunishRifujin(w, c, f);
+      }
     }
     const seasonals = FLAVOR_SEASONAL[f];
     if (seasonals) {
@@ -3225,6 +3243,58 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
 // 屁・しゃっくり・よだれ等の粗相 → 理不尽ボコ。
 // 近くに誰かいると 35% で発動、そのうち 30% で死亡（rifujin_boko）。
 // "なぜか殴られた"が画面で読めるよう、両者に理由バブル + lifeLog を残す。
+// Σ-7-f おしっこ／うんこもらし → 棒でボコ。
+// bo_suki/ikusa 持ちを優先攻撃者に選ぶ（60%）。ココン参戦、フラナ叱り、目撃者ドン引き。
+// kill 確率は理不尽ボコ（30%）より低めの 10%。
+const MORASHI_PUNISH_CHANCE = 0.35;
+const MORASHI_KILL_CHANCE = 0.10;
+function maybePunishMorashi(w: WorldState, victim: Chibiwafu, flavor: string) {
+  if (Math.random() > MORASHI_PUNISH_CHANCE) return;
+  // 新生児（ageSec<5）は対象外（誕生直後にボコられないように）
+  if (victim.ageSec < 5) return;
+  const nearby = w.chibis.filter((o) => o !== victim && isAlive(o)
+    && o.ageSec >= 5 && distance(o.pos, victim.pos) < 60);
+  if (nearby.length === 0) return;
+
+  // bo_suki/ikusa を 60% で優先選択
+  const aggressive = nearby.filter((o) => o.traits.includes('bo_suki') || o.traits.includes('ikusa'));
+  const striker = aggressive.length > 0 && Math.random() < 0.6
+    ? aggressive[Math.floor(Math.random() * aggressive.length)]!
+    : nearby[Math.floor(Math.random() * nearby.length)]!;
+
+  const selfLine = flavor === 'おしっこもらし' ? pickPeeMorashiLine() : pickPoopMorashiLine();
+  spawnBubble(w.bubbles, victim.pos, selfLine, 'speech', 1.3);
+  spawnBubble(w.bubbles, striker.pos, pickBokoAttackerLine(), 'speech', 1.5);
+  setState(victim, 'hurt', 1.5);
+  setState(striker, 'angry', 1.0);
+  pushLife(victim, Math.floor(victim.ageSec), `${flavor}で ${striker.name} にボコボコにされた`);
+  pushLife(striker, Math.floor(striker.ageSec), `${victim.name} が${flavor}をやっていたのでボコった`);
+
+  // ココン 70% で参加（120px 以内）
+  const cocoon = w.npcs.find((n) => n.id === 'cocoon');
+  if (cocoon && !cocoon.dead && distance(cocoon.pos, victim.pos) < 120 && Math.random() < 0.7) {
+    spawnBubble(w.bubbles, cocoon.pos, pickCocoonBokoLine(), 'npc-speech', 1.5);
+    cocoon.mood = Math.min(100, (cocoon.mood ?? 50) + 8);
+  }
+
+  // フラナ 50% で叱る（120px 以内）
+  const furana = w.npcs.find((n) => n.id === 'furana');
+  if (furana && !furana.dead && distance(furana.pos, victim.pos) < 120 && Math.random() < 0.5) {
+    spawnBubble(w.bubbles, furana.pos, pickFuranaScoldLine(), 'npc-speech', 1.5);
+  }
+
+  // 目撃者の 1 体がドン引き（60%）
+  const witnesses = nearby.filter((o) => o !== striker);
+  if (witnesses.length > 0 && Math.random() < 0.6) {
+    const wit = witnesses[Math.floor(Math.random() * witnesses.length)]!;
+    spawnBubble(w.bubbles, wit.pos, pickBokoWitnessLine(), 'speech', 1.2);
+  }
+
+  if (Math.random() < MORASHI_KILL_CHANCE) {
+    kill(w, victim, 'rifujin_boko');
+  }
+}
+
 const RIFUJIN_PUNISH_CHANCE = 0.35;
 const RIFUJIN_KILL_CHANCE = 0.30;
 function maybePunishRifujin(w: WorldState, victim: Chibiwafu, flavor: string) {
