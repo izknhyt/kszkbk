@@ -111,19 +111,64 @@ function makeCanvasTex(
 // ============================================================
 // state → sprite frame index
 // ============================================================
-const STATE_IDX: Record<ChibiState, number> = {
+// ============================================================
+// state → ポーズインデックス（chibiTexs / furanaTexs の配列添字）
+//
+// FURANA_STATE_IDX: NPC（furana 含む）は 9 ポーズだけ持つので 0-8 範囲。
+// CHIBI_STATE_IDX: ちびわふは 40 ポーズ揃いなので state 別に専用ポーズ。
+// ============================================================
+const FURANA_STATE_IDX: Record<ChibiState, number> = {
   idle:0, cry:1, surprised:2, angry:3,
   sleep:4, dazed:5, hurt:6, exhausted:7, dead:8,
   chatting:0, staring:2, eating:3,
-  scared:2,  // Σ-5-d: 逃走中は surprised ポーズ流用
+  scared:2,  // 逃走中は surprised ポーズ流用
 };
+// ちびわふは新ポーズに振り分け（22_talk_gesture / 23_eat_drink / 16_cower 等を活かす）
+//   index = ファイル番号 - 1（01_normal=0, 09_dead=8, 10_walk=9, 40_lonely=39）
+const CHIBI_STATE_IDX: Record<ChibiState, number> = {
+  idle:      0,   // 01_normal
+  cry:      14,   // 15_heavy_cry（02_crying より dramatic）
+  surprised: 2,   // 03_surprised
+  angry:     3,   // 04_angry
+  sleep:    27,   // 28_sleep_curl
+  dazed:     5,   // 06_dizzy
+  hurt:     18,   // 19_knocked
+  exhausted:39,   // 40_lonely_sit
+  dead:     19,   // 20_splat（くそざこ的に splat 死がデフォ、09_dead は古いまま使ってない）
+  chatting: 21,   // 22_talk_gesture
+  staring:  38,   // 39_search_look
+  eating:   22,   // 23_eat_drink
+  scared:   15,   // 16_cower
+};
+// 後方互換用エイリアス（既存呼び出しが STATE_IDX を直接見ている所がある）
+const STATE_IDX = FURANA_STATE_IDX;
+// 飛行中（投げられて空中）は thrown_airborne で固定。
+const CHIBI_FLIGHT_IDX = 25;  // 26_thrown_airborne
 
+// ちびわふ 40 ポーズ揃い（00_origin はマスター、in-game では使わない）
+// インデックスはファイル番号 -1（CHIBI_STATE_IDX の値と対応）
 const CHIBI_URLS = [
-  '/chibiwafu/01_normal.png',  '/chibiwafu/02_crying.png',
-  '/chibiwafu/03_surprised.png','/chibiwafu/04_angry.png',
-  '/chibiwafu/05_sulking.png', '/chibiwafu/06_dizzy.png',
-  '/chibiwafu/07_dirty.png',   '/chibiwafu/08_sleepy.png',
+  '/chibiwafu/01_normal.png',         '/chibiwafu/02_crying.png',
+  '/chibiwafu/03_surprised.png',      '/chibiwafu/04_angry.png',
+  '/chibiwafu/05_sulking.png',        '/chibiwafu/06_dizzy.png',
+  '/chibiwafu/07_dirty.png',          '/chibiwafu/08_sleepy.png',
   '/chibiwafu/09_dead.png',
+  '/chibiwafu/10_walk_lean.png',      '/chibiwafu/11_run_lean.png',
+  '/chibiwafu/12_reach.png',          '/chibiwafu/13_hold_stick.png',
+  '/chibiwafu/14_cheeky_hips.png',    '/chibiwafu/15_heavy_cry.png',
+  '/chibiwafu/16_cower.png',          '/chibiwafu/17_arms_up.png',
+  '/chibiwafu/18_drown_flail.png',    '/chibiwafu/19_knocked.png',
+  '/chibiwafu/20_splat.png',          '/chibiwafu/21_sit.png',
+  '/chibiwafu/22_talk_gesture.png',   '/chibiwafu/23_eat_drink.png',
+  '/chibiwafu/24_work_carry.png',     '/chibiwafu/25_grabbed.png',
+  '/chibiwafu/26_thrown_airborne.png','/chibiwafu/27_weather_suffering.png',
+  '/chibiwafu/28_sleep_curl.png',     '/chibiwafu/29_sleep_flat.png',
+  '/chibiwafu/30_nap_sitting.png',    '/chibiwafu/31_wake_up.png',
+  '/chibiwafu/32_plead.png',          '/chibiwafu/33_celebrate_jump.png',
+  '/chibiwafu/34_sick_fever.png',     '/chibiwafu/35_smoke_cough.png',
+  '/chibiwafu/36_dig_scrape.png',     '/chibiwafu/37_gather_pickup.png',
+  '/chibiwafu/38_refuse_no.png',      '/chibiwafu/39_search_look.png',
+  '/chibiwafu/40_lonely_sit.png',
 ];
 const FURANA_URLS = [
   '/furana/01_normal.png',  '/furana/02_crying.png',
@@ -971,11 +1016,26 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // ============================================================
   // ヘルパー
   // ============================================================
+  // 死因 → 死体ポーズ index
+  // 溺死系 = drown_flail / 圧死・打撃系 = splat / 投げ・落下系 = knocked /
+  // 静かな死（hunger/fatigue/老衰）= 09_dead / それ以外 = splat
+  function pickCorpseTex(causeId: string|null, texs: THREE.Texture[]): THREE.Texture {
+    if (!causeId) return texs[19]??texs[8]??texs[0]!;
+    if (causeId==='drown_pond' || causeId==='flood_drown' || causeId==='river_swept' || causeId==='kamisama_drown')
+      return texs[17]??texs[8]??texs[0]!;  // 18_drown_flail
+    if (causeId==='hunger_death' || causeId==='fatigue_death' || causeId==='roushuai' || causeId==='mama_lost')
+      return texs[8]??texs[0]!;             // 09_dead
+    if (causeId==='cliff_fall' || causeId==='slope_fall' || causeId==='kamisama_throw' || causeId==='kamisama_punch')
+      return texs[18]??texs[19]??texs[8]??texs[0]!;  // 19_knocked
+    return texs[19]??texs[8]??texs[0]!;     // 20_splat（デフォ：くそざこ事故死）
+  }
+
   function ensureMView(map: Map<number,MView>, id:number, state:ChibiState,
-                        texs:THREE.Texture[], grp:THREE.Group, w:number, h:number): MView {
+                        texs:THREE.Texture[], grp:THREE.Group, w:number, h:number,
+                        stateIdx: Record<ChibiState, number> = STATE_IDX): MView {
     let v=map.get(id);
     if(!v){
-      const tex=texs[STATE_IDX[state]]??texs[0]!;
+      const tex=texs[stateIdx[state]]??texs[0]!;
       const mesh=spriteMesh(w,h,tex);
       (mesh.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
       grp.add(mesh);
@@ -985,12 +1045,17 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     return v;
   }
 
-  function syncSpriteState(v:MView, state:ChibiState, faceLeft:boolean, texs:THREE.Texture[]){
-    if(v.lastState!==state){
-      const tex=texs[STATE_IDX[state]]??texs[0]!;
+  // syncSpriteState: poseOverride を渡せば state ではなくその index を使う（飛行中など）
+  function syncSpriteState(v:MView, state:ChibiState, faceLeft:boolean, texs:THREE.Texture[],
+                            stateIdx: Record<ChibiState, number> = STATE_IDX,
+                            poseOverride?: number){
+    const targetKey = poseOverride!=null ? `_pose:${poseOverride}` : state;
+    if(v.lastState!==targetKey){
+      const idx = poseOverride!=null ? poseOverride : stateIdx[state];
+      const tex=texs[idx]??texs[0]!;
       (v.mesh.material as THREE.MeshBasicMaterial).map=tex;
       (v.mesh.material as THREE.MeshBasicMaterial).needsUpdate=true;
-      v.lastState=state;
+      v.lastState=targetKey;
     }
     if(v.lastFace!==faceLeft){
       v.mesh.scale.x=faceLeft?-1:1;
@@ -1452,7 +1517,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     rmStale(corpseViews,cids,corpseGrp);
     for(const c of world.corpses){
       if(!corpseViews.has(c.id)){
-        const tex=chibiTexs[8]??chibiTexs[0]!;
+        // 死因に応じて死体ポーズを選ぶ（splat / drown_flail / knocked / sleep / 09_dead）
+        const tex = pickCorpseTex(c.deathCauseId, chibiTexs);
         const m=spriteMesh(CHIBI_W*0.85,CHIBI_H*0.85,tex);
         (m.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
         (m.material as THREE.MeshBasicMaterial).opacity=0.8;
@@ -1467,8 +1533,10 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     for(const [id,v] of chibiViews){ if(!aliveIds.has(id)){ chibiGrp.remove(v.mesh); v.mesh.geometry.dispose(); chibiViews.delete(id); } }
     const ondo=world.event?.kind==='ondo';
     for(const c of world.chibis){
-      const v=ensureMView(chibiViews as Map<number,MView>,c.id,c.state,chibiTexs,chibiGrp,CHIBI_W,CHIBI_H);
-      syncSpriteState(v,c.state,c.faceLeft,chibiTexs);
+      const v=ensureMView(chibiViews as Map<number,MView>,c.id,c.state,chibiTexs,chibiGrp,CHIBI_W,CHIBI_H,CHIBI_STATE_IDX);
+      // 飛行中（投げられて空中）は thrown_airborne ポーズで上書き
+      const poseOverride = c.flight ? CHIBI_FLIGHT_IDX : undefined;
+      syncSpriteState(v,c.state,c.faceLeft,chibiTexs,CHIBI_STATE_IDX,poseOverride);
       let wx=c.pos.x, wz=c.pos.y;
       if(ondo) wx+=Math.sin(world.timeSec*6+c.id*0.7)*8;
       const baseY=c.flight ? c.flight.posZ*ELEV_SCALE : elevAt(world.terrain,wx,wz);
