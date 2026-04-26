@@ -134,7 +134,7 @@ const CHIBI_STATE_IDX: Record<ChibiState, number> = {
   dazed:     5,   // 06_dizzy
   hurt:     18,   // 19_knocked
   exhausted:39,   // 40_lonely_sit
-  dead:     19,   // 20_splat（くそざこ的に splat 死がデフォ、09_dead は古いまま使ってない）
+  dead:      8,   // 09_dead（生きている state==='dead' の瞬間用、死体は pickCorpseTex で死因別）
   chatting: 21,   // 22_talk_gesture
   staring:  38,   // 39_search_look
   eating:   22,   // 23_eat_drink
@@ -1017,16 +1017,16 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // ヘルパー
   // ============================================================
   // 死因 → 死体ポーズ index
-  // 溺死系 = drown_flail / 圧死・打撃系 = splat / 投げ・落下系 = knocked /
-  // 静かな死（hunger/fatigue/老衰）= 09_dead / それ以外 = splat
+  // 溺死系 = 18_drown_flail / 投げ・落下系 = 19_knocked / 静かな死 = 09_dead /
+  // それ以外（事故・災害） = 20_splat
   function pickCorpseTex(causeId: string|null, texs: THREE.Texture[]): THREE.Texture {
-    if (!causeId) return texs[19]??texs[8]??texs[0]!;
+    if (!causeId) return texs[8]??texs[0]!;
     if (causeId==='drown_pond' || causeId==='flood_drown' || causeId==='river_swept' || causeId==='kamisama_drown')
       return texs[17]??texs[8]??texs[0]!;  // 18_drown_flail
-    if (causeId==='hunger_death' || causeId==='fatigue_death' || causeId==='roushuai' || causeId==='mama_lost')
-      return texs[8]??texs[0]!;             // 09_dead
-    if (causeId==='cliff_fall' || causeId==='slope_fall' || causeId==='kamisama_throw' || causeId==='kamisama_punch')
-      return texs[18]??texs[19]??texs[8]??texs[0]!;  // 19_knocked
+    if (causeId==='hunger_death' || causeId==='fatigue_death' || causeId==='roushuai' || causeId==='mama_lost' || causeId==='fled_to_exhaustion')
+      return texs[8]??texs[0]!;             // 09_dead（RIP、静かな死）
+    if (causeId==='cliff_fall' || causeId==='slope_fall' || causeId==='kamisama_throw' || causeId==='kamisama_punch' || causeId==='landslide_crush')
+      return texs[18]??texs[8]??texs[0]!;  // 19_knocked
     return texs[19]??texs[8]??texs[0]!;     // 20_splat（デフォ：くそざこ事故死）
   }
 
@@ -1517,8 +1517,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     rmStale(corpseViews,cids,corpseGrp);
     for(const c of world.corpses){
       if(!corpseViews.has(c.id)){
-        // 死因に応じて死体ポーズを選ぶ（splat / drown_flail / knocked / sleep / 09_dead）
-        const tex = pickCorpseTex(c.deathCauseId, chibiTexs);
+        const tex=pickCorpseTex(c.deathCauseId, chibiTexs);
         const m=spriteMesh(CHIBI_W*0.85,CHIBI_H*0.85,tex);
         (m.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
         (m.material as THREE.MeshBasicMaterial).opacity=0.8;

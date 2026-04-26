@@ -905,11 +905,16 @@ async function start() {
       }
     }
     // 生体ヒットなし → 死体からも探す
+    // ペルスペクティブ tilt でスプライトクリック地点と地面 hit が ~27px ズレるので、
+    // 判定半径を 50 に広めにとる（複数死体が重なってる時は最近接を選択）
     const wp = stage.screenToWorld(detail.clientX, detail.clientY);
+    let bestCorpse: typeof world.corpses[number] | null = null;
+    let bestDist = 50;
     for (const corpse of world.corpses) {
       const d = Math.hypot(corpse.pos.x - wp.x, corpse.pos.y - wp.y);
-      if (d < 26) { showChibiModal(corpse, true); return; }
+      if (d < bestDist) { bestDist = d; bestCorpse = corpse; }
     }
+    if (bestCorpse) { showChibiModal(bestCorpse, true); return; }
     closeChibiModal();
     pinnedId = null;
   });
