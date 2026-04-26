@@ -33,6 +33,7 @@ import {
   FURANA_LINES_DEATH_REACTION,
   FURANA_LINES_HAPPY,
   FURANA_LINES_HATE,
+  FURANA_LINES_HURT,
   FURANA_LINES_IDLE,
   FURANA_LINES_PAT,
   FURANA_LINES_THROW,
@@ -1675,10 +1676,62 @@ const WOLF_MAX_HP = 30;
 const WOLF_SPEED = 75;  // Σ-6-x：55 → 75（ちびわふ最速 28 に対して 2.7 倍、より狩猟本能を強調）
 const WOLF_BITE_RANGE = 22;
 const WOLF_BITE_DAMAGE = 28;  // HP 20 の弱い子は一撃、HP 40+ の丈夫は2発必要
+const WOLF_BITE_NPC_DAMAGE = 12;  // Σ-7-w：フラナ等 NPC への噛み（フラナ 220HP に対し 5.5%）
 const WOLF_SPAWN_INTERVAL_NIGHT_BASE = 75;  // 夜の平均スポーン間隔（秒）
 const WOLF_GROUP_SIZE_MIN = 1;
 const WOLF_GROUP_SIZE_MAX = 2;
 const WOLF_MAX_ALIVE = 6;  // 同時存在数のハードリミット（性能安全網）
+
+// Σ-7-w 狼警報：噛みつき音/フラナ被害で、半径内のちびわふを起こしてパニックさせる。
+// 寝てる子は energy/fatigue 依存で起きるか「ねむい…」と寝続ける。
+// 起きなかった子は wolfAlarmIgnoredTick が立って次の獲物候補に登録される。
+const PANIC_WAKE_LINES = [
+  'ひぎゃあわふ！？', 'なに！？わふ！', 'おきたわふー！',
+  'ぎゃーわふ！', 'こわいわふ！！', 'ママー！？',
+];
+const SLEEP_THROUGH_LINES = [
+  'ねむい…わふ', 'もうだめ…わふ', 'むぐぅ…わふ', 'すぴー…',
+  'おきれない…わふ', 'ほうっといて…わふ',
+];
+const FURANA_HURT_PANIC_LINES = [
+  'ママがーわふ！！', 'ママをたすけてわふ！', 'ママあぶないわふ！',
+  'ぎゃーママわふ！', 'やめろわふー！',
+];
+
+function wolfAlarm(w: WorldState, center: Vec2, radius: number, isFurana = false) {
+  for (const c of w.chibis) {
+    if (!isAlive(c) || c.flight) continue;
+    const d = Math.hypot(c.pos.x - center.x, c.pos.y - center.y);
+    if (d > radius) continue;
+    if (c.state === 'sleep') {
+      // 起きるか？ energy 高 + fatigue 低 → 起きやすい。フラナ被害なら強制ボーナス +20%。
+      let wakeChance = 0.85
+        - Math.max(0, c.fatigue - 50) * 0.008
+        - Math.max(0, 50 - c.params.energy) * 0.006;
+      if (isFurana) wakeChance += 0.2;
+      if (Math.random() < wakeChance) {
+        setState(c, 'scared', 1.5);
+        spawnBubble(w.bubbles, c.pos,
+          isFurana ? FURANA_HURT_PANIC_LINES[Math.floor(Math.random() * FURANA_HURT_PANIC_LINES.length)]!
+                   : PANIC_WAKE_LINES[Math.floor(Math.random() * PANIC_WAKE_LINES.length)]!,
+          'speech', 1.7);
+        pushLife(c, Math.floor(c.ageSec), isFurana ? 'ママの叫びで飛び起きた' : '狼の叫びで飛び起きた');
+      } else {
+        // 起きられなかった → 警報無視マーカーを立てる（次の獲物候補で +400 priority）
+        c.wolfAlarmIgnoredTick = w.tick;
+        spawnBubble(w.bubbles, c.pos,
+          SLEEP_THROUGH_LINES[Math.floor(Math.random() * SLEEP_THROUGH_LINES.length)]!,
+          'speech', 1.5);
+        pushLife(c, Math.floor(c.ageSec), '叫び声を聞いたが起きられなかった');
+      }
+    } else if (Math.random() < 0.35) {
+      spawnBubble(w.bubbles, c.pos,
+        isFurana ? FURANA_HURT_PANIC_LINES[Math.floor(Math.random() * FURANA_HURT_PANIC_LINES.length)]!
+                 : (Math.random() < 0.5 ? 'オオカミわふー！' : 'にげろわふ！'),
+        'speech', 1.8);
+    }
+  }
+}
 
 let _wolfIdSeq = 1;
 export function resetWolfIdSeq(n: number) { _wolfIdSeq = n; }
@@ -1701,6 +1754,7 @@ function spawnWolfGroup(w: WorldState) {
       id: _wolfIdSeq++,
       pos: { x: baseX + (Math.random() - 0.5) * 40, y: baseY + (Math.random() - 0.5) * 40 },
       targetChibiId: null,
+      targetNpcId: null,
       state: 'stalk',
       stateTimer: 0,
       hp: WOLF_MAX_HP,
@@ -1720,26 +1774,43 @@ function spawnWolfGroup(w: WorldState) {
 
 // オオカミのターゲット選定。野宿ちびわふ（homeFid=null）を最優先、
 // 次に夜なのに家に入ってない奴、最後に誰でも。
-function pickWolfTarget(w: WorldState, wolf: Wolf): Chibiwafu | null {
-  const candidates = w.chibis.filter((c) => isAlive(c) && !c.flight);
-  if (candidates.length === 0) return null;
-  // 優先度付きでソート
-  const scored = candidates.map((c) => {
+type WolfTarget =
+  | { kind: 'chibi'; ref: Chibiwafu }
+  | { kind: 'npc'; ref: NpcState };
+
+function pickWolfTarget(w: WorldState, wolf: Wolf): WolfTarget | null {
+  let best: { priority: number; target: WolfTarget } | null = null;
+  for (const c of w.chibis) {
+    if (!isAlive(c) || c.flight) continue;
     let priority = 0;
     if (!c.homeFid) priority += 200;  // 野宿は絶好の獲物
     // 家で寝てる子は強く忌避（家が盾）。野宿で寝てる子は好物。
     if (c.state === 'sleep' && c.homeFid) priority -= 300;
-    if (c.state === 'sleep' && !c.homeFid) priority += 80;  // 寝てる野宿は狩りやすい
+    if (c.state === 'sleep' && !c.homeFid) priority += 80;
+    // Σ-7-w：警報を無視して寝続けた子は呼び水獲物（+400、~10 秒間）
+    if (c.wolfAlarmIgnoredTick != null && w.tick - c.wolfAlarmIgnoredTick < 200) priority += 400;
     // 稼働中の街灯の明かりの下ならオオカミは警戒して避ける
     if (chibiUnderStreetlamp(w, c.pos.x, c.pos.y)) priority -= 220;
     const d = Math.hypot(c.pos.x - wolf.pos.x, c.pos.y - wolf.pos.y);
-    priority -= d * 0.04;  // 近いほど優先
-    return { c, priority };
-  });
-  scored.sort((a, b) => b.priority - a.priority);
-  // priority がマイナスのみの場合はノーターゲット（家で寝てる子しかいない → 徘徊するだけ）
-  if (scored[0]!.priority < 0) return null;
-  return scored[0]!.c;
+    priority -= d * 0.04;
+    if (priority < 0) continue;
+    if (!best || priority > best.priority) best = { priority, target: { kind: 'chibi', ref: c } };
+  }
+  // Σ-7-w フラナも狙う候補（250px 以内、生存）。基本 chibi より控えめ優先で、
+  // chibi が居ない／フラナの方が圧倒的に近い時にだけ targets される。
+  const furana = w.npcs.find((n) => n.id === 'furana' && !n.dead);
+  if (furana) {
+    const d = Math.hypot(furana.pos.x - wolf.pos.x, furana.pos.y - wolf.pos.y);
+    if (d < 250) {
+      let priority = 60;
+      priority -= d * 0.05;
+      if (chibiUnderStreetlamp(w, furana.pos.x, furana.pos.y)) priority -= 150;
+      if (priority > 0 && (!best || priority > best.priority)) {
+        best = { priority, target: { kind: 'npc', ref: furana } };
+      }
+    }
+  }
+  return best?.target ?? null;
 }
 
 export function updateWolves(w: WorldState, dt: number) {
@@ -1801,48 +1872,65 @@ export function updateWolves(w: WorldState, dt: number) {
       continue;
     }
 
-    // stalk：ターゲット再評価（1秒おき or 未設定）
-    let target = wolf.targetChibiId !== null
+    // stalk：ターゲット再評価（1秒おき or 未設定）。chibi/npc どちらでも返ってくる。
+    let chibiT: Chibiwafu | null = wolf.targetChibiId != null
       ? (chibiById(w, wolf.targetChibiId) ?? null)
       : null;
-    if (target && (!isAlive(target) || target.flight)) target = null;
-    if (!target || Math.random() < dt * 0.5) {
-      target = pickWolfTarget(w, wolf);
-      wolf.targetChibiId = target ? target.id : null;
+    if (chibiT && (!isAlive(chibiT) || chibiT.flight)) chibiT = null;
+    let npcT: NpcState | null = wolf.targetNpcId
+      ? (w.npcs.find((n) => n.id === wolf.targetNpcId && !n.dead) ?? null)
+      : null;
+
+    if ((!chibiT && !npcT) || Math.random() < dt * 0.5) {
+      const picked = pickWolfTarget(w, wolf);
+      if (picked?.kind === 'chibi') {
+        chibiT = picked.ref; npcT = null;
+        wolf.targetChibiId = picked.ref.id; wolf.targetNpcId = null;
+      } else if (picked?.kind === 'npc') {
+        chibiT = null; npcT = picked.ref;
+        wolf.targetChibiId = null; wolf.targetNpcId = picked.ref.id;
+      } else {
+        chibiT = null; npcT = null;
+        wolf.targetChibiId = null; wolf.targetNpcId = null;
+      }
     }
-    if (!target) {
+    const targetPos = chibiT ? chibiT.pos : npcT?.pos;
+    if (!targetPos) {
       // 獲物なし：適当に徘徊
       wolf.pos.x += (Math.random() - 0.5) * wolf.speed * 0.3 * dt;
       wolf.pos.y += (Math.random() - 0.5) * wolf.speed * 0.3 * dt;
       continue;
     }
 
-    const dx = target.pos.x - wolf.pos.x;
-    const dy = target.pos.y - wolf.pos.y;
+    const dx = targetPos.x - wolf.pos.x;
+    const dy = targetPos.y - wolf.pos.y;
     const d = Math.max(0.001, Math.hypot(dx, dy));
     wolf.faceLeft = dx < 0;
 
     if (d <= WOLF_BITE_RANGE && wolf.biteCooldown <= 0) {
-      // 噛む
       wolf.state = 'bite';
-      wolf.stateTimer = 1.2;  // 噛んだあと 1.2 秒硬直（ストレス緩和）
-      wolf.biteCooldown = 2.5;  // 再噛み抑止（連続即死防止）
-      wolf.targetChibiId = null;  // 次のターゲットを再選定
-      spawnBubble(w.bubbles, target.pos, 'ぎゃわふー！！', 'speech', 2.0);
-      pushLife(target, Math.floor(target.ageSec), 'オオカミに噛まれた');
-      // 逃げ疲れて倒れてた（scared/exhausted）ところを食われた → fled_to_exhaustion
-      const biteDeathCause: DeathCauseId =
-        (target.state === 'scared' || target.state === 'exhausted') && target.fatigue >= 50
-          ? 'fled_to_exhaustion'
-          : 'wolf_bite';
-      damageChibi(w, target, WOLF_BITE_DAMAGE, biteDeathCause);
-      // 近くのちびわふが叫ぶ
-      for (const c of w.chibis) {
-        if (c === target || !isAlive(c)) continue;
-        if (Math.hypot(c.pos.x - target.pos.x, c.pos.y - target.pos.y) > 120) continue;
-        if (Math.random() < 0.3) {
-          spawnBubble(w.bubbles, c.pos, Math.random() < 0.5 ? 'オオカミわふー！' : 'にげろわふ！', 'speech', 1.8);
-        }
+      wolf.stateTimer = 1.2;
+      wolf.biteCooldown = 2.5;
+      wolf.targetChibiId = null;
+      wolf.targetNpcId = null;
+      if (chibiT) {
+        // ----- chibi を噛む（既存） -----
+        spawnBubble(w.bubbles, chibiT.pos, 'ぎゃわふー！！', 'speech', 2.0);
+        pushLife(chibiT, Math.floor(chibiT.ageSec), 'オオカミに噛まれた');
+        const biteDeathCause: DeathCauseId =
+          (chibiT.state === 'scared' || chibiT.state === 'exhausted') && chibiT.fatigue >= 50
+            ? 'fled_to_exhaustion'
+            : 'wolf_bite';
+        damageChibi(w, chibiT, WOLF_BITE_DAMAGE, biteDeathCause);
+        wolfAlarm(w, chibiT.pos, /*radius*/ 150);
+      } else if (npcT) {
+        // ----- フラナを噛む（Σ-7-w） -----
+        spawnBubble(w.bubbles, npcT.pos, pickLine(FURANA_LINES_HURT), 'npc-speech', 2.4);
+        pushNpcLife(npcT, Math.floor(w.timeSec), 'オオカミに噛まれた');
+        damageNpc(w, npcT, WOLF_BITE_NPC_DAMAGE);
+        npcT.mood = Math.max(0, (npcT.mood ?? 50) - 15);
+        // 周囲のちびわふは「ママがー！」とパニックしながら飛び起きる
+        wolfAlarm(w, npcT.pos, /*radius*/ 220, /*isFurana*/ true);
       }
       continue;
     }

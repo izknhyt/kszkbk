@@ -58,6 +58,9 @@ export interface Chibiwafu {
   fatigue: number;
   // 割当て住居の feature id。null なら野宿組（夜に HP ドレイン + 疲労回復鈍化）
   homeFid: string | null;
+  // Σ-7-w 狼警報：直近の警報を無視（起きずに寝続けた）した tick。
+  // 設定後 ~10 秒間は pickWolfTarget の優先度が +400（呼び水獲物扱い）。transient。
+  wolfAlarmIgnoredTick?: number;
 }
 
 export interface LifeEvent {
@@ -284,6 +287,8 @@ export interface Wolf {
   id: number;
   pos: Vec2;
   targetChibiId: number | null;
+  // Σ-7-w フラナを狙うとき。chibi と同時に持たない（どちらかが null）。
+  targetNpcId?: 'furana' | 'suzu' | 'lou' | 'cocoon' | null;
   state: WolfState;
   stateTimer: number;
   hp: number;
