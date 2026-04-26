@@ -838,7 +838,10 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // jobId → last worker が居た時刻（秒）
   const tfLastWorkerSec = new Map<string, number>();
   // jobId → job type（完了検知のため前フレームの状態を保持）
-  const tfPrevJobIds = new Map<string, 'raise' | 'lower'>();
+  // 前フレームのジョブ {id → {target, progress}} を保持。
+  // 削除されたジョブは「完了」と「再クリックでの置き換え」が区別つかないので、
+  // 最後の progress >= 0.95 だったものだけを完了通知する。
+  const tfPrevJobIds = new Map<string, { target: 'raise' | 'lower'; progress: number }>();
 
   // --- Σ-5-e-c: 建設進捗オーバーレイ ---
   const cnOverlay = document.createElement('div');
@@ -1370,15 +1373,15 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
     // ---- Terraform オーバーレイ（InstancedMesh + 点滅 + 境界アウトライン）----
     {
-      // 完了したジョブ検知（前フレームにあって今フレームにないもの = 完了）
+      // 完了したジョブ検知（前フレームにあって今フレームにない && 直前 progress >= 0.95）
       const currentJobIds = new Set(world.terraformJobs.map(j=>j.id));
-      for(const [id, target] of tfPrevJobIds){
-        if(!currentJobIds.has(id)){
-          canvas.dispatchEvent(new CustomEvent('kszk-terraform-complete',{detail:{target}}));
+      for(const [id, prev] of tfPrevJobIds){
+        if(!currentJobIds.has(id) && prev.progress >= 0.95){
+          canvas.dispatchEvent(new CustomEvent('kszk-terraform-complete',{detail:{target: prev.target}}));
         }
       }
       tfPrevJobIds.clear();
-      for(const job of world.terraformJobs) tfPrevJobIds.set(job.id, job.target);
+      for(const job of world.terraformJobs) tfPrevJobIds.set(job.id, { target: job.target, progress: job.progress });
 
       // 作業者有無を判定（raise / lower 別に any-worker フラグ）
       const WORKER_R2 = 28;
