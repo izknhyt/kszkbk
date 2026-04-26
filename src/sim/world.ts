@@ -3264,13 +3264,21 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       const tLen = Math.max(1, Math.hypot(tdx, tdy));
       const nx = tdx / tLen;
       const ny = tdy / tLen;
+      // Σ-7-fix: 多点サンプリングで「進路上の最大勾配」を取る。
+      // bilinear 平滑化された 1 点 sampling だと 32px タイル境界の崖を見逃すため。
       const curElev = getElevation(c.pos.x, c.pos.y);
-      const fwdElev = getElevation(c.pos.x + nx * 20, c.pos.y + ny * 20);
-      const slope = Math.abs((fwdElev - curElev) / 20);
+      let maxSlope = 0, maxFwdElev = curElev;
+      for (let step = 8; step <= 32; step += 8) {
+        const ex = getElevation(c.pos.x + nx * step, c.pos.y + ny * step);
+        const localSlope = Math.abs((ex - curElev) / step);
+        if (localSlope > maxSlope) { maxSlope = localSlope; maxFwdElev = ex; }
+      }
+      const slope = maxSlope;
+      const fwdElev = maxFwdElev;
 
-      // Σ-7-fix: 崖（slope > 0.6）は本当に登れない。今 tick の移動を完全 reject + target を捨てる。
-      // courage 90+ の冒険家のみ slope 0.6-0.8 を強行突破できる（くそざこの中の挑戦者）。
-      const cliffLimit = c.params.courage >= 90 ? 0.8 : 0.6;
+      // Σ-7-fix: 崖（slope > 0.5）は本当に登れない。今 tick の移動を完全 reject + target を捨てる。
+      // courage 90+ の冒険家のみ slope 0.5-0.7 を強行突破できる（くそざこの中の挑戦者）。
+      const cliffLimit = c.params.courage >= 90 ? 0.7 : 0.5;
       if (slope > cliffLimit && fwdElev > curElev) {
         // 崖を登ろうとしてる → このティックの移動を取り消し + ターゲット破棄
         c.pos.x -= nx * c.speed * dt;

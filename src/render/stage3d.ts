@@ -236,38 +236,28 @@ const MAT_RGB: Record<string, [number,number,number]> = {
   rock: [0x7a/255,0x7a/255,0x7a/255],
   water:[0x4a/255,0x6b/255,0x9c/255],
 };
-// 標高別カラーランプ（5 段階）：低地から高地までグラデーション。
-// elev 0-20 = 深い緑、20-40 = 草緑、40-60 = 薄緑黄、60-80 = 茶、80-100 = 明るい灰
-const ELEV_RAMP: Array<[number,[number,number,number]]> = [
-  [  0, [0x35/255,0x60/255,0x30/255]],  // 深い緑（低地）
-  [ 20, [0x6b/255,0x9e/255,0x4a/255]],  // 草緑
-  [ 45, [0xa8/255,0xb8/255,0x60/255]],  // 薄緑黄（草原台地）
-  [ 65, [0xb0/255,0x88/255,0x4a/255]],  // 茶（土山腹）
-  [ 85, [0xc8/255,0xc4/255,0xb0/255]],  // 明るい灰（岩山頂）
-  [100, [0xe8/255,0xe4/255,0xd8/255]],  // ほぼ白（最高峰）
+// 標高別カラーバンド（5 段階の離散）：地図のように「N 段目」がハッキリ見える。
+// グラデーションだと色が連続的に変わるので「どこが高いか」直感的に読めなかった。
+// 各バンド内では同じ色 → エッジで切り替わる → プレイヤーが標高を「色の階段」として認識できる。
+const ELEV_BANDS: Array<{ max: number; rgb: [number,number,number] }> = [
+  { max: 18,  rgb: [0x35/255,0x60/255,0x30/255] },  // 深緑（低地・湿地）
+  { max: 38,  rgb: [0x68/255,0x95/255,0x44/255] },  // 草緑（平野）
+  { max: 58,  rgb: [0xa6/255,0xae/255,0x55/255] },  // 黄緑（丘陵）
+  { max: 76,  rgb: [0xae/255,0x82/255,0x46/255] },  // 茶（山腹）
+  { max: 100, rgb: [0xc8/255,0xc4/255,0xb0/255] },  // 灰岩（山頂）
 ];
 function rampColor(elev: number): [number,number,number] {
   const e = Math.max(0, Math.min(100, elev));
-  for (let i = 0; i < ELEV_RAMP.length - 1; i++) {
-    const [e0, c0] = ELEV_RAMP[i]!;
-    const [e1, c1] = ELEV_RAMP[i+1]!;
-    if (e <= e1) {
-      const t = (e - e0) / Math.max(0.001, e1 - e0);
-      return [
-        c0[0] + (c1[0] - c0[0]) * t,
-        c0[1] + (c1[1] - c0[1]) * t,
-        c0[2] + (c1[2] - c0[2]) * t,
-      ];
-    }
+  for (const band of ELEV_BANDS) {
+    if (e <= band.max) return band.rgb;
   }
-  return ELEV_RAMP[ELEV_RAMP.length - 1]![1];
+  return ELEV_BANDS[ELEV_BANDS.length - 1]!.rgb;
 }
 function tileRgb(mat: string, elev: number): [number,number,number] {
-  // ベースは標高 ramp、material は弱いブレンドで個性付け
+  // 標高バンドが主、material は 15% だけブレンド（rock タイルが灰寄り、sand が黄寄り 等の微調整）
   const r = rampColor(elev);
   const m = MAT_RGB[mat] ?? MAT_RGB['soil']!;
-  // material 30% / ramp 70% でブレンド（material バリエーションは残す）
-  return [r[0]*0.7 + m[0]*0.3, r[1]*0.7 + m[1]*0.3, r[2]*0.7 + m[2]*0.3];
+  return [r[0]*0.85 + m[0]*0.15, r[1]*0.85 + m[1]*0.15, r[2]*0.85 + m[2]*0.15];
 }
 
 // ============================================================
@@ -1375,11 +1365,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const cPts:number[]=[];
       for(let r2=0;r2<ROWS2;r2++) for(let c2=0;c2<COLS2;c2++){
         const e0=world.terrain[r2]![c2]!.elev;
-        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=19){
+        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=16){
           const x=(c2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ex)*ELEV_SCALE;
           cPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
         }}
-        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=19){
+        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=16){
           const z=(r2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ey)*ELEV_SCALE;
           cPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
         }}
@@ -1407,7 +1397,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(c2+1<COLS2){
           const ex=world.terrain[r2]![c2+1]!.elev;
           const cs = crossesContour(e0, ex);
-          if(cs!==null && Math.abs(e0-ex)<19){
+          if(cs!==null && Math.abs(e0-ex)<16){
             const x=(c2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
@@ -1416,7 +1406,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(r2+1<ROWS2){
           const ey=world.terrain[r2+1]![c2]!.elev;
           const cs = crossesContour(e0, ey);
-          if(cs!==null && Math.abs(e0-ey)<19){
+          if(cs!==null && Math.abs(e0-ey)<16){
             const z=(r2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
