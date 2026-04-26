@@ -38,7 +38,7 @@ export interface StageHandle {
 // ============================================================
 // 定数
 // ============================================================
-const ELEV_SCALE   = 5;    // elev (0-100) → Three.js Y (0-500)
+const ELEV_SCALE   = 9;    // elev (0-100) → Three.js Y (0-900)。高低差を強調して 3D 感を出す
 const BASE_H       = 1200; // zoomLevel=1 のカメラ高さ
 const CHIBI_W      = 48;
 const CHIBI_H      = 64;
@@ -145,6 +145,52 @@ const STATE_IDX = FURANA_STATE_IDX;
 // 飛行中（投げられて空中）は thrown_airborne で固定。
 const CHIBI_FLIGHT_IDX = 25;  // 26_thrown_airborne
 
+// 各ポーズの sprite scale 補正（PNG bbox 計測から逆算、scripts/measure_pose_bbox.mjs で生成）
+// baseline は 01-09 ポーズの平均（wRatio=0.875, hRatio=0.854）。
+// 新ポーズは 1024×1024 キャンバスに小さく描かれるので scale を上げて apparent size を揃える。
+const CHIBI_POSE_SCALE: Array<[number, number]> = [
+  [1.009, 0.978],  // 0  01_normal
+  [1.003, 0.979],  // 1  02_crying
+  [0.972, 0.975],  // 2  03_surprised
+  [1.000, 0.988],  // 3  04_angry
+  [0.995, 1.005],  // 4  05_sulking
+  [1.013, 0.978],  // 5  06_dizzy
+  [1.007, 1.003],  // 6  07_dirty
+  [0.996, 1.034],  // 7  08_sleepy
+  [1.006, 1.067],  // 8  09_dead
+  [1.336, 1.215],  // 9  10_walk_lean
+  [1.116, 1.352],  // 10 11_run_lean
+  [1.379, 1.038],  // 11 12_reach
+  [1.282, 1.105],  // 12 13_hold_stick
+  [1.366, 1.080],  // 13 14_cheeky_hips
+  [1.071, 1.129],  // 14 15_heavy_cry
+  [1.213, 1.514],  // 15 16_cower
+  [1.216, 1.132],  // 16 17_arms_up
+  [1.020, 1.540],  // 17 18_drown_flail
+  [1.151, 1.261],  // 18 19_knocked
+  [1.019, 1.543],  // 19 20_splat
+  [1.262, 1.128],  // 20 21_sit
+  [1.254, 1.054],  // 21 22_talk_gesture
+  [1.197, 1.053],  // 22 23_eat_drink
+  [1.266, 1.202],  // 23 24_work_carry
+  [1.312, 1.028],  // 24 25_grabbed
+  [1.172, 1.338],  // 25 26_thrown_airborne
+  [1.101, 1.095],  // 26 27_weather_suffering
+  [1.030, 1.451],  // 27 28_sleep_curl
+  [0.973, 1.793],  // 28 29_sleep_flat
+  [1.151, 1.126],  // 29 30_nap_sitting
+  [1.187, 1.105],  // 30 31_wake_up
+  [1.192, 1.045],  // 31 32_plead
+  [1.040, 1.101],  // 32 33_celebrate_jump
+  [1.067, 1.028],  // 33 34_sick_fever
+  [1.130, 1.129],  // 34 35_smoke_cough
+  [1.119, 1.458],  // 35 36_dig_scrape
+  [1.084, 1.306],  // 36 37_gather_pickup
+  [1.336, 1.057],  // 37 38_refuse_no
+  [1.210, 1.119],  // 38 39_search_look
+  [1.261, 1.197],  // 39 40_lonely_sit
+];
+
 // ちびわふ 40 ポーズ揃い（00_origin はマスター、in-game では使わない）
 // インデックスはファイル番号 -1（CHIBI_STATE_IDX の値と対応）
 const CHIBI_URLS = [
@@ -190,7 +236,9 @@ const MAT_RGB: Record<string, [number,number,number]> = {
 };
 function tileRgb(mat: string, elev: number): [number,number,number] {
   const b = MAT_RGB[mat] ?? MAT_RGB['soil']!;
-  const br = Math.min(1.4, 0.7 + elev * 0.003);
+  // 高低差を強調：低地は暗め（0.55）、高地は明るめ（1.45）。線形 + 軽い γ。
+  const t = Math.max(0, Math.min(1, elev / 100));
+  const br = 0.55 + t * 0.90;  // elev 0 → 0.55, elev 100 → 1.45
   return [Math.min(1,b[0]!*br), Math.min(1,b[1]!*br), Math.min(1,b[2]!*br)];
 }
 
@@ -675,9 +723,15 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   scene.add(seaMesh);
 
   // --- Σ-7-b: 動的水たまりタイル（waterLevel >=0.2 のタイル毎に配置）---
-  // 3 段階の深さで色分け（浅瀬/中/深）。3 個の InstancedMesh を使い分ける。
+  // 4 段階の深さで色分け（湿り/浅瀬/中/深）。4 個の InstancedMesh を使い分ける。
+  // 湿り（wl 0.05-0.2）は薄く、雨上がりのフェード演出にも使う。
+  // map: rippleTex で波紋アニメ、UV offset を時間で更新して「流れる」感じを出す。
+  // rippleTex 適用は後で（rippleTex 定義後に行う必要があるため、参照は draw() 内で）。
   const _waterTileGeo = new THREE.PlaneGeometry(TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE);
   _waterTileGeo.rotateX(-Math.PI/2);
+  const waterDampIM = new THREE.InstancedMesh(_waterTileGeo,
+    new THREE.MeshBasicMaterial({color:0x9fc4d8,transparent:true,opacity:0.22,depthWrite:false,side:THREE.DoubleSide}),
+    T_COLS*T_ROWS);
   const waterShallowIM = new THREE.InstancedMesh(_waterTileGeo,
     new THREE.MeshBasicMaterial({color:0x6aa5d0,transparent:true,opacity:0.45,depthWrite:false,side:THREE.DoubleSide}),
     T_COLS*T_ROWS);
@@ -687,8 +741,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const waterDeepIM = new THREE.InstancedMesh(_waterTileGeo,
     new THREE.MeshBasicMaterial({color:0x1f4c7a,transparent:true,opacity:0.72,depthWrite:false,side:THREE.DoubleSide}),
     T_COLS*T_ROWS);
-  waterShallowIM.count = 0; waterMidIM.count = 0; waterDeepIM.count = 0;
-  scene.add(waterShallowIM, waterMidIM, waterDeepIM);
+  waterDampIM.count = 0; waterShallowIM.count = 0; waterMidIM.count = 0; waterDeepIM.count = 0;
+  scene.add(waterDampIM, waterShallowIM, waterMidIM, waterDeepIM);
+  const waterIMs = [waterDampIM, waterShallowIM, waterMidIM, waterDeepIM];
 
   // --- Σ-7-b: 雨粒 LineSegments（雨天時のみ出現、frustum 内 300-500 本）---
   let rainLines: THREE.LineSegments | null = null;
@@ -734,6 +789,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   let wireLines: THREE.LineSegments|null = null;
   let cliffLines: THREE.LineSegments|null = null;
+  let contourLines: THREE.LineSegments|null = null;
 
   // オオカミビルボードテクスチャ（共有）
   const wolfTexture = wolfTex();
@@ -792,6 +848,28 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     return t;
   }
   const waterFlowTex=makeWaterFlowTex();
+
+  // Σ-7-b'/c' 動的水たまり用：柔らかい斜め波紋テクスチャ。
+  // alpha は sin で揺らぎ → UV scroll で「流れて見える」効果。
+  function makeRippleTex(): THREE.DataTexture {
+    const W=32, H=32;
+    const data=new Uint8Array(W*H*4);
+    for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+      const v = Math.sin((x+y*0.7)*0.45) * 0.5 + 0.5;
+      const i=(y*W+x)*4;
+      data[i]=255; data[i+1]=255; data[i+2]=255;
+      data[i+3]=Math.floor(180 + v*75);  // 180-255（base 残しつつ波で揺らぐ）
+    }
+    const t=new THREE.DataTexture(data,W,H); t.needsUpdate=true;
+    t.wrapS=t.wrapT=THREE.RepeatWrapping;
+    return t;
+  }
+  const rippleTex=makeRippleTex();
+  // 4 つの水深 IM 全部に ripple texture を適用（各 IM の material を変更）
+  for(const im of waterIMs){
+    (im.material as THREE.MeshBasicMaterial).map = rippleTex;
+    (im.material as THREE.MeshBasicMaterial).needsUpdate = true;
+  }
   // feature id → UV scroll mesh（channel の水流アニメ）
   const channelFlowMeshes = new Map<string, THREE.Mesh>();
   // feature id → ripple mesh（water の波紋）
@@ -1019,15 +1097,16 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // 死因 → 死体ポーズ index
   // 溺死系 = 18_drown_flail / 投げ・落下系 = 19_knocked / 静かな死 = 09_dead /
   // それ以外（事故・災害） = 20_splat
-  function pickCorpseTex(causeId: string|null, texs: THREE.Texture[]): THREE.Texture {
-    if (!causeId) return texs[8]??texs[0]!;
+  function pickCorpseTex(causeId: string|null, texs: THREE.Texture[]): {tex: THREE.Texture, idx: number} {
+    const pick = (idx: number) => ({tex: texs[idx] ?? texs[8] ?? texs[0]!, idx});
+    if (!causeId) return pick(8);
     if (causeId==='drown_pond' || causeId==='flood_drown' || causeId==='river_swept' || causeId==='kamisama_drown')
-      return texs[17]??texs[8]??texs[0]!;  // 18_drown_flail
+      return pick(17);  // 18_drown_flail
     if (causeId==='hunger_death' || causeId==='fatigue_death' || causeId==='roushuai' || causeId==='mama_lost' || causeId==='fled_to_exhaustion')
-      return texs[8]??texs[0]!;             // 09_dead（RIP、静かな死）
+      return pick(8);   // 09_dead（RIP、静かな死）
     if (causeId==='cliff_fall' || causeId==='slope_fall' || causeId==='kamisama_throw' || causeId==='kamisama_punch' || causeId==='landslide_crush')
-      return texs[18]??texs[8]??texs[0]!;  // 19_knocked
-    return texs[19]??texs[8]??texs[0]!;     // 20_splat（デフォ：くそざこ事故死）
+      return pick(18);  // 19_knocked
+    return pick(19);    // 20_splat（デフォ：くそざこ事故死）
   }
 
   function ensureMView(map: Map<number,MView>, id:number, state:ChibiState,
@@ -1046,19 +1125,29 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   }
 
   // syncSpriteState: poseOverride を渡せば state ではなくその index を使う（飛行中など）
+  // useScaleTable=true でちびわふ用 POSE_SCALE 補正を適用（NPC/Furana は使わない）。
   function syncSpriteState(v:MView, state:ChibiState, faceLeft:boolean, texs:THREE.Texture[],
                             stateIdx: Record<ChibiState, number> = STATE_IDX,
-                            poseOverride?: number){
+                            poseOverride?: number,
+                            useScaleTable: boolean = false){
     const targetKey = poseOverride!=null ? `_pose:${poseOverride}` : state;
+    let scaleX = 1, scaleY = 1;
+    if (useScaleTable) {
+      const idx = poseOverride!=null ? poseOverride : stateIdx[state];
+      const sc = CHIBI_POSE_SCALE[idx];
+      if (sc) { scaleX = sc[0]; scaleY = sc[1]; }
+    }
     if(v.lastState!==targetKey){
       const idx = poseOverride!=null ? poseOverride : stateIdx[state];
       const tex=texs[idx]??texs[0]!;
       (v.mesh.material as THREE.MeshBasicMaterial).map=tex;
       (v.mesh.material as THREE.MeshBasicMaterial).needsUpdate=true;
       v.lastState=targetKey;
-    }
-    if(v.lastFace!==faceLeft){
-      v.mesh.scale.x=faceLeft?-1:1;
+      // pose 変化時にスケールも更新
+      v.mesh.scale.set(scaleX * (faceLeft?-1:1), scaleY, 1);
+      v.lastFace=faceLeft;
+    } else if(v.lastFace!==faceLeft){
+      v.mesh.scale.x = scaleX * (faceLeft?-1:1);
       v.lastFace=faceLeft;
     }
   }
@@ -1116,6 +1205,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     const now=performance.now();
     const dt=Math.min(0.1,(now-prevDrawMs)/1000);
     prevDrawMs=now; frameCount++;
+
+    // Σ-7-b'：水紋テクスチャを毎フレーム UV scroll（流れて見える効果）。
+    // 速度はゆっくり（0.04/sec 南東方向）、深い水ほど少し遅め。
+    rippleTex.offset.x -= dt * 0.04;
+    rippleTex.offset.y -= dt * 0.025;
 
     applyKeyPan(dt);
     currentDifficulty = world.difficulty;
@@ -1217,6 +1311,45 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         cliffLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x1a1a1a}));
         scene.add(cliffLines);
       }
+
+      // 等高線（20 単位、隣接タイルの elev が 20 の倍数を跨いだら線を引く）
+      // 高低差の視認性を上げる地図的な等高線。茶色細線で控えめに。
+      if(contourLines){ scene.remove(contourLines); contourLines.geometry.dispose(); contourLines=null; }
+      const conPts:number[]=[];
+      const CONTOUR_STEP = 20;
+      const crossesContour = (a: number, b: number): number | null => {
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        const firstStep = Math.ceil(lo / CONTOUR_STEP) * CONTOUR_STEP;
+        if (firstStep > hi) return null;
+        return firstStep;
+      };
+      for(let r2=0;r2<ROWS2;r2++) for(let c2=0;c2<COLS2;c2++){
+        const e0=world.terrain[r2]![c2]!.elev;
+        if(c2+1<COLS2){
+          const ex=world.terrain[r2]![c2+1]!.elev;
+          const cs = crossesContour(e0, ex);
+          if(cs!==null && Math.abs(e0-ex)<15){
+            const x=(c2+1)*TERRAIN_TILE_SIZE;
+            const ya=cs*ELEV_SCALE+0.3;
+            conPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
+          }
+        }
+        if(r2+1<ROWS2){
+          const ey=world.terrain[r2+1]![c2]!.elev;
+          const cs = crossesContour(e0, ey);
+          if(cs!==null && Math.abs(e0-ey)<15){
+            const z=(r2+1)*TERRAIN_TILE_SIZE;
+            const ya=cs*ELEV_SCALE+0.3;
+            conPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
+          }
+        }
+      }
+      if(conPts.length){
+        const lg=new THREE.BufferGeometry();
+        lg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(conPts),3));
+        contourLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x6a4a2a,transparent:true,opacity:0.35}));
+        scene.add(contourLines);
+      }
     }
 
     // ---- Terraform オーバーレイ（InstancedMesh + 点滅 + 境界アウトライン）----
@@ -1282,14 +1415,14 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
     }
 
-    // ---- Σ-7-b: 水たまりタイル可視化（30フレームごと、3 段階深さ）----
+    // ---- Σ-7-b: 水たまりタイル可視化（30フレームごと、4 段階深さ）----
     if(frameCount%30===0){
       const ROWS=world.terrain.length, COLS=world.terrain[0]?.length??0;
-      let sIdx=0, mIdx=0, dIdx=0;
+      let dampIdx=0, sIdx=0, mIdx=0, dIdx=0;
       for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
         const tile=world.terrain[r]![c]!;
         const wl=tile.waterLevel;
-        if(wl<0.2) continue;
+        if(wl<0.05) continue;  // 0.2 → 0.05：湿り tile も描画して雨上がりがふわっと消える
         const cx=(c+0.5)*TERRAIN_TILE_SIZE, cy=(r+0.5)*TERRAIN_TILE_SIZE;
         // 海タイルは恒久 seaMesh で描画済み → 動的レイヤーから除外
         if(isSeaAt(cx,cy)) continue;
@@ -1297,11 +1430,13 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         const y = elevAt(world.terrain,cx,cy) + 0.5 + wl*1.5;
         _imDummy.position.set(cx, y, cy);
         _imDummy.updateMatrix();
-        if(wl<0.4)      waterShallowIM.setMatrixAt(sIdx++,_imDummy.matrix);
-        else if(wl<0.7) waterMidIM.setMatrixAt(mIdx++,_imDummy.matrix);
-        else            waterDeepIM.setMatrixAt(dIdx++,_imDummy.matrix);
+        if(wl<0.20)      waterDampIM.setMatrixAt(dampIdx++,_imDummy.matrix);
+        else if(wl<0.40) waterShallowIM.setMatrixAt(sIdx++,_imDummy.matrix);
+        else if(wl<0.70) waterMidIM.setMatrixAt(mIdx++,_imDummy.matrix);
+        else             waterDeepIM.setMatrixAt(dIdx++,_imDummy.matrix);
       }
-      waterShallowIM.count=sIdx; waterMidIM.count=mIdx; waterDeepIM.count=dIdx;
+      waterDampIM.count=dampIdx; waterShallowIM.count=sIdx; waterMidIM.count=mIdx; waterDeepIM.count=dIdx;
+      waterDampIM.instanceMatrix.needsUpdate=true;
       waterShallowIM.instanceMatrix.needsUpdate=true;
       waterMidIM.instanceMatrix.needsUpdate=true;
       waterDeepIM.instanceMatrix.needsUpdate=true;
@@ -1517,10 +1652,13 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     rmStale(corpseViews,cids,corpseGrp);
     for(const c of world.corpses){
       if(!corpseViews.has(c.id)){
-        const tex=pickCorpseTex(c.deathCauseId, chibiTexs);
+        const {tex, idx} = pickCorpseTex(c.deathCauseId, chibiTexs);
         const m=spriteMesh(CHIBI_W*0.85,CHIBI_H*0.85,tex);
         (m.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
         (m.material as THREE.MeshBasicMaterial).opacity=0.8;
+        // pose 補正を死体にも適用（不揃いに見えるのを防ぐ）
+        const sc = CHIBI_POSE_SCALE[idx];
+        if (sc) m.scale.set(sc[0], sc[1], 1);
         corpseGrp.add(m); corpseViews.set(c.id,m);
       }
       const m=corpseViews.get(c.id)!;
@@ -1535,7 +1673,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const v=ensureMView(chibiViews as Map<number,MView>,c.id,c.state,chibiTexs,chibiGrp,CHIBI_W,CHIBI_H,CHIBI_STATE_IDX);
       // 飛行中（投げられて空中）は thrown_airborne ポーズで上書き
       const poseOverride = c.flight ? CHIBI_FLIGHT_IDX : undefined;
-      syncSpriteState(v,c.state,c.faceLeft,chibiTexs,CHIBI_STATE_IDX,poseOverride);
+      syncSpriteState(v,c.state,c.faceLeft,chibiTexs,CHIBI_STATE_IDX,poseOverride,/*useScaleTable*/true);
       let wx=c.pos.x, wz=c.pos.y;
       if(ondo) wx+=Math.sin(world.timeSec*6+c.id*0.7)*8;
       const baseY=c.flight ? c.flight.posZ*ELEV_SCALE : elevAt(world.terrain,wx,wz);

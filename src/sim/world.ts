@@ -1480,13 +1480,14 @@ function rainIntensity(k: WeatherKind): number {
 }
 
 // 蒸発速度（/sec）— 晴天/heatwave で速く、雨天では蒸発しない
+// 数値は体感優先：clear で 0.5 wl が約 3 分、heatwave で約 1.5 分かけて減る
 function evapRate(k: WeatherKind): number {
   switch (k) {
-    case 'heatwave': return 0.008;
-    case 'clear':    return 0.004;
-    case 'cloudy':   return 0.002;
-    case 'fog':      return 0.0008;
-    case 'snow':     return 0.0005;
+    case 'heatwave': return 0.005;
+    case 'clear':    return 0.0025;
+    case 'cloudy':   return 0.0012;
+    case 'fog':      return 0.0005;
+    case 'snow':     return 0.0003;
     default:         return 0;  // 雨天時は蒸発しない
   }
 }
