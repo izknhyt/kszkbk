@@ -208,6 +208,10 @@ export interface WorldState {
   // --- Σ-3 地形シード ---------------------------------------------------
   // runId から派生。difficulty ごとに異なる地形プリセットを同一シードで再現可能。
   terrainSeed: number;
+  // --- Σ-7 水動力 -------------------------------------------------------
+  // 0.25 秒毎にフロー計算を行う duty cycle 用カウンタ（transient）。
+  // 雨/蒸発/吸収は毎 tick、downhill flow と feature キャッシュは 0.25s 毎。
+  hydroTimer: number;
 }
 
 // フリー配置障害物：陸地タイルのみ、フラナ拠点付近は除外。
@@ -1434,6 +1438,205 @@ export function updateTerrainStability(w: WorldState, dt: number): void {
 }
 
 // =========================================================================
+// Σ-7 タイル水動力（hydrology）
+//
+// TerrainTile.waterLevel (0-1) を雨/蒸発/吸収/downhill flow で動的更新する。
+// 雨で低地に水たまりが溜まり、水源 feature が湧水を供給し、水路 feature が
+// 流速を倍にする。海タイル（isSeaAt）は常に 1.0 固定。
+// 重い処理（蒸発・吸収・flow）は 0.25s 毎にまとめて実行。
+// =========================================================================
+
+// 降雨強度（/sec）— 雨の種類で雨水蓄積速度が変わる
+function rainIntensity(k: WeatherKind): number {
+  switch (k) {
+    case 'storm':      return 0.008;
+    case 'heavy_rain': return 0.0045;
+    case 'light_rain': return 0.0025;
+    default:           return 0;
+  }
+}
+
+// 蒸発速度（/sec）— 晴天/heatwave で速く、雨天では蒸発しない
+function evapRate(k: WeatherKind): number {
+  switch (k) {
+    case 'heatwave': return 0.008;
+    case 'clear':    return 0.004;
+    case 'cloudy':   return 0.002;
+    case 'fog':      return 0.0008;
+    case 'snow':     return 0.0005;
+    default:         return 0;  // 雨天時は蒸発しない
+  }
+}
+
+// 材質×標高別の吸収速度（/sec）— sand は早抜け、rock はほぼ溜まる
+function absorpRate(material: TerrainMaterial, elev: number): number {
+  if (material === 'sand') return 0.010;
+  if (material === 'rock') return 0.0005;
+  if (material === 'water') return 0;  // 水路タイル → 漏出なし
+  // soil / grass：標高で軽く変化
+  if (elev > 60) return 0.001;
+  if (elev > 40) return 0.003;
+  return 0.004;
+}
+
+// downhill flow 用の delta バッファ（毎回 alloc しない）
+let _hydroDelta: Float32Array | null = null;
+// 水源 feature 位置キャッシュ（tick 毎に張り直し、updateHydrology 内で使い回す）
+let _waterFeatTilesCache: { tick: number; tiles: Array<{ tx: number; ty: number }> } | null = null;
+// channel feature の cell index set（同上）
+let _channelTilesCache: { tick: number; set: Set<number> } | null = null;
+
+export function updateHydrology(w: WorldState, dt: number): void {
+  const terrain = w.terrain;
+  if (!terrain || terrain.length === 0) return;
+  const ROWS = terrain.length;
+  const COLS = terrain[0]!.length;
+
+  // --- 海/水路タイルは常時 1.0 固定（毎 tick 確認だけ）---
+  for (let r = 0; r < ROWS; r++) {
+    const row = terrain[r]!;
+    for (let c = 0; c < COLS; c++) {
+      const tile = row[c]!;
+      const cx = (c + 0.5) * TERRAIN_TILE_SIZE;
+      const cy = (r + 0.5) * TERRAIN_TILE_SIZE;
+      if (isSeaAt(cx, cy)) tile.waterLevel = 1.0;
+    }
+  }
+
+  // --- 降雨（毎 tick 積算）---
+  const rain = rainIntensity(w.weather.kind);
+  if (rain > 0) {
+    const add = rain * dt;
+    for (let r = 0; r < ROWS; r++) {
+      const row = terrain[r]!;
+      for (let c = 0; c < COLS; c++) {
+        const tile = row[c]!;
+        if (tile.material === 'rock' && tile.elev > 80) continue; // 岩肌は浸透せず流れる扱い
+        tile.waterLevel = Math.min(1.0, tile.waterLevel + add);
+      }
+    }
+  }
+
+  // --- 水源 feature が周囲タイルに継続供給（毎 tick）---
+  if (!_waterFeatTilesCache || _waterFeatTilesCache.tick !== w.tick) {
+    const tiles: Array<{ tx: number; ty: number }> = [];
+    for (const f of w.features) {
+      if (f.kind === 'water' && f.devLevel >= 2) {
+        tiles.push(worldToTile(f.pos.x, f.pos.y));
+      }
+    }
+    _waterFeatTilesCache = { tick: w.tick, tiles };
+  }
+  const supplyAdd = 0.05 * dt;
+  for (const { tx, ty } of _waterFeatTilesCache.tiles) {
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const nr = ty + dr, nc = tx + dc;
+        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
+        const tile = terrain[nr]![nc]!;
+        tile.waterLevel = Math.min(1.0, tile.waterLevel + supplyAdd);
+      }
+    }
+  }
+
+  // --- 0.25s 毎の重い処理（蒸発/吸収/downhill flow/mud 化）---
+  w.hydroTimer -= dt;
+  if (w.hydroTimer > 0) return;
+  w.hydroTimer = 0.25;
+  const flowDt = 0.25;
+
+  // channel タイル set 更新（流速 ×2 ブースト）
+  if (!_channelTilesCache || _channelTilesCache.tick !== w.tick) {
+    const set = new Set<number>();
+    for (const f of w.features) {
+      if (f.kind === 'channel' && f.devLevel >= 2) {
+        const { tx, ty } = worldToTile(f.pos.x, f.pos.y);
+        if (ty >= 0 && ty < ROWS && tx >= 0 && tx < COLS) {
+          set.add(ty * COLS + tx);
+        }
+      }
+    }
+    _channelTilesCache = { tick: w.tick, set };
+  }
+  const channelSet = _channelTilesCache.set;
+
+  // delta バッファ確保
+  const N = ROWS * COLS;
+  if (!_hydroDelta || _hydroDelta.length !== N) {
+    _hydroDelta = new Float32Array(N);
+  }
+  _hydroDelta.fill(0);
+
+  const eRate = evapRate(w.weather.kind);
+  const DIRS: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
+  for (let r = 0; r < ROWS; r++) {
+    const row = terrain[r]!;
+    for (let c = 0; c < COLS; c++) {
+      const tile = row[c]!;
+      const cx = (c + 0.5) * TERRAIN_TILE_SIZE;
+      const cy = (r + 0.5) * TERRAIN_TILE_SIZE;
+      if (isSeaAt(cx, cy)) continue;  // 海は処理スキップ（1.0 固定）
+
+      const wl = tile.waterLevel;
+      const idx = r * COLS + c;
+
+      // 蒸発（水源近傍は半減）
+      let eThis = eRate;
+      if (eThis > 0 && _waterFeatTilesCache!.tiles.length > 0) {
+        for (const wp of _waterFeatTilesCache!.tiles) {
+          if (Math.abs(wp.tx - c) <= 1 && Math.abs(wp.ty - r) <= 1) { eThis *= 0.5; break; }
+        }
+      }
+      // 吸収
+      const aThis = absorpRate(tile.material, tile.elev);
+      const loss = (eThis + aThis) * flowDt;
+      if (loss > 0) _hydroDelta[idx] -= Math.min(wl, loss);
+
+      if (wl < 0.01) continue;
+
+      // downhill flow：水面高さ (elev + wl×5) が隣より高ければ流す
+      const myLevel = tile.elev + wl * 5;
+      const flowBoost = channelSet.has(idx) ? 2.0 : 1.0;
+
+      for (const [dc, dr] of DIRS) {
+        const nc = c + dc, nr = r + dr;
+        if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
+        const nIdx = nr * COLS + nc;
+        const ntile = terrain[nr]![nc]!;
+        const nLevel = ntile.elev + ntile.waterLevel * 5;
+        if (nLevel >= myLevel) continue;
+
+        const diff = myLevel - nLevel;
+        const transfer = Math.min(wl * 0.3, diff * 0.08 * flowBoost * flowDt);
+        if (transfer > 0.0005) {
+          _hydroDelta[idx] -= transfer;
+          _hydroDelta[nIdx] += transfer;
+        }
+      }
+    }
+  }
+
+  // delta 適用 + mud 化判定
+  for (let r = 0; r < ROWS; r++) {
+    const row = terrain[r]!;
+    for (let c = 0; c < COLS; c++) {
+      const tile = row[c]!;
+      const cx = (c + 0.5) * TERRAIN_TILE_SIZE;
+      const cy = (r + 0.5) * TERRAIN_TILE_SIZE;
+      if (isSeaAt(cx, cy)) continue;
+      const idx = r * COLS + c;
+      tile.waterLevel = Math.max(0, Math.min(1.0, tile.waterLevel + _hydroDelta[idx]!));
+
+      // material 遷移：waterLevel 高い soil/sand → 'water' 判定にしない（描画で泥色に）。
+      // ここでは TerrainMaterial を切り替えず、render 側で waterLevel ベースで色付ける。
+      // 例外：waterLevel が 0.85+ で 'sand' は 'soil' に降格（湿った砂は泥）。
+      if (tile.waterLevel > 0.85 && tile.material === 'sand') tile.material = 'soil';
+    }
+  }
+}
+
+// =========================================================================
 // オオカミ襲撃（Ω-5）
 // 夜間のみ出現。map 端から湧き、野宿ちびわふを優先的に狩る。
 // 朝になると撤退。プレイヤーは左クリックで殴って追い払える。
@@ -1726,6 +1929,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     terrain,
     terrainSeed,
     terraformJobs: [],
+    hydroTimer: 0,
   };
 }
 
@@ -3792,6 +3996,7 @@ export function tickWorld(w: WorldState, dt: number) {
   applyFuranaLossPanic(w, dt);
   updateLabor(w, dt);
   computeWaterFlow(w);
+  updateHydrology(w, dt);
   updateInfra(w, dt);
   updateThunderstrike(w, dt);
   updateFloodZones(w, dt);
