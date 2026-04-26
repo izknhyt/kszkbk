@@ -8,13 +8,14 @@ export type SlotId = 1 | 2 | 3;
 
 const OLD_SINGLE_KEY = 'kszkbk:save:v1';
 const slotKey = (slot: SlotId) => `kszkbk:save:slot${slot}`;
-const CURRENT_VERSION = 12;
+const CURRENT_VERSION = 13;
 
 // v1-v8 の履歴は README 省略。v9：スロット制、runId/difficulty 追加
 // v10：weather / weatherForecast 追加
 // v11：Σ-2 タイル式ハイトマップ（terrain RLE + terraformJobs + soil リソース）
 // v12：Σ-3 terrainSeed（procedural ジェネレータ切り替え）
-type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+// v13：Σ-7 タイル水位を 0/10 binary → 0-100 細粒度化（雨/蒸発/flow を persist）
+type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
 
 // =========================================================================
 // Σ-2 地形 RLE 圧縮ユーティリティ
@@ -48,7 +49,9 @@ interface TerrainSave {
   elevRle: Array<[number, number]>;  // round(elev)
   matRle: Array<[number, number]>;   // MAT_CODES index
   stabRle: Array<[number, number]>;  // round(stability*100)
-  waterRle: Array<[number, number]>; // 0 or 10 (waterLevel*10 rounded)
+  // v12 以前：0 or 10（waterLevel * 10 rounded、binary 扱い）
+  // v13 以降：0-100（waterLevel * 100 rounded、細粒度）
+  waterRle: Array<[number, number]>;
 }
 
 function serializeTerrain(terrain: TerrainTile[][]): TerrainSave {
@@ -63,7 +66,8 @@ function serializeTerrain(terrain: TerrainTile[][]): TerrainSave {
       elevFlat.push(Math.round(tile.elev));
       matFlat.push(MAT_CODES.indexOf(tile.material));
       stabFlat.push(Math.round(tile.stability * 100));
-      waterFlat.push(tile.waterLevel >= 0.5 ? 10 : 0);
+      // Σ-7-e v13: 0-100 細粒度（waterLevel * 100 rounded）
+      waterFlat.push(Math.max(0, Math.min(100, Math.round(tile.waterLevel * 100))));
     }
   }
   return {
@@ -76,11 +80,14 @@ function serializeTerrain(terrain: TerrainTile[][]): TerrainSave {
   };
 }
 
-function deserializeTerrain(s: TerrainSave): TerrainTile[][] {
+// v12 以前は water 値が 0/10 (binary)、v13 以降は 0-100 (細粒度)。
+// version 引数で除算スケールを切り替える。
+function deserializeTerrain(s: TerrainSave, version: number): TerrainTile[][] {
   const elevFlat = rleDecode(s.elevRle);
   const matFlat = rleDecode(s.matRle);
   const stabFlat = rleDecode(s.stabRle);
   const waterFlat = rleDecode(s.waterRle);
+  const waterScale = version >= 13 ? 100 : 10;
   const terrain: TerrainTile[][] = [];
   for (let row = 0; row < s.rows; row++) {
     const rowArr: TerrainTile[] = [];
@@ -90,7 +97,7 @@ function deserializeTerrain(s: TerrainSave): TerrainTile[][] {
         elev: elevFlat[idx] ?? 0,
         material: MAT_CODES[matFlat[idx] ?? 0] ?? 'grass',
         stability: (stabFlat[idx] ?? 100) / 100,
-        waterLevel: (waterFlat[idx] ?? 0) / 10,
+        waterLevel: (waterFlat[idx] ?? 0) / waterScale,
         buryTimer: 0,
       });
     }
@@ -230,7 +237,7 @@ export function load(w: WorldState, slot: SlotId): boolean {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw) as SaveData;
-    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(data.version)) return false;
+    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(data.version)) return false;
     if (data.runId) w.runId = data.runId;
     if (typeof data.runStartedAtMs === 'number') w.runStartedAtMs = data.runStartedAtMs;
     if (data.difficulty) w.difficulty = data.difficulty;
@@ -262,7 +269,7 @@ export function load(w: WorldState, slot: SlotId): boolean {
     if (typeof data.wolvesKilled === 'number') w.wolvesKilled = data.wolvesKilled;
     // v11+: 地形。旧セーブは ensurePlots で procedural 再生成されるので null のままでよい
     if (data.terrain && data.terrain.cols === TERRAIN_COLS && data.terrain.rows === TERRAIN_ROWS) {
-      w.terrain = deserializeTerrain(data.terrain);
+      w.terrain = deserializeTerrain(data.terrain, data.version);
       activateTerrain(w.terrain);
     }
     if (Array.isArray(data.terraformJobs)) w.terraformJobs = data.terraformJobs;

@@ -260,7 +260,7 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
         const tc = Math.max(0, Math.min(COLS - 1, Math.floor(newTarget.x / TILE)));
         const tr = Math.max(0, Math.min(ROWS - 1, Math.floor(newTarget.y / TILE)));
         const wl = env.terrain[tr]?.[tc]?.waterLevel ?? 0;
-        if (wl < 0.4) break;
+        if (wl < 0.35) break;
         // 深い → 別座標で再抽選
         newTarget = {
           x: margin + Math.random() * (bounds.w - margin * 2),

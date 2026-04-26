@@ -1462,12 +1462,13 @@ export function updateTerrainStability(w: WorldState, dt: number): void {
 // 重い処理（蒸発・吸収・flow）は 0.25s 毎にまとめて実行。
 // =========================================================================
 
-// 降雨強度（/sec）— 雨の種類で雨水蓄積速度が変わる
+// 降雨強度（/sec）— 雨の種類で雨水蓄積速度が変わる。
+// storm は嵐相当でやや過剰、低地に水たまりが急速に発達する。
 function rainIntensity(k: WeatherKind): number {
   switch (k) {
-    case 'storm':      return 0.008;
-    case 'heavy_rain': return 0.0045;
-    case 'light_rain': return 0.0025;
+    case 'storm':      return 0.025;
+    case 'heavy_rain': return 0.012;
+    case 'light_rain': return 0.005;
     default:           return 0;
   }
 }
@@ -1612,8 +1613,11 @@ export function updateHydrology(w: WorldState, dt: number): void {
       if (wl < 0.01) continue;
 
       // downhill flow：水面高さ (elev + wl×5) が隣より高ければ流す
+      // 全体の outflow を wl の 30% に制限（タイル丸ごと流れて水たまりが消える事を防ぐ）
       const myLevel = tile.elev + wl * 5;
       const flowBoost = channelSet.has(idx) ? 2.0 : 1.0;
+      const maxOutflow = wl * 0.30;
+      let outAcc = 0;
 
       for (const [dc, dr] of DIRS) {
         const nc = c + dc, nr = r + dr;
@@ -1624,10 +1628,12 @@ export function updateHydrology(w: WorldState, dt: number): void {
         if (nLevel >= myLevel) continue;
 
         const diff = myLevel - nLevel;
-        const transfer = Math.min(wl * 0.3, diff * 0.08 * flowBoost * flowDt);
+        let transfer = diff * 0.06 * flowBoost * flowDt;
+        if (outAcc + transfer > maxOutflow) transfer = Math.max(0, maxOutflow - outAcc);
         if (transfer > 0.0005) {
           _hydroDelta[idx] -= transfer;
           _hydroDelta[nIdx] += transfer;
+          outAcc += transfer;
         }
       }
     }
@@ -2819,15 +2825,18 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   if (c.ageSec >= 5 && !c.flight && c.state !== 'sleep' && c.state !== 'dead') {
     const { tx, ty } = worldToTile(c.pos.x, c.pos.y);
     const tile = w.terrain[ty]?.[tx];
-    if (tile && tile.waterLevel >= 0.5 && !isSeaAt(c.pos.x, c.pos.y)) {
-      // 浅い場合は水を踏んだバブル（10% per second）
-      if (tile.waterLevel < 0.6 && Math.random() < dt * 0.10) {
+    if (tile && tile.waterLevel >= 0.30 && !isSeaAt(c.pos.x, c.pos.y)) {
+      // 浅い帯（0.30-0.40）：水を踏んだバブル（10% per second）
+      if (tile.waterLevel < 0.40 && Math.random() < dt * 0.10) {
         spawnBubble(w.bubbles, c.pos, pickWaterSteppedLine(), 'speech', 1.2);
       }
-      // 深い水たまり：勇気が低いほど溺れる（0.6+ で 0.003-0.012/sec）
-      if (tile.waterLevel >= 0.6) {
+      // 深い水たまり（0.4+）：勇気が低いほど溺れる
+      // chance = dt * 0.004 * (wl-0.3)^2 * 25 * courageFactor
+      // wl=0.4 → 0.0001/sec * cf, wl=0.5 → 0.001 * cf, wl=0.7 → 0.0064 * cf, wl=1.0 → 0.024 * cf
+      if (tile.waterLevel >= 0.40) {
         const courageFactor = Math.max(0, (60 - c.params.courage) / 60); // courage 0=1.0, 60+=0
-        const drownChance = dt * 0.003 * (1 + tile.waterLevel * 1.5) * courageFactor;
+        const depth = tile.waterLevel - 0.3;
+        const drownChance = dt * 0.004 * depth * depth * 25 * courageFactor;
         if (Math.random() < drownChance) {
           spawnBubble(w.bubbles, c.pos, pickDrownLastWords(), 'speech', 1.5);
           pushLife(c, Math.floor(c.ageSec), '水たまりに沈んでしまった');
