@@ -254,12 +254,29 @@ git push origin --delete <branch-name>
 
 詳細は CLAUDE.md「完了フェーズ → Σ-5 〜 Σ-6-UI」参照。
 
+### ✅ 完了：Σ-7 タイル水動力 + 粗相ボコ（2026-04-26、`claude/sigma-7-v2-main`）
+
+「ちゃんとした水の概念がほしい、雨が降ったら低地に水溜まる、川や沼ができる」
+「おしっこうんこもらしたやつは棒で殴られる」要望を反映：
+
+- **Σ-7-a 〜 e**：tile.waterLevel を雨/蒸発/吸収/downhill flow で動的化、
+  3D 水たまり（深さ別 InstancedMesh 3 段）+ 雨粒、water spring 供給 + channel
+  flow ×2 ブースト、雨水で隣接 farm が watered（雨後の自然農業）、drown_pond
+  死因（waterLevel ≥0.4 で courage 依存、ageSec<5 除外）、save v13 細粒度化。
+- **Σ-7-f**：'おしっこもらし'/'うんこもらし' flavor、おしっこ時に足元タイル +0.2、
+  bo_suki/ikusa を 60% 優先 striker、ココン 70% 参戦（機嫌 +8）、フラナ 50% 叱り、
+  目撃者 60% ドン引き、10% で rifujin_boko 死。
+
+**経緯**：先に Sonnet `claude/sigma-7-main` で実装したが古い base（67b75c2）から
+分岐していて Pixi `stage.ts`/CONFIG.DRY_Y_LIMIT/別 waterGrid を使った設計だった
+ので merge 不可。監督が hybrid cherry-pick で本流ベースに再実装（3-4h、tile.waterLevel
++ stage3d.ts + isSeaAt）。設計とセリフは Sonnet 案を流用。
+
 ### 🚧 次の選択肢（優先度順）
 
 | 候補 | 内容 | 規模 | 推奨理由 |
 |---|---|---|---|
 | **Σ-6 歩行アニメ** | 既存 9 ポーズから walk_a/b/c atlas、0.3 秒切替 | 1 週 | Σ-5 で労働が目に見えるようになった今、歩行アニメ追加でインパクト最大化 |
-| **Σ-6 水動力システム**（旧計画） | tile waterLevel に rain 蓄積 + 高低差で流下 + 盆地に水溜まり + 溺死 | 1.5-2 週 | 地形 + 天候 + 死因が連動する大技、潮汐/火災とも相性 |
 | **Ω-12 神罰** | 隕石 / 雷撃でストレス発散。3D の煙・爆発 FX 流用 | 1 週 | プレイヤー側の楽しみが増える、3D 映え |
 | **Ω-12 潮汐** | Σ-3 島地形向け、海面周期 ±、取り残され溺死 | 1 週 | 島難度の体験を厚くする（Σ-6 水動力後なら実装コスト下がる） |
 | **② 病気＆集団感染** | 咳→伝染→パンデミック、温泉 / 薬草で治療 | 2 週 | 因果連鎖デザインの強化 |
@@ -286,6 +303,7 @@ git push origin --delete <branch-name>
 
 ## 更新履歴
 
+- 2026-04-26：Σ-7 タイル水動力 + 粗相ボコ完了（`claude/sigma-7-v2-main`、監督 hybrid cherry-pick）。Sonnet `claude/sigma-7-main` は base 古い問題で破棄。§6 完了サマリに Σ-7 セクション追加、Σ-6 水動力候補を削除
 - 2026-04-24：Σ-6-UI 完了（HUD 全面 overhaul：カテゴリタブ + ツールチップ + 警告 + trend + 天気予報 + ショートカット）。§6 完了サマリを 7 段階に更新
 - 2026-04-23：Σ-5-g 完了（茂み自然再生、director patch）。§6 完了サマリを 6 段階一括表記に更新
 - 2026-04-23：Σ-5-f 完了（terraform 視認強化 + 資源底上げ + 解体返金 80%）・建設キャンセル機能 commit。§6 完了サマリを 5 段階一括表記に更新

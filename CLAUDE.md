@@ -242,10 +242,22 @@ public/
 - 精錬所 `kiln`：stone×2 → brick×1（Ω-7 P2）
 - 牧場 `pasture`：wool/sec 生産、織機 `loom`：wool→cloth 変換（Ω-7 P3）
 
+### Σ-7 タイル水動力（hydrology）
+- `updateHydrology(w, dt)` が `TerrainTile.waterLevel` を雨/蒸発/吸収/downhill flow で動的更新
+- 雨で低地に水たまり、storm で 0.025/sec の蓄積（heavy_rain 0.012、light_rain 0.005）
+- 水源 feature は周囲 3×3 タイルに 0.05/sec 供給、channel feature は flow ×2 ブースト
+- 0.25s 毎のフロー計算 + 毎 tick の雨/蒸発、`hydroTimer` で duty cycle
+- 雨水/自然水で隣接タイル waterLevel ≥0.3 → farm `wateredByTile` で食料生産（雨後の自然農業）
+- 水たまり溺死 `drown_pond`：waterLevel ≥0.5 で courage 依存の確率溺死、新生児（ageSec<5）除外
+- ちびわふは `wanderStep` で waterLevel ≥0.35 を回避（courage ≥70 / hunger >70 / fatigue >70 で無効）
+- 描画：`stage3d.ts` の waterShallow/Mid/Deep の 3 InstancedMesh、雨粒 LineSegments
+- 粗相ボコ機構（Σ-7-f）：'おしっこもらし'/'うんこもらし' flavor → 35% で bo_suki/ikusa/ココンが棒で殴る、10% で `rifujin_boko` 死
+
 ### セーブ
-3 スロット、起動時にスタート画面で選択 or 新規 + 難度選択。version 12。
-保存対象：meta（runId/difficulty）、points、統計、buildings、features、obstacles、resources、weather、**terrain（RLE 圧縮）**、**terrainSeed**、**terraformJobs**。
+3 スロット、起動時にスタート画面で選択 or 新規 + 難度選択。**version 13**。
+保存対象：meta（runId/difficulty）、points、統計、buildings、features、obstacles、resources、weather、**terrain（RLE 圧縮、Σ-7 で waterLevel 細粒度化）**、**terrainSeed**、**terraformJobs**。
 **chibis / npcs は persist しない**（毎ロード再生成）。
+v12 セーブは waterLevel 0/10 binary を 0/1.0 として読み込む後方互換あり。
 
 ## コミット規約
 
@@ -402,7 +414,26 @@ https://claude.ai/code/session_XXXXXX
 **変更範囲**：index.html / src/main.ts / src/render/ui.ts / src/style.css のみ。
 **sim/ / types.ts / save.ts / stage3d.ts は一切無変更**（UI 層だけの純粋な overhaul）。
 
-### ロードマップ v2（地形・3D 化）【Σ-5 〜 Σ-6-UI まで完了】
+#### ✅ Σ-7 タイル水動力 + 粗相ボコ（2026-04-26、`claude/sigma-7-v2-main` で監督手作業）
+
+| Phase | 内容 | 主な変更 |
+|---|---|---|
+| Σ-7-a | hydrology core：`updateHydrology(w,dt)` 新設、tile.waterLevel に雨/蒸発/吸収/downhill flow を 0.25s 毎に適用 | sim/world.ts +205 行 |
+| Σ-7-b | 3D 水たまりタイル（waterShallow/Mid/Deep の 3 InstancedMesh、深さ別色）+ 雨粒 LineSegments | render/stage3d.ts +78 行 |
+| Σ-7-c | farm の灌漑判定拡張：隣接タイル waterLevel ≥0.3 で `wateredByTile` 扱い、水色リング表示 | world.ts/stage3d.ts/types.ts |
+| Σ-7-d | drown_pond 死因 + ちびわふ水回避（courage <70 で waterLevel ≥0.35 を避ける）+ 水際セリフ 3 種 | types/deaths/chats/world/chibiwafu |
+| Σ-7-e | バランス：storm rain 0.025/sec、流速 wl×30%/0.25s 上限、drown 二次曲線 + save v13 細粒度 waterLevel persist | world.ts / save.ts |
+| Σ-7-f | 粗相ボコ：'おしっこもらし'/'うんこもらし' flavor、bo_suki/ikusa/ココン参戦、フラナ叱り、目撃者ドン引き、10% で rifujin_boko 死 | flavorBehaviors/flavorTraits/world/chats |
+| docs | CLAUDE.md / HANDOFF.md 更新 | docs |
+
+**経緯**：先に `claude/sigma-7-main`（Sonnet）で実装したが、ベースが 67b75c2（Σ-2.5/3/4/5/6 全部入る前）で stage.ts (Pixi) を編集していたためマージ不可。
+監督が hybrid cherry-pick として、設計・セリフを参照しつつ idle-village 最新ベースで再実装した。
+
+**追加された FeatureKind 拡張**：`Feature.wateredByTile`（transient、HUD 用）
+**追加された死因**：`drown_pond`
+**追加された flavor**：`おしっこもらし` / `うんこもらし`（FLAVOR_TRAITS、MORASHI_FLAVORS Set）
+
+### ロードマップ v2（地形・3D 化）【Σ-5 〜 Σ-7 まで完了】
 
 **方針**：Σ-0〜Σ-6-UI で 3D 地形・描画基盤 + 開発ゲーム体感（労働 AI / feature 3D 化 /
 HUD 進捗 / 狼 flee）+ 建設ゲームループ（数値 pt + 事故ペナルティ + 複数人ボーナス）+
