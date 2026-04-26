@@ -729,21 +729,37 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // rippleTex 適用は後で（rippleTex 定義後に行う必要があるため、参照は draw() 内で）。
   const _waterTileGeo = new THREE.PlaneGeometry(TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE);
   _waterTileGeo.rotateX(-Math.PI/2);
+  // 色彩度+20%、opacity 強化で水っぽさアップ
   const waterDampIM = new THREE.InstancedMesh(_waterTileGeo,
-    new THREE.MeshBasicMaterial({color:0x9fc4d8,transparent:true,opacity:0.22,depthWrite:false,side:THREE.DoubleSide}),
+    new THREE.MeshBasicMaterial({color:0x8fc8e8,transparent:true,opacity:0.35,depthWrite:false,side:THREE.DoubleSide}),
     T_COLS*T_ROWS);
   const waterShallowIM = new THREE.InstancedMesh(_waterTileGeo,
-    new THREE.MeshBasicMaterial({color:0x6aa5d0,transparent:true,opacity:0.45,depthWrite:false,side:THREE.DoubleSide}),
+    new THREE.MeshBasicMaterial({color:0x55b0e5,transparent:true,opacity:0.62,depthWrite:false,side:THREE.DoubleSide}),
     T_COLS*T_ROWS);
   const waterMidIM = new THREE.InstancedMesh(_waterTileGeo,
-    new THREE.MeshBasicMaterial({color:0x3a7aa8,transparent:true,opacity:0.60,depthWrite:false,side:THREE.DoubleSide}),
+    new THREE.MeshBasicMaterial({color:0x2a82c8,transparent:true,opacity:0.78,depthWrite:false,side:THREE.DoubleSide}),
     T_COLS*T_ROWS);
   const waterDeepIM = new THREE.InstancedMesh(_waterTileGeo,
-    new THREE.MeshBasicMaterial({color:0x1f4c7a,transparent:true,opacity:0.72,depthWrite:false,side:THREE.DoubleSide}),
+    new THREE.MeshBasicMaterial({color:0x1559a0,transparent:true,opacity:0.88,depthWrite:false,side:THREE.DoubleSide}),
     T_COLS*T_ROWS);
   waterDampIM.count = 0; waterShallowIM.count = 0; waterMidIM.count = 0; waterDeepIM.count = 0;
   scene.add(waterDampIM, waterShallowIM, waterMidIM, waterDeepIM);
   const waterIMs = [waterDampIM, waterShallowIM, waterMidIM, waterDeepIM];
+
+  // specular ハイライト：水面に sin(time) で揺らぐ白い斑点。深い水たまりだけ。
+  const _shimmerGeo = new THREE.PlaneGeometry(10, 10);
+  _shimmerGeo.rotateX(-Math.PI/2);
+  const shimmerIM = new THREE.InstancedMesh(
+    _shimmerGeo,
+    new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.55,depthWrite:false,side:THREE.DoubleSide}),
+    Math.floor(T_COLS*T_ROWS*0.5),
+  );
+  shimmerIM.count = 0;
+  scene.add(shimmerIM);
+
+  // foam edge：水たまり境界（隣が水じゃないタイル）の白い縁取り。LineSegments で描画。
+  let waterFoamLines: THREE.LineSegments | null = null;
+  const waterFoamMat = new THREE.LineBasicMaterial({color:0xeaf8ff,transparent:true,opacity:0.85});
 
   // --- Σ-7-b: 雨粒 LineSegments（雨天時のみ出現、frustum 内 300-500 本）---
   let rainLines: THREE.LineSegments | null = null;
@@ -1415,31 +1431,86 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
     }
 
-    // ---- Σ-7-b: 水たまりタイル可視化（30フレームごと、4 段階深さ）----
+    // ---- Σ-7-b: 水たまりタイル可視化（30フレームごと、4 段階深さ）+ shimmer + foam edge ----
     if(frameCount%30===0){
       const ROWS=world.terrain.length, COLS=world.terrain[0]?.length??0;
-      let dampIdx=0, sIdx=0, mIdx=0, dIdx=0;
+      let dampIdx=0, sIdx=0, mIdx=0, dIdx=0, shimmerIdx=0;
+      const foamPts: number[] = [];
+      const HS = TERRAIN_TILE_SIZE*0.5;
+      // 水タイルかどうかを判定するヘルパー（foam edge 用、isSeaAt と組合せ）
+      const isWaterTile = (rr: number, cc: number): boolean => {
+        if (rr<0||rr>=ROWS||cc<0||cc>=COLS) return false;
+        const t = world.terrain[rr]![cc]!;
+        if (t.waterLevel < 0.05) return false;
+        const tcx=(cc+0.5)*TERRAIN_TILE_SIZE, tcy=(rr+0.5)*TERRAIN_TILE_SIZE;
+        return !isSeaAt(tcx, tcy);
+      };
       for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
         const tile=world.terrain[r]![c]!;
         const wl=tile.waterLevel;
-        if(wl<0.05) continue;  // 0.2 → 0.05：湿り tile も描画して雨上がりがふわっと消える
+        if(wl<0.05) continue;
         const cx=(c+0.5)*TERRAIN_TILE_SIZE, cy=(r+0.5)*TERRAIN_TILE_SIZE;
-        // 海タイルは恒久 seaMesh で描画済み → 動的レイヤーから除外
         if(isSeaAt(cx,cy)) continue;
-        // 水位で Y を浮かせる：地表 + 0.5 + waterLevel*1.5
-        const y = elevAt(world.terrain,cx,cy) + 0.5 + wl*1.5;
+        const y = elevAt(world.terrain,cx,cy) + 1.5 + wl*4.5;
         _imDummy.position.set(cx, y, cy);
         _imDummy.updateMatrix();
         if(wl<0.20)      waterDampIM.setMatrixAt(dampIdx++,_imDummy.matrix);
         else if(wl<0.40) waterShallowIM.setMatrixAt(sIdx++,_imDummy.matrix);
         else if(wl<0.70) waterMidIM.setMatrixAt(mIdx++,_imDummy.matrix);
         else             waterDeepIM.setMatrixAt(dIdx++,_imDummy.matrix);
+
+        // specular shimmer：深め（wl>=0.25）かつ位相ハッシュで間引き（≒1/3）
+        if (wl >= 0.25 && ((r*7+c*13)%3 === 0)) {
+          const ox = ((r*23+c*7) % 17) - 8;
+          const oz = ((r*5+c*29) % 17) - 8;
+          _imDummy.position.set(cx+ox, y+0.8, cy+oz);
+          _imDummy.updateMatrix();
+          shimmerIM.setMatrixAt(shimmerIdx++, _imDummy.matrix);
+        }
+
+        // foam edge：上下左右の隣が水でないなら、その辺に白縁を引く
+        const e = wl >= 0.20;  // 湿りタイルは foam なし（shallow 以上のみ）
+        if (e) {
+          const top = y + 0.6;
+          // 北 (cy - HS)
+          if (!isWaterTile(r-1, c)) {
+            foamPts.push(cx-HS, top, cy-HS, cx+HS, top, cy-HS);
+          }
+          // 南 (cy + HS)
+          if (!isWaterTile(r+1, c)) {
+            foamPts.push(cx-HS, top, cy+HS, cx+HS, top, cy+HS);
+          }
+          // 西 (cx - HS)
+          if (!isWaterTile(r, c-1)) {
+            foamPts.push(cx-HS, top, cy-HS, cx-HS, top, cy+HS);
+          }
+          // 東 (cx + HS)
+          if (!isWaterTile(r, c+1)) {
+            foamPts.push(cx+HS, top, cy-HS, cx+HS, top, cy+HS);
+          }
+        }
       }
       waterDampIM.count=dampIdx; waterShallowIM.count=sIdx; waterMidIM.count=mIdx; waterDeepIM.count=dIdx;
       waterDampIM.instanceMatrix.needsUpdate=true;
       waterShallowIM.instanceMatrix.needsUpdate=true;
       waterMidIM.instanceMatrix.needsUpdate=true;
       waterDeepIM.instanceMatrix.needsUpdate=true;
+      shimmerIM.count=shimmerIdx;
+      shimmerIM.instanceMatrix.needsUpdate=true;
+
+      // foam LineSegments 更新
+      if (waterFoamLines){ scene.remove(waterFoamLines); waterFoamLines.geometry.dispose(); waterFoamLines=null; }
+      if (foamPts.length){
+        const fg=new THREE.BufferGeometry();
+        fg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(foamPts),3));
+        waterFoamLines=new THREE.LineSegments(fg, waterFoamMat);
+        scene.add(waterFoamLines);
+      }
+    }
+    // shimmer の opacity は毎フレーム sin で揺らす（フレームごと再計算なし）
+    {
+      const t = world.timeSec;
+      (shimmerIM.material as THREE.MeshBasicMaterial).opacity = 0.35 + Math.sin(t*2.0) * 0.20;
     }
 
     // ---- Σ-7-b: 雨粒（5フレームごと、雨天時のみ）----
