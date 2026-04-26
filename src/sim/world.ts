@@ -581,9 +581,23 @@ export function updateInfra(w: WorldState, dt: number) {
   for (const f of w.features) {
     if (f.kind !== 'farm') continue;
     if (f.devLevel < 2) continue; // 建設中は生産しない
-    const irrigated = wateredFeatures.some(
+    const featureIrrigated = wateredFeatures.some(
       (wf) => Math.hypot(wf.pos.x - f.pos.x, wf.pos.y - f.pos.y) <= FARM_IRRIGATION_RADIUS,
     );
+    // Σ-7-c: 雨水/自然水でも潤う。farm 中心タイル + 8 近傍に waterLevel >=0.3 があれば irrigated
+    let tileIrrigated = false;
+    if (!featureIrrigated) {
+      const { tx: ftx, ty: fty } = worldToTile(f.pos.x, f.pos.y);
+      outer: for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = fty + dr, nc = ftx + dc;
+          if (nr < 0 || nr >= TERRAIN_ROWS || nc < 0 || nc >= TERRAIN_COLS) continue;
+          if (w.terrain[nr]![nc]!.waterLevel >= 0.3) { tileIrrigated = true; break outer; }
+        }
+      }
+    }
+    f.wateredByTile = !featureIrrigated && tileIrrigated;
+    const irrigated = featureIrrigated || tileIrrigated;
     if (!irrigated) continue;
     // 井戸が近い farm は drought/snow でも 0.4 倍生産（耐災害ボーナス）
     let effectiveMul = weatherMul;

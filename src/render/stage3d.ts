@@ -403,6 +403,14 @@ function makeFeatureGroup(f: import('../types').Feature): THREE.Group {
         }
       }
       if(lv>=2) g.add(makeLvLabel(lv));
+      // Σ-7-c: 雨水/自然水で潤っている場合は水色リング
+      if(f.wateredByTile){
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(22,1.5,6,24),
+          new THREE.MeshBasicMaterial({color:0x88ccff,transparent:true,opacity:0.85,side:THREE.DoubleSide}));
+        ring.rotation.x=-Math.PI/2;
+        ring.position.y=8;
+        g.add(ring);
+      }
       break;
     }
     case 'path': {
@@ -1285,8 +1293,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(!fids.has(id)){ featGrp.remove(v.grp); featViews.delete(id); }
       }
       for(const f of world.features){
-        // キャッシュキー：id + devLevel + saturated（変化したら再構築）
-        const fkey=`${f.devLevel}:${f.saturated?1:0}`;
+        // キャッシュキー：id + devLevel + saturated + wateredByTile（変化したら再構築）
+        const fkey=`${f.devLevel}:${f.saturated?1:0}:${f.wateredByTile?1:0}`;
         const existing=featViews.get(f.id);
         if(!existing || existing.key!==fkey){
           if(existing){ featGrp.remove(existing.grp); }

@@ -207,6 +207,8 @@ export interface Feature {
   // 水理計算（transient: tick毎に再計算、保存不要）
   flow?: number;       // 現在の通水量 units/sec
   saturated?: boolean; // 許容量超過 → 氾濫中
+  // Σ-7-c: feature 経路ではなく雨水/自然水タイルで潤っているか（HUD アイコン表示用）
+  wateredByTile?: boolean;
 }
 
 // 氾濫セル（水路が溢れた場所から広がる洪水範囲）
