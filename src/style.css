@@ -286,10 +286,12 @@ html, body {
   cursor: pointer;
 }
 
-/* ミニマップ（右下、stage 右脇 HUD の外に置く） */
+/* ミニマップ（stage 右下、HUD の左隣に置く） */
+/* デスクトップ：HUD 幅 340px + 8px マージン = right: 348px */
+/* モバイル：1 カラムレイアウト（HUD が下にある）→ right: 8px */
 .minimap {
   position: fixed;
-  right: 8px;
+  right: 348px;
   bottom: 48px; /* action-bar の高さ分だけ上にずらす */
   width: 240px;
   height: 135px;
