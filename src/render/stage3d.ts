@@ -1291,7 +1291,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       case 'heavy_rain': renderer.setClearColor(0x4a5a6a); break;
       case 'fog':        renderer.setClearColor(0xc0c8cc); if(scene.fog instanceof THREE.Fog)(scene.fog as THREE.Fog).color.set(0xc0c8cc); (scene.fog as THREE.Fog).near=2000; break;
       case 'snow':       renderer.setClearColor(0xd0d8e8); break;
-      case 'heatwave':   renderer.setClearColor(0xff9a60); break;
+      case 'heatwave':   renderer.setClearColor(0xf2c878); break;  // やや薄めの黄昏色（前は 0xff9a60 でオレンジ強すぎ）
     }
 
     // キャラクタースプライトのティント（MeshBasicMaterial は手動で color 乗算）
@@ -1351,11 +1351,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const cPts:number[]=[];
       for(let r2=0;r2<ROWS2;r2++) for(let c2=0;c2<COLS2;c2++){
         const e0=world.terrain[r2]![c2]!.elev;
-        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=8){
+        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=14){
           const x=(c2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ex)*ELEV_SCALE;
           cPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
         }}
-        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=8){
+        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=14){
           const z=(r2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ey)*ELEV_SCALE;
           cPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
         }}
@@ -1371,7 +1371,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       // 高低差の視認性を上げる地図的な等高線。茶色細線で控えめに。
       if(contourLines){ scene.remove(contourLines); contourLines.geometry.dispose(); contourLines=null; }
       const conPts:number[]=[];
-      const CONTOUR_STEP = 20;
+      const CONTOUR_STEP = 25;  // 標高 25 単位毎の主要等高線
       const crossesContour = (a: number, b: number): number | null => {
         const lo = Math.min(a, b), hi = Math.max(a, b);
         const firstStep = Math.ceil(lo / CONTOUR_STEP) * CONTOUR_STEP;
@@ -1383,7 +1383,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(c2+1<COLS2){
           const ex=world.terrain[r2]![c2+1]!.elev;
           const cs = crossesContour(e0, ex);
-          if(cs!==null && Math.abs(e0-ex)<8){
+          if(cs!==null && Math.abs(e0-ex)<14){
             const x=(c2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
@@ -1392,7 +1392,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(r2+1<ROWS2){
           const ey=world.terrain[r2+1]![c2]!.elev;
           const cs = crossesContour(e0, ey);
-          if(cs!==null && Math.abs(e0-ey)<8){
+          if(cs!==null && Math.abs(e0-ey)<14){
             const z=(r2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
@@ -1402,7 +1402,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       if(conPts.length){
         const lg=new THREE.BufferGeometry();
         lg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(conPts),3));
-        contourLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x4a3018,transparent:true,opacity:0.55}));
+        // 白系の等高線（あらゆる地形色に対してハイコントラスト、地図的に見える）
+        contourLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0xfff5d8,transparent:true,opacity:0.55}));
         scene.add(contourLines);
       }
     }
