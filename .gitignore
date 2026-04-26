@@ -3,3 +3,5 @@ dist/
 .DS_Store
 *.log
 .vite/
+output/
+public/chibiwafu/*_processed_*.png
