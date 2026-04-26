@@ -225,8 +225,9 @@ const FURANA_URLS = [
 ];
 
 // ============================================================
-// 地形カラー
-// ============================================================
+// 地形カラー — 標高で色を「層別に」変える地図的アプローチ。
+// 低地は緑、中腹は薄い緑、高地は乾いた茶〜岩、頂上は明るい灰。
+// material は補正係数として軽く効かせる程度（rock は灰寄り、sand は黄寄り）。
 const MAT_RGB: Record<string, [number,number,number]> = {
   grass:[0x6b/255,0x9e/255,0x4a/255],
   soil: [0xa8/255,0x7a/255,0x4a/255],
@@ -234,12 +235,38 @@ const MAT_RGB: Record<string, [number,number,number]> = {
   rock: [0x7a/255,0x7a/255,0x7a/255],
   water:[0x4a/255,0x6b/255,0x9c/255],
 };
+// 標高別カラーランプ（5 段階）：低地から高地までグラデーション。
+// elev 0-20 = 深い緑、20-40 = 草緑、40-60 = 薄緑黄、60-80 = 茶、80-100 = 明るい灰
+const ELEV_RAMP: Array<[number,[number,number,number]]> = [
+  [  0, [0x35/255,0x60/255,0x30/255]],  // 深い緑（低地）
+  [ 20, [0x6b/255,0x9e/255,0x4a/255]],  // 草緑
+  [ 45, [0xa8/255,0xb8/255,0x60/255]],  // 薄緑黄（草原台地）
+  [ 65, [0xb0/255,0x88/255,0x4a/255]],  // 茶（土山腹）
+  [ 85, [0xc8/255,0xc4/255,0xb0/255]],  // 明るい灰（岩山頂）
+  [100, [0xe8/255,0xe4/255,0xd8/255]],  // ほぼ白（最高峰）
+];
+function rampColor(elev: number): [number,number,number] {
+  const e = Math.max(0, Math.min(100, elev));
+  for (let i = 0; i < ELEV_RAMP.length - 1; i++) {
+    const [e0, c0] = ELEV_RAMP[i]!;
+    const [e1, c1] = ELEV_RAMP[i+1]!;
+    if (e <= e1) {
+      const t = (e - e0) / Math.max(0.001, e1 - e0);
+      return [
+        c0[0] + (c1[0] - c0[0]) * t,
+        c0[1] + (c1[1] - c0[1]) * t,
+        c0[2] + (c1[2] - c0[2]) * t,
+      ];
+    }
+  }
+  return ELEV_RAMP[ELEV_RAMP.length - 1]![1];
+}
 function tileRgb(mat: string, elev: number): [number,number,number] {
-  const b = MAT_RGB[mat] ?? MAT_RGB['soil']!;
-  // 高低差を強調：低地は暗め（0.55）、高地は明るめ（1.45）。線形 + 軽い γ。
-  const t = Math.max(0, Math.min(1, elev / 100));
-  const br = 0.55 + t * 0.90;  // elev 0 → 0.55, elev 100 → 1.45
-  return [Math.min(1,b[0]!*br), Math.min(1,b[1]!*br), Math.min(1,b[2]!*br)];
+  // ベースは標高 ramp、material は弱いブレンドで個性付け
+  const r = rampColor(elev);
+  const m = MAT_RGB[mat] ?? MAT_RGB['soil']!;
+  // material 30% / ramp 70% でブレンド（material バリエーションは残す）
+  return [r[0]*0.7 + m[0]*0.3, r[1]*0.7 + m[1]*0.3, r[2]*0.7 + m[2]*0.3];
 }
 
 // ============================================================
@@ -314,8 +341,10 @@ function refreshTerrainGeo(geo: THREE.BufferGeometry, terrain: import('../types'
 // Toon グラジェントマップ（4段階）
 // ============================================================
 function makeGradMap(): THREE.DataTexture {
-  const d = new Uint8Array([70,130,185,255]);
-  const t = new THREE.DataTexture(d,4,1,THREE.RedFormat);
+  // 5 段階に増やしつつ、影側を強くダーク・光側を強くブライトに振る。
+  // [70,130,185,255] → [40,90,140,200,255]：陰側 40 で深いシャドウ、光側 255 でハイライト
+  const d = new Uint8Array([40,90,140,200,255]);
+  const t = new THREE.DataTexture(d,5,1,THREE.RedFormat);
   t.minFilter = THREE.NearestFilter;
   t.magFilter = THREE.NearestFilter;
   t.needsUpdate = true;
@@ -1373,7 +1402,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       if(conPts.length){
         const lg=new THREE.BufferGeometry();
         lg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(conPts),3));
-        contourLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x6a4a2a,transparent:true,opacity:0.35}));
+        contourLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x4a3018,transparent:true,opacity:0.55}));
         scene.add(contourLines);
       }
     }
@@ -1406,8 +1435,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
       // 1Hz パルス（作業者あり）または静止暗色（作業者なし）
       const pulse = Math.sin(world.timeSec*2*Math.PI)*0.5+0.5; // 0→1
-      (tfRaiseIM.material as THREE.MeshBasicMaterial).opacity = raiseHasWorker ? 0.50+pulse*0.20 : 0.38;
-      (tfLowerIM.material as THREE.MeshBasicMaterial).opacity = lowerHasWorker ? 0.50+pulse*0.20 : 0.38;
+      // ノイズ感削減：作業中 0.40+pulse*0.18 / 待機 0.22（前は 0.50+pulse*0.20 / 0.38）
+      (tfRaiseIM.material as THREE.MeshBasicMaterial).opacity = raiseHasWorker ? 0.40+pulse*0.18 : 0.22;
+      (tfLowerIM.material as THREE.MeshBasicMaterial).opacity = lowerHasWorker ? 0.40+pulse*0.18 : 0.22;
 
       let tfRI=0, tfLI=0;
       const outlinePts:number[]=[];
