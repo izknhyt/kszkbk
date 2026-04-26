@@ -1752,9 +1752,14 @@ function spawnWolfGroup(w: WorldState) {
   const safeBottom = w.bounds.h * 0.85;
   const baseY = edge === 2 ? 40 : edge === 3 ? safeBottom - 40 : 60 + Math.random() * (safeBottom - 120);
   for (let i = 0; i < count; i++) {
+    // Σ-7-fix: 海タイルから狼が出現するのは違和感あり。
+    // findDryTile で 200px 範囲内の陸地に出す（Σ-3 島/半島マップで重要）。
+    const candX = baseX + (Math.random() - 0.5) * 40;
+    const candY = baseY + (Math.random() - 0.5) * 40;
+    const dry = findDryTile(candX, candY, 200);
     w.wolves.push({
       id: _wolfIdSeq++,
-      pos: { x: baseX + (Math.random() - 0.5) * 40, y: baseY + (Math.random() - 0.5) * 40 },
+      pos: dry,
       targetChibiId: null,
       targetNpcId: null,
       state: 'stalk',

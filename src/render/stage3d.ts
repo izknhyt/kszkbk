@@ -38,7 +38,7 @@ export interface StageHandle {
 // ============================================================
 // 定数
 // ============================================================
-const ELEV_SCALE   = 9;    // elev (0-100) → Three.js Y (0-900)。高低差を強調して 3D 感を出す
+const ELEV_SCALE   = 12;   // elev (0-100) → Three.js Y (0-1200)。高低差を強調して 3D 感を出す
 const BASE_H       = 1200; // zoomLevel=1 のカメラ高さ
 const CHIBI_W      = 48;
 const CHIBI_H      = 64;
@@ -697,9 +697,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const camera = new THREE.PerspectiveCamera(20, host.clientWidth/Math.max(1,host.clientHeight), 1, 50000);
 
   // --- ライティング ---
-  const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
+  // 環境光を 0.6 → 0.42 に下げて、directional light の影をハッキリ出す。
+  // 結果：高地と低地のコントラスト UP、地形の凹凸が視認しやすい。
+  const ambLight = new THREE.AmbientLight(0xffffff, 0.42);
   scene.add(ambLight);
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1.25);
   dirLight.position.set(800, 2000, -600);
   scene.add(dirLight);
 
@@ -1136,8 +1138,13 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const tex=texs[stateIdx[state]]??texs[0]!;
       const mesh=spriteMesh(w,h,tex);
       (mesh.material as THREE.MeshBasicMaterial).color.setRGB(...curCharTint);
+      // 初期スケールも適用（CHIBI_POSE_SCALE が定義されたインデックスのみ）。
+      // これがないと初回 syncSpriteState が「state 未変化」で scale を立て忘れる。
+      const sc = stateIdx === CHIBI_STATE_IDX ? CHIBI_POSE_SCALE[stateIdx[state]] : null;
+      if (sc) mesh.scale.set(sc[0], sc[1], 1);
       grp.add(mesh);
-      v={mesh,lastState:state,lastFace:false};
+      // lastState を「未設定」に擬似的に設定 → 初回 syncSpriteState で必ずスケール再適用
+      v={mesh,lastState:'_init' as ChibiState,lastFace:false};
       map.set(id,v);
     }
     return v;
@@ -1315,11 +1322,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const cPts:number[]=[];
       for(let r2=0;r2<ROWS2;r2++) for(let c2=0;c2<COLS2;c2++){
         const e0=world.terrain[r2]![c2]!.elev;
-        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=15){
+        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=8){
           const x=(c2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ex)*ELEV_SCALE;
           cPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
         }}
-        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=15){
+        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=8){
           const z=(r2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ey)*ELEV_SCALE;
           cPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
         }}
@@ -1347,7 +1354,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(c2+1<COLS2){
           const ex=world.terrain[r2]![c2+1]!.elev;
           const cs = crossesContour(e0, ex);
-          if(cs!==null && Math.abs(e0-ex)<15){
+          if(cs!==null && Math.abs(e0-ex)<8){
             const x=(c2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
@@ -1356,7 +1363,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(r2+1<ROWS2){
           const ey=world.terrain[r2+1]![c2]!.elev;
           const cs = crossesContour(e0, ey);
-          if(cs!==null && Math.abs(e0-ey)<15){
+          if(cs!==null && Math.abs(e0-ey)<8){
             const z=(r2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
