@@ -33,6 +33,7 @@ export interface StageHandle {
   getCamera: () => CameraView;
   screenToWorld: (cx: number, cy: number) => { x: number; y: number };
   setHitTest: (fn: (wx: number, wy: number) => HitTarget | null) => void;
+  setContourVisible: (visible: boolean) => void;
 }
 
 // ============================================================
@@ -283,10 +284,15 @@ function buildTerrainGeo(terrain: import('../types').TerrainTile[][]): THREE.Buf
   for (let vi=0; vi<VH; vi++) {
     for (let ui=0; ui<VW; ui++) {
       const vIdx = vi*VW+ui;
-      let eSum=0, cnt=0;
+      let eSum=0, cnt=0, eMin=200, eMax=-1;
       for (let dr=-1; dr<=0; dr++) for (let dc=-1; dc<=0; dc++) {
         const tr=vi+dr, tc=ui+dc;
-        if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){ eSum+=terrain[tr]![tc]!.elev; cnt++; }
+        if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){
+          const e = terrain[tr]![tc]!.elev;
+          eSum+=e; cnt++;
+          if (e<eMin) eMin=e;
+          if (e>eMax) eMax=e;
+        }
       }
       const elev = cnt>0 ? eSum/cnt : 0;
       pos[vIdx*3]   = ui*TERRAIN_TILE_SIZE;
@@ -296,7 +302,15 @@ function buildTerrainGeo(terrain: import('../types').TerrainTile[][]): THREE.Buf
       const nc = Math.min(COLS-1, ui===VW-1?ui-1:ui);
       const tile = terrain[nr]![nc]!;
       const [r,g,bv] = tileRgb(tile.material, elev);
-      col[vIdx*3]=r; col[vIdx*3+1]=g; col[vIdx*3+2]=bv;
+      // 崖面シェーディング：周囲タイルの elev 差が大きいほど暗いブラウンに blend。
+      // 通れない急斜面は線を引かなくても「岩肌」っぽい色で読める。
+      const slopeRange = eMax - eMin;
+      const cliff = Math.max(0, Math.min(1, (slopeRange - 12) / 22));  // 12 から効き始め、34 で max
+      const cliffR = 0x4a/255, cliffG = 0x35/255, cliffB = 0x22/255;
+      const k = cliff * 0.65;
+      col[vIdx*3]   = r  * (1 - k) + cliffR * k;
+      col[vIdx*3+1] = g  * (1 - k) + cliffG * k;
+      col[vIdx*3+2] = bv * (1 - k) + cliffB * k;
     }
   }
   let ii=0;
@@ -320,10 +334,15 @@ function refreshTerrainGeo(geo: THREE.BufferGeometry, terrain: import('../types'
   const colA = geo.getAttribute('color')    as THREE.BufferAttribute;
   for (let vi=0;vi<VH;vi++) for (let ui=0;ui<VW;ui++) {
     const vIdx=vi*VW+ui;
-    let eSum=0, cnt=0;
+    let eSum=0, cnt=0, eMin=200, eMax=-1;
     for (let dr=-1;dr<=0;dr++) for (let dc=-1;dc<=0;dc++) {
       const tr=vi+dr, tc=ui+dc;
-      if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){ eSum+=terrain[tr]![tc]!.elev; cnt++; }
+      if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){
+        const e = terrain[tr]![tc]!.elev;
+        eSum+=e; cnt++;
+        if (e<eMin) eMin=e;
+        if (e>eMax) eMax=e;
+      }
     }
     const elev=cnt>0?eSum/cnt:0;
     posA.setXYZ(vIdx, ui*TERRAIN_TILE_SIZE, elev*ELEV_SCALE, vi*TERRAIN_TILE_SIZE);
@@ -331,7 +350,11 @@ function refreshTerrainGeo(geo: THREE.BufferGeometry, terrain: import('../types'
     const nc=Math.min(COLS-1,ui===VW-1?ui-1:ui);
     const tile=terrain[nr]![nc]!;
     const [r,g,bv]=tileRgb(tile.material,elev);
-    colA.setXYZ(vIdx,r,g,bv);
+    const slopeRange = eMax - eMin;
+    const cliff = Math.max(0, Math.min(1, (slopeRange - 12) / 22));
+    const cliffR=0x4a/255, cliffG=0x35/255, cliffB=0x22/255;
+    const k = cliff * 0.65;
+    colA.setXYZ(vIdx, r*(1-k)+cliffR*k, g*(1-k)+cliffG*k, bv*(1-k)+cliffB*k);
   }
   posA.needsUpdate=true; colA.needsUpdate=true;
   geo.computeVertexNormals();
@@ -837,6 +860,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   let wireLines: THREE.LineSegments|null = null;
   let cliffLines: THREE.LineSegments|null = null;
   let contourLines: THREE.LineSegments|null = null;
+  let contourVisible = false;  // デフォは OFF（プレイヤーが必要なときだけ有効化）
 
   // オオカミビルボードテクスチャ（共有）
   const wolfTexture = wolfTex();
@@ -1351,11 +1375,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const cPts:number[]=[];
       for(let r2=0;r2<ROWS2;r2++) for(let c2=0;c2<COLS2;c2++){
         const e0=world.terrain[r2]![c2]!.elev;
-        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=14){
+        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=19){
           const x=(c2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ex)*ELEV_SCALE;
           cPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
         }}
-        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=14){
+        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=19){
           const z=(r2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ey)*ELEV_SCALE;
           cPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
         }}
@@ -1383,7 +1407,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(c2+1<COLS2){
           const ex=world.terrain[r2]![c2+1]!.elev;
           const cs = crossesContour(e0, ex);
-          if(cs!==null && Math.abs(e0-ex)<14){
+          if(cs!==null && Math.abs(e0-ex)<19){
             const x=(c2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
@@ -1392,17 +1416,17 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(r2+1<ROWS2){
           const ey=world.terrain[r2+1]![c2]!.elev;
           const cs = crossesContour(e0, ey);
-          if(cs!==null && Math.abs(e0-ey)<14){
+          if(cs!==null && Math.abs(e0-ey)<19){
             const z=(r2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
           }
         }
       }
-      if(conPts.length){
+      if(conPts.length && contourVisible){
         const lg=new THREE.BufferGeometry();
         lg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(conPts),3));
-        // 白系の等高線（あらゆる地形色に対してハイコントラスト、地図的に見える）
+        // 白系の等高線（プレイヤーがトグルで ON にした時だけ表示、地図的に高低を読む用）
         contourLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0xfff5d8,transparent:true,opacity:0.55}));
         scene.add(contourLines);
       }
@@ -1928,5 +1952,6 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     getCamera,
     screenToWorld: stwXZ,
     setHitTest: (fn)=>{ hitFn=fn; },
+    setContourVisible: (visible: boolean)=>{ contourVisible = visible; if (contourLines) contourLines.visible = visible; },
   };
 }

@@ -635,6 +635,22 @@ async function start() {
   document.getElementById('ab-bokai')?.addEventListener('click', () => triggerBokaigi(world));
   document.getElementById('ab-fire')?.addEventListener('click', () => triggerFire(world));
 
+  // 等高線 ON/OFF トグル
+  let contourOn = false;
+  const contourBtn = document.getElementById('ab-contour') as HTMLButtonElement | null;
+  const toggleContour = () => {
+    contourOn = !contourOn;
+    stage.setContourVisible(contourOn);
+    if (contourBtn) contourBtn.classList.toggle('active', contourOn);
+    flashToast(contourOn ? '📐 等高線 ON' : '📐 等高線 OFF', 'info');
+  };
+  contourBtn?.addEventListener('click', toggleContour);
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === 'c' || e.key === 'C') toggleContour();
+  });
+
   // build mode indicator の解除ボタン
   document.getElementById('build-mode-cancel')?.addEventListener('click', () => {
     setBuildMode(null);

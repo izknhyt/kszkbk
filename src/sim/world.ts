@@ -3257,7 +3257,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
     }
 
     // Σ-1-b 坂勾配ペナルティ：進行方向 20px 先との標高差でチェック
-    // 勾配 > 0.3 → 速度半減 + fatigue、> 0.6 → courage 判定で滑落
+    // 勾配 > 0.3 → 速度半減 + fatigue、> 0.6 → 通行不可（崖は登れない）+ 滑落リスク
     if (c.target && !c.flight) {
       const tdx = c.target.x - c.pos.x;
       const tdy = c.target.y - c.pos.y;
@@ -3268,7 +3268,16 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       const fwdElev = getElevation(c.pos.x + nx * 20, c.pos.y + ny * 20);
       const slope = Math.abs((fwdElev - curElev) / 20);
 
-      if (slope > 0.3) {
+      // Σ-7-fix: 崖（slope > 0.6）は本当に登れない。今 tick の移動を完全 reject + target を捨てる。
+      // courage 90+ の冒険家のみ slope 0.6-0.8 を強行突破できる（くそざこの中の挑戦者）。
+      const cliffLimit = c.params.courage >= 90 ? 0.8 : 0.6;
+      if (slope > cliffLimit && fwdElev > curElev) {
+        // 崖を登ろうとしてる → このティックの移動を取り消し + ターゲット破棄
+        c.pos.x -= nx * c.speed * dt;
+        c.pos.y -= ny * c.speed * dt;
+        c.target = null;
+        c.fatigue = Math.min(100, c.fatigue + dt * 0.5);
+      } else if (slope > 0.3) {
         // 急坂：このティックの移動量の半分を戻す（実質 0.5× 速度）
         c.pos.x -= nx * c.speed * dt * 0.5;
         c.pos.y -= ny * c.speed * dt * 0.5;
