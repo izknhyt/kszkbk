@@ -14,7 +14,10 @@ export function setQueryTerrain(t: TerrainTile[][]): void {
 }
 
 /**
- * ワールド座標 (x, y) が海タイルかどうか。
+ * ワールド座標 (x, y) が海タイルかどうか（永続的な海/水路）。
+ * 雨水の dynamic な waterLevel は含まない（Σ-7 で waterLevel が連続値化したため、
+ * これを含むと陸地の水たまりが海ハザード mudriver/bridge を誘発する）。
+ * 雨水での溺死は drown_pond 死因が別途担当。
  * アクティブ地形がない場合は旧 DRY_Y_LIMIT でフォールバック。
  */
 export function isSeaAt(x: number, y: number): boolean {
@@ -22,7 +25,7 @@ export function isSeaAt(x: number, y: number): boolean {
     const col = Math.floor(x / TILE_SIZE);
     const row = Math.floor(y / TILE_SIZE);
     const t = _terrain[row]?.[col];
-    if (t) return t.waterLevel >= 0.5 || t.material === 'water';
+    if (t) return t.material === 'water';
   }
   return y > CONFIG.DRY_Y_LIMIT;
 }

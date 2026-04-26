@@ -1198,7 +1198,8 @@ export function raiseTile(terrain: TerrainTile[][], tx: number, ty: number, amou
   if (!tile) return;
   tile.elev = Math.min(100, tile.elev + amount);
   tile.stability = Math.min(tile.stability, 0.6);
-  tile.material = elevToMaterial(tile.elev, tile.waterLevel >= 0.5);
+  // 永続的な海/水路マスのみ 'water' を維持（雨水蓄積で水路化はしない）
+  tile.material = elevToMaterial(tile.elev, tile.material === 'water');
 }
 
 export function lowerTile(terrain: TerrainTile[][], tx: number, ty: number, amount: number): void {
@@ -1206,7 +1207,7 @@ export function lowerTile(terrain: TerrainTile[][], tx: number, ty: number, amou
   if (!tile) return;
   tile.elev = Math.max(0, tile.elev - amount);
   tile.stability = Math.min(tile.stability, 0.75);
-  tile.material = elevToMaterial(tile.elev, tile.waterLevel >= 0.5);
+  tile.material = elevToMaterial(tile.elev, tile.material === 'water');
 }
 
 // ちびわふ労働：ジョブ近傍 28px 以内の生存ちびわふが進捗を進める
@@ -1417,8 +1418,9 @@ export function updateTerrainStability(w: WorldState, dt: number): void {
       tile.stability = 0.3;
       lowest.elev = Math.min(100, lowest.elev + 8);
       lowest.stability = Math.min(lowest.stability, 0.5);
-      tile.material = elevToMaterial(tile.elev, tile.waterLevel >= 0.5);
-      lowest.material = elevToMaterial(lowest.elev, lowest.waterLevel >= 0.5);
+      // 雨水での自動 water 化はしない（永続海のみ維持）
+      tile.material = elevToMaterial(tile.elev, tile.material === 'water');
+      lowest.material = elevToMaterial(lowest.elev, lowest.material === 'water');
 
       // 低タイルに buryTimer をセット（生き埋め判定用）
       const buriedTile = getTile(terrain, col + lowestDc, row + lowestDr);
