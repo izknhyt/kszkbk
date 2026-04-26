@@ -65,14 +65,15 @@ export const HAZARDS: HazardZone[] = [
     traitMultipliers: { bouken: 1.5 },
     note: '海 — 冒険家は1.5倍の確率で溺れる',
   },
-  // bridge は海沿いの桟橋イベント（難度 standard/hell のみ）— 旧丸太橋を海沿いに衣替え
+  // 海辺の波さらわれ（旧丸太橋を Σ-3 で海沿いに衣替え）。mudriver より発火率低め、
+  // 冒険家は 1.5 倍で被弾。死因 id は legacy 互換で 'bridge' のまま、title は更新。
   {
     id: 'bridge',
     causeId: 'bridge',
-    kind: 'sea',  // Σ-3-c: 海タイル判定
-    ratePerSec: 2.5,
+    kind: 'sea',
+    ratePerSec: 0.2,
     traitMultipliers: { bouken: 1.5 },
-    note: '海辺に立ちすぎて流される',
+    note: '海辺で大波にさらわれる（冒険家は 1.5 倍）',
   },
   {
     id: 'stonebread',

@@ -31,10 +31,10 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
   },
   bridge: {
     id: 'bridge',
-    title: '丸太橋崩壊',
+    title: '海辺で波にさらわれた',
     rare: false,
     points: 9,
-    template: (n) => `${n}が渡り始めた直後、橋は泥川へ帰っていった。`,
+    template: (n) => `${n}は海辺で水平線を眺めていたら、想定外の大波に足をすくわれてそのまま遠くへ流された。`,
   },
   fire: {
     id: 'fire',
