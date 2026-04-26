@@ -721,3 +721,28 @@ const CONSTRUCTION_CANCEL_LINES = [
 export function pickConstructionCancelLine(): string {
   return CONSTRUCTION_CANCEL_LINES[Math.floor(Math.random() * CONSTRUCTION_CANCEL_LINES.length)]!;
 }
+
+// =========================================================================
+// Σ-7-d 水たまり・溺死関連
+// =========================================================================
+const WATER_SCARED_LINES = [
+  'こわいわふ……', 'つめたそうわふ……', 'みずこわいわふ', 'びしょびしょになるわふ……',
+  'おちたくないわふ', 'みずきらいわふ', 'ふかいかもわふ…', 'どうしようわふ',
+];
+const WATER_STEPPED_LINES = [
+  'ひえええわふ！', 'つめたいーわふ！', 'びしょびしょわふ！', 'ぬれちゃったわふ！',
+  'ぐちゅぐちゅわふ！', 'あしずぼわふ！', 'やめてわふ〜！', 'つめたいわふ〜！',
+];
+const DROWN_LAST_WORDS = [
+  'ママー！', 'たすけてわふー！', 'しずんでいくわふ……', 'おわりだわふ……',
+  'ぷくぷくわふ……', 'ままぁわふ……', 'もうだめわふ……',
+];
+export function pickWaterScaredLine(): string {
+  return WATER_SCARED_LINES[Math.floor(Math.random() * WATER_SCARED_LINES.length)]!;
+}
+export function pickWaterSteppedLine(): string {
+  return WATER_STEPPED_LINES[Math.floor(Math.random() * WATER_STEPPED_LINES.length)]!;
+}
+export function pickDrownLastWords(): string {
+  return DROWN_LAST_WORDS[Math.floor(Math.random() * DROWN_LAST_WORDS.length)]!;
+}

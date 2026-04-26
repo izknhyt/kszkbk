@@ -82,6 +82,9 @@ interface WanderEnv {
   constructionPositions: Vec2[];
   // 優先建設中 feature 位置リスト（Σ-6-x：プレイヤー指示で他より優先）
   priorityConstructionPositions: Vec2[];
+  // Σ-7-d 水回避：terrain[row][col].waterLevel を見るためのタイル参照
+  // null の場合は回避無効（旧呼び出し互換）
+  terrain?: import('../types').TerrainTile[][];
 }
 
 // ============================================================
@@ -243,6 +246,26 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
             y: margin + Math.random() * (maxY - margin),
           };
         }
+      }
+    }
+
+    // Σ-7-d 水たまり回避：target が深い水たまりなら再抽選（最大 6 回）
+    //   courage >=70 は水を怖がらない（水辺好き）
+    //   hunger >70 / fatigue >70 で判断鈍化（回避スキップ）
+    if (newTarget && env?.terrain && c.params.courage < 70 && c.hunger <= 70 && c.fatigue <= 70) {
+      const TILE = 32;
+      const ROWS = env.terrain.length;
+      const COLS = env.terrain[0]?.length ?? 0;
+      for (let tries = 0; tries < 6; tries++) {
+        const tc = Math.max(0, Math.min(COLS - 1, Math.floor(newTarget.x / TILE)));
+        const tr = Math.max(0, Math.min(ROWS - 1, Math.floor(newTarget.y / TILE)));
+        const wl = env.terrain[tr]?.[tc]?.waterLevel ?? 0;
+        if (wl < 0.4) break;
+        // 深い → 別座標で再抽選
+        newTarget = {
+          x: margin + Math.random() * (bounds.w - margin * 2),
+          y: margin + Math.random() * (bounds.h * 0.85 - margin),
+        };
       }
     }
 

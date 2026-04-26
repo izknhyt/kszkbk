@@ -378,6 +378,15 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 24,
     template: (n) => `${n}は「むり！もうむり！」と叫びながら全力で逃げたが、疲れ果てて道端に倒れ込み、追いかけてきたオオカミにそのまま食われた。`,
   },
+  // --- Σ-7-d 水動力 --------------------------------------------------------
+  drown_pond: {
+    id: 'drown_pond',
+    title: '水たまりで溺死',
+    rare: false,
+    uncommon: true,
+    points: 18,
+    template: (n) => `${n}は雨水の溜まった水たまりに足を滑らせ、ぴちゃっとはまってそのまま沈んだ。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;

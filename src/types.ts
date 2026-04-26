@@ -157,7 +157,9 @@ export type DeathCauseId =
   | 'landslide_crush'        // 土砂崩れで転倒打撲死
   | 'buried_alive'           // 土砂崩れで生き埋め窒息死
   // --- Σ-5-d 狼 flee 追加 --------------------------------------------------
-  | 'fled_to_exhaustion';    // 逃げ疲れて崩れ落ちたところをオオカミに食われた
+  | 'fled_to_exhaustion'    // 逃げ疲れて崩れ落ちたところをオオカミに食われた
+  // --- Σ-7-d 水動力 追加 ---------------------------------------------------
+  | 'drown_pond';           // 雨水溜まりに沈んで溺死
 
 export interface DeathCause {
   id: DeathCauseId;

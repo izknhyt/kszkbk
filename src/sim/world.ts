@@ -86,6 +86,8 @@ import {
   pickSleepyContagionLine,
   pickStrikerLine,
   pickVictimHurtLine,
+  pickWaterSteppedLine,
+  pickDrownLastWords,
 } from './chats';
 import { EMBARRASSING_FLAVORS, FLAVOR_AMBIENT, FLAVOR_DURING, FLAVOR_SEASONAL, applyFlavorSpeedMod } from './flavorBehaviors';
 import { SpatialHash } from './spatialHash';
@@ -2812,6 +2814,29 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
   c.fatigue = Math.max(0, Math.min(100, c.fatigue));
   if (c.hunger >= 100) { kill(w, c, 'hunger_death'); return; }
   if (c.fatigue >= 100) { kill(w, c, 'fatigue_death'); return; }
+  // Σ-7-d 水たまり溺死：踏んだタイルの waterLevel が深く、courage 判定失敗で沈む
+  // 新生児（ageSec<5）と既に飛行中は対象外
+  if (c.ageSec >= 5 && !c.flight && c.state !== 'sleep' && c.state !== 'dead') {
+    const { tx, ty } = worldToTile(c.pos.x, c.pos.y);
+    const tile = w.terrain[ty]?.[tx];
+    if (tile && tile.waterLevel >= 0.5 && !isSeaAt(c.pos.x, c.pos.y)) {
+      // 浅い場合は水を踏んだバブル（10% per second）
+      if (tile.waterLevel < 0.6 && Math.random() < dt * 0.10) {
+        spawnBubble(w.bubbles, c.pos, pickWaterSteppedLine(), 'speech', 1.2);
+      }
+      // 深い水たまり：勇気が低いほど溺れる（0.6+ で 0.003-0.012/sec）
+      if (tile.waterLevel >= 0.6) {
+        const courageFactor = Math.max(0, (60 - c.params.courage) / 60); // courage 0=1.0, 60+=0
+        const drownChance = dt * 0.003 * (1 + tile.waterLevel * 1.5) * courageFactor;
+        if (Math.random() < drownChance) {
+          spawnBubble(w.bubbles, c.pos, pickDrownLastWords(), 'speech', 1.5);
+          pushLife(c, Math.floor(c.ageSec), '水たまりに沈んでしまった');
+          kill(w, c, 'drown_pond');
+          return;
+        }
+      }
+    }
+  }
   // 畑に 24px 以内で立ってる空腹のちびわふ：1 food 消費して食事状態に入る
   if (c.state === 'idle' && c.hunger > 30 && w.resources.food >= 1) {
     for (const f of w.features) {
@@ -3100,6 +3125,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       priorityTerraformJobPositions: env.priorityTerraformJobPositions,
       constructionPositions: env.constructionPositions,
       priorityConstructionPositions: env.priorityConstructionPositions,
+      terrain: w.terrain,
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {
