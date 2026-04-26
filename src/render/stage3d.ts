@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import type { WorldState } from '../sim/world';
 import { POWERLINE_CONNECT_RADIUS, TERRAIN_TILE_SIZE } from '../sim/world';
+import { isSeaAt } from '../sim/terrain/query';
 import type { ChibiState, DayPhase, Difficulty, HitTarget, PlacedBuilding, Season } from '../types';
 import { NPC_DEFS, type NpcId } from '../sim/npcs';
 import { CONFIG } from '../config';
@@ -611,14 +612,34 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   let terrainGeo: THREE.BufferGeometry|null = null;
   let terrainBuiltAt = -9999;
 
-  // --- 水面（低標高タイルの上に薄く）---
-  const waterMat = new THREE.MeshBasicMaterial({color:0x4a6b9c,transparent:true,opacity:0.55,side:THREE.DoubleSide});
-  const waterMesh = new THREE.Mesh(
+  // --- 海面（恒久的に存在、isSeaAt タイルの下敷き）---
+  const seaMat = new THREE.MeshBasicMaterial({color:0x1f4c7a,transparent:true,opacity:0.85,side:THREE.DoubleSide});
+  const seaMesh = new THREE.Mesh(
     (() => { const g=new THREE.PlaneGeometry(CONFIG.WORLD_W,CONFIG.WORLD_H); g.rotateX(-Math.PI/2); return g; })(),
-    waterMat,
+    seaMat,
   );
-  waterMesh.position.set(CONFIG.WORLD_W/2, 0.8, CONFIG.WORLD_H/2);
-  scene.add(waterMesh);
+  seaMesh.position.set(CONFIG.WORLD_W/2, 0.8, CONFIG.WORLD_H/2);
+  scene.add(seaMesh);
+
+  // --- Σ-7-b: 動的水たまりタイル（waterLevel >=0.2 のタイル毎に配置）---
+  // 3 段階の深さで色分け（浅瀬/中/深）。3 個の InstancedMesh を使い分ける。
+  const _waterTileGeo = new THREE.PlaneGeometry(TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE);
+  _waterTileGeo.rotateX(-Math.PI/2);
+  const waterShallowIM = new THREE.InstancedMesh(_waterTileGeo,
+    new THREE.MeshBasicMaterial({color:0x6aa5d0,transparent:true,opacity:0.45,depthWrite:false,side:THREE.DoubleSide}),
+    T_COLS*T_ROWS);
+  const waterMidIM = new THREE.InstancedMesh(_waterTileGeo,
+    new THREE.MeshBasicMaterial({color:0x3a7aa8,transparent:true,opacity:0.60,depthWrite:false,side:THREE.DoubleSide}),
+    T_COLS*T_ROWS);
+  const waterDeepIM = new THREE.InstancedMesh(_waterTileGeo,
+    new THREE.MeshBasicMaterial({color:0x1f4c7a,transparent:true,opacity:0.72,depthWrite:false,side:THREE.DoubleSide}),
+    T_COLS*T_ROWS);
+  waterShallowIM.count = 0; waterMidIM.count = 0; waterDeepIM.count = 0;
+  scene.add(waterShallowIM, waterMidIM, waterDeepIM);
+
+  // --- Σ-7-b: 雨粒 LineSegments（雨天時のみ出現、frustum 内 300-500 本）---
+  let rainLines: THREE.LineSegments | null = null;
+  const rainMat = new THREE.LineBasicMaterial({color:0x88ccff,transparent:true,opacity:0.45});
 
   // --- レイヤーグループ ---
   const featGrp  = new THREE.Group();
@@ -1078,7 +1099,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       } else {
         refreshTerrainGeo(terrainGeo, world.terrain);
       }
-      waterMesh.visible=world.terrain.some(row=>row.some(t=>t.material==='water'));
+      seaMesh.visible=world.terrain.some(row=>row.some(t=>t.material==='water'));
 
       // 崩落検出 → 土煙パーティクル（前フレーム比 elev 差 ≥10 のタイル）
       if(prevElevs){
@@ -1185,6 +1206,56 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         olg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(outlinePts),3));
         tfOutlineLines=new THREE.LineSegments(olg,new THREE.LineBasicMaterial({color:0xffffff,opacity:0.8,transparent:true}));
         fxGrp.add(tfOutlineLines);
+      }
+    }
+
+    // ---- Σ-7-b: 水たまりタイル可視化（30フレームごと、3 段階深さ）----
+    if(frameCount%30===0){
+      const ROWS=world.terrain.length, COLS=world.terrain[0]?.length??0;
+      let sIdx=0, mIdx=0, dIdx=0;
+      for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+        const tile=world.terrain[r]![c]!;
+        const wl=tile.waterLevel;
+        if(wl<0.2) continue;
+        const cx=(c+0.5)*TERRAIN_TILE_SIZE, cy=(r+0.5)*TERRAIN_TILE_SIZE;
+        // 海タイルは恒久 seaMesh で描画済み → 動的レイヤーから除外
+        if(isSeaAt(cx,cy)) continue;
+        // 水位で Y を浮かせる：地表 + 0.5 + waterLevel*1.5
+        const y = elevAt(world.terrain,cx,cy) + 0.5 + wl*1.5;
+        _imDummy.position.set(cx, y, cy);
+        _imDummy.updateMatrix();
+        if(wl<0.4)      waterShallowIM.setMatrixAt(sIdx++,_imDummy.matrix);
+        else if(wl<0.7) waterMidIM.setMatrixAt(mIdx++,_imDummy.matrix);
+        else            waterDeepIM.setMatrixAt(dIdx++,_imDummy.matrix);
+      }
+      waterShallowIM.count=sIdx; waterMidIM.count=mIdx; waterDeepIM.count=dIdx;
+      waterShallowIM.instanceMatrix.needsUpdate=true;
+      waterMidIM.instanceMatrix.needsUpdate=true;
+      waterDeepIM.instanceMatrix.needsUpdate=true;
+    }
+
+    // ---- Σ-7-b: 雨粒（5フレームごと、雨天時のみ）----
+    if(frameCount%5===0){
+      if(rainLines){ scene.remove(rainLines); rainLines.geometry.dispose(); rainLines=null; }
+      const k=world.weather.kind;
+      const isRain = k==='light_rain' || k==='heavy_rain' || k==='storm';
+      if(isRain){
+        const count = k==='storm' ? 500 : k==='heavy_rain' ? 350 : 200;
+        // カメラ周辺の世界座標範囲を雨粒で埋める
+        const halfRange = 1200/zoom;
+        const pts = new Float32Array(count*6);
+        for(let i=0;i<count;i++){
+          const rx = camX + (Math.random()-0.5)*halfRange*2;
+          const rz = camZ + (Math.random()-0.5)*halfRange*2;
+          const ry = 60 + Math.random()*120;
+          const len = k==='storm' ? 18 : 12;
+          pts[i*6]=rx; pts[i*6+1]=ry; pts[i*6+2]=rz;
+          pts[i*6+3]=rx-1.5; pts[i*6+4]=ry-len; pts[i*6+5]=rz;
+        }
+        const lg=new THREE.BufferGeometry();
+        lg.setAttribute('position', new THREE.BufferAttribute(pts,3));
+        rainLines = new THREE.LineSegments(lg, rainMat);
+        scene.add(rainLines);
       }
     }
 
