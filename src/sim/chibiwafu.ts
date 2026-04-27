@@ -8,6 +8,7 @@ import {
 import type { Season } from '../types';
 import { isSeaAt } from './terrain/query';
 import { findPath, worldToTilePoint, pathToWorldWaypoints } from './pathfinding';
+import { spawnBubble, type Bubble } from './bubbles';
 
 let nextId = 1;
 
@@ -88,6 +89,8 @@ interface WanderEnv {
   terrain?: TerrainTile[][];
   // Σ-8-b A* path 用。terrainVersion が変わったら chibi の path を破棄。
   terrainVersion?: number;
+  // Σ-8-b-1.5 崖飛び込み演出用：吹き出しを出すための world.bubbles 参照
+  bubbles?: Bubble[];
 }
 
 // ============================================================
@@ -345,6 +348,17 @@ function requestPath(c: Chibiwafu, env?: WanderEnv): void {
   const goal  = worldToTilePoint(c.target.x, c.target.y);
   const path = findPath(env.terrain, start, goal);
   if (!path) {
+    // Σ-8-b-1.5: くそざこ味の事故演出。path 不可な高低差を、無邪気な
+    // ちびわふが「飛び込んで」しまう（gunsuki/taiko_kko/mama 高で発動率↑）。
+    // 仲間やフラナを追って崖から落ちる、登ろうとしてジャンプ事故、等。
+    if (maybeRashLeap(c, env!)) {
+      // flight 経由で着地時に cliff_fall ダメージが入る。target は破棄
+      c.target = null;
+      c.pathPoints = undefined;
+      c.pathVersion = undefined;
+      c.pathFailedSec = 0.5;
+      return;
+    }
     // path 失敗：target 破棄 + 1 秒の idle cooldown（再抽選を防ぐ）
     // SPEC §A* 失敗時：「短時間の confused/idle」「ログや吹き出しはスパムしない cooldown」
     c.target = null;
@@ -375,4 +389,98 @@ export type { WanderEnv };
 
 export function distance(a: Vec2, b: Vec2): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+// =========================================================================
+// Σ-8-b-1.5 崖飛び込み事故（くそざこ味の演出）
+// path 不可な標高差 ≥ 2 段を、無邪気な ちびわふが強引に越えようとして滑落する。
+// 仲間/ママ追跡 / 太鼓っ子 / 群好き / courage 高で発動率上昇、心配性で減衰。
+// 死因は既存 'cliff_fall'。launchFlight を循環 import 回避のため inline 化。
+// =========================================================================
+const TILE_SIZE_FOR_LEAP = 32;
+const ELEV_STEP_LEAP = 25;  // CONFIG 読まずに固定値で十分（SPEC 固定）
+const CLIFF_GAP_LEAP = ELEV_STEP_LEAP * 2;  // 2 段差以上で発動対象
+
+const RASH_LEAP_DOWN_LINES = [
+  'いっちゃうわふー！', 'みんなまってわふー！', 'ジャンプわふっ！',
+  'ママまってわふっ！', 'えいやっわふー！', 'いくわふー！',
+];
+const RASH_LEAP_UP_LINES = [
+  'のぼれるわふー！', 'えいやっわふっ！', 'まってよ〜わふっ！',
+  'ママー！どこわふー！', 'のぼるわふっ！', 'ふんわふー！',
+];
+
+function tileElevAtLeap(terrain: TerrainTile[][], x: number, y: number): number {
+  const tx = Math.floor(x / TILE_SIZE_FOR_LEAP);
+  const ty = Math.floor(y / TILE_SIZE_FOR_LEAP);
+  return terrain[ty]?.[tx]?.elev ?? 0;
+}
+
+function maybeRashLeap(c: Chibiwafu, env: WanderEnv): boolean {
+  if (!env?.terrain || !c.target) return false;
+  if (c.flight) return false;  // 既に飛行中はスキップ
+
+  const myE = tileElevAtLeap(env.terrain, c.pos.x, c.pos.y);
+  const tgE = tileElevAtLeap(env.terrain, c.target.x, c.target.y);
+  const diff = tgE - myE;
+  if (Math.abs(diff) < CLIFF_GAP_LEAP) return false;
+
+  // 発動率：courage 50→0%、courage 100→0.25 を基本に、性格と状況で加算
+  let chance = Math.max(0, (c.params.courage - 50) * 0.005);
+  if (c.params.mama > 60)               chance += 0.10;  // ママ大好き = 無謀に追う
+  if (c.traits.includes('gunsuki'))     chance += 0.10;  // 群好きが仲間に飛び込む
+  if (c.traits.includes('taiko_kko'))   chance += 0.05;  // 祭好きの勢い
+  if (c.traits.includes('bouken'))      chance += 0.10;  // 冒険家
+  if (c.traits.includes('ikusa'))       chance += 0.05;
+  if (c.traits.includes('shinpai'))     chance *= 0.20;  // 心配性は慎重
+  if (c.traits.includes('mukuchi'))     chance *= 0.50;
+  if (c.hunger > 70)                    chance *= 0.6;   // 衰弱中は控える
+  if (c.fatigue > 70)                   chance *= 0.6;
+
+  // dt あたり何回 wanderStep が呼ばれるかに依存しないよう小さめ抑え目
+  if (chance < 0.005) return false;
+  if (Math.random() > chance) return false;
+
+  const dx = c.target.x - c.pos.x;
+  const dy = c.target.y - c.pos.y;
+  const len = Math.max(0.001, Math.hypot(dx, dy));
+  const nx = dx / len, ny = dy / len;
+
+  const isDown = diff < 0;
+  const lines = isDown ? RASH_LEAP_DOWN_LINES : RASH_LEAP_UP_LINES;
+  const line = lines[Math.floor(Math.random() * lines.length)]!;
+  if (env.bubbles) spawnBubble(env.bubbles, { x: c.pos.x, y: c.pos.y }, line, 'speech', 1.6);
+  c.faceLeft = nx < 0;
+
+  // c.flight を直接設定（launchFlight 相当、cliff_fall 死因タグ付）
+  if (isDown) {
+    // 高所 → 低所：勢いよく飛び降り、着地で 高低差 × 1.0 のダメージ（cliff_fall 判定で増幅）
+    c.flight = {
+      vx: nx * 80,
+      vy: ny * 80,
+      vz: 0,
+      posZ: myE,
+      startElev: myE,
+      leftSec: 0.8,
+      totalSec: 0.8,
+      hitKeys: [],
+      landingDamage: 0,  // 着地時に world.ts 側で cliff_fall ダメージが上書き
+      landCauseId: 'cliff_fall',
+    };
+  } else {
+    // 低所 → 高所：登ろうとしてジャンプ、ほぼ届かず軽ダメージで墜落
+    c.flight = {
+      vx: nx * 45,
+      vy: ny * 45,
+      vz: 0,
+      posZ: myE,
+      startElev: myE,
+      leftSec: 0.55,
+      totalSec: 0.55,
+      hitKeys: [],
+      landingDamage: 8,  // 登ろうとして転倒する軽ダメージ
+      landCauseId: 'cliff_fall',
+    };
+  }
+  return true;
 }

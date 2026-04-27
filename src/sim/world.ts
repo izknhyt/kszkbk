@@ -3294,6 +3294,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       priorityConstructionPositions: env.priorityConstructionPositions,
       terrain: w.terrain,
       terrainVersion: w.terrainVersion,
+      bubbles: w.bubbles,
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {
