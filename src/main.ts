@@ -9,6 +9,7 @@ import {
   enqueueTerraformLower,
   enqueueTerraformRaise,
   ensurePlots,
+  setRampOnTile,
   forceSpawn,
   launchFlight,
   LOWER_SOIL_GAIN,
@@ -803,15 +804,37 @@ async function start() {
     hintEl.textContent = def.hint;
     if (rampRow) rampRow.style.display = (m === 'ramp') ? 'grid' : 'none';
   }
+  // Σ-8-b-2: ramp 設置モード（terraform mode と排他）
+  let s8RampMode = false;
+  function setS8RampMode(active: boolean) {
+    s8RampMode = active;
+    document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((b) => {
+      b.classList.toggle('active', active && b.dataset.s8tool === 'ramp');
+    });
+    updateSigma8Panel(active ? 'ramp' : null);
+    if (active) {
+      setTerraformMode(null);
+      setBuildMode(null);
+    }
+  }
+
   document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((btn) => {
     btn.addEventListener('click', () => {
       const tool = btn.dataset.s8tool as S8Tool;
       if (tool === 'raise' || tool === 'lower') {
+        if (s8RampMode) setS8RampMode(false);
         setTerraformMode(terraformMode === tool ? null : tool);
+        return;
+      }
+      if (tool === 'ramp') {
+        // Σ-8-b-2: ramp 設置モード。方向は #s8-ramp-dir で選択
+        setS8RampMode(!s8RampMode);
+        if (s8RampMode) flashToast('坂道化モード：方向を選んで低い側のタイルをクリック', 'info');
         return;
       }
       if (tool === 'build') {
         // 既存 build パネルへ誘導
+        if (s8RampMode) setS8RampMode(false);
         setTerraformMode(null);
         flashToast('右の建設パネルから建物を選んでわふ', 'info');
         updateSigma8Panel('build');
@@ -820,7 +843,8 @@ async function start() {
         });
         return;
       }
-      // flatten / smooth / ramp / channel：骨格段階。Σ-8-b/c/d で本実装。
+      // flatten / smooth / channel：骨格段階。Σ-8-b-3 以降で本実装。
+      if (s8RampMode) setS8RampMode(false);
       setTerraformMode(null);
       flashToast(`${S8_TOOL_LABELS[tool].name} は Σ-8 後続フェーズで実装予定`, 'info');
       updateSigma8Panel(tool);
@@ -857,6 +881,22 @@ async function start() {
   // 空クリック → 建設 or 地形編集モード処理
   stage.canvas.addEventListener('kszk-empty-click', (e) => {
     const detail = (e as CustomEvent).detail as { worldX: number; worldY: number };
+    // Σ-8-b-2: ramp 設置モード優先（terraform より上）
+    if (s8RampMode) {
+      const { tx, ty } = worldToTile(detail.worldX, detail.worldY);
+      const dirSel = document.getElementById('s8-ramp-dir') as HTMLSelectElement | null;
+      const dir = (dirSel?.value ?? 'N') as 'N' | 'S' | 'E' | 'W';
+      const r = setRampOnTile(world, tx, ty, dir);
+      if (r === 'ok') {
+        flashToast(`坂道化 [${tx},${ty}] → ${dir}`, 'info');
+        announceRampPlaced(world, tx, ty);
+      } else if (r === 'no-step')         flashToast('高さ差がないわふ（隣との段差が必要）', 'info');
+      else if (r === 'wrong-direction')   flashToast('方向を逆にしてわふ（低い側にだけ坂道化できる）', 'info');
+      else if (r === 'too-steep')         flashToast('段差が大きすぎるわふ（高さ差 1 段だけ）', 'info');
+      else if (r === 'is-sea')            flashToast('海には立てられないわふ', 'info');
+      else                                flashToast('範囲外わふ', 'info');
+      return;
+    }
     if (terraformMode) {
       const { tx, ty } = worldToTile(detail.worldX, detail.worldY);
       if (terraformMode === 'raise') {
@@ -1459,6 +1499,41 @@ async function start() {
     save(world, currentSlot);
   };
   window.addEventListener('beforeunload', saveOnUnload);
+}
+
+// Σ-8-b-2: ramp 設置時の周辺ちびわふ反応（trait 別の個性反映）
+const RAMP_LINES_NOUMIN = ['いいみちわふ！', 'はかどるわふ！', 'はたらくわふー！'];
+const RAMP_LINES_SEKKACHI = ['はやくいくわふ！', 'おさきにわふ！', 'いそぐわふ！'];
+const RAMP_LINES_NONBIRI = ['まあまあわふ', 'のんびりいこうわふ', 'いいながめわふ'];
+const RAMP_LINES_SHINPAI = ['だいじょうぶわふ？', 'こわれないわふ？', 'のぼれるかなわふ…'];
+const RAMP_LINES_BOUKEN = ['ぼうけんわふ！', 'のぼるわふー！', 'やまわふ！'];
+const RAMP_LINES_NAKIMUSHI = ['たかいよ〜わふ', 'こわいわふ…', 'ママぁ…わふ'];
+const RAMP_LINES_GUNSUKI = ['みんなくるわふ！', 'いっしょわふー！'];
+const RAMP_LINES_TAIKO_KKO = ['まつりだわふ！', 'どんどんわふ！'];
+const RAMP_LINES_GENERIC = ['さかみちわふ！', 'のぼるわふ', 'これでいけるわふ'];
+
+function announceRampPlaced(world: WorldState, tx: number, ty: number) {
+  const cx = (tx + 0.5) * 32;
+  const cy = (ty + 0.5) * 32;
+  const candidates = world.chibis.filter((c) =>
+    isChibiAlive(c) && !c.flight && Math.hypot(c.pos.x - cx, c.pos.y - cy) <= 110,
+  );
+  if (candidates.length === 0) return;
+  // 反応するのは半径内の最大 3 体（うるさくならないよう抑える）
+  const reacted = candidates.slice(0, 3);
+  for (const c of reacted) {
+    let pool = RAMP_LINES_GENERIC;
+    if (c.traits.includes('noumin'))           pool = RAMP_LINES_NOUMIN;
+    else if (c.traits.includes('sekkachi'))    pool = RAMP_LINES_SEKKACHI;
+    else if (c.traits.includes('nonbiri'))     pool = RAMP_LINES_NONBIRI;
+    else if (c.traits.includes('shinpai'))     pool = RAMP_LINES_SHINPAI;
+    else if (c.traits.includes('bouken'))      pool = RAMP_LINES_BOUKEN;
+    else if (c.traits.includes('nakimushi'))   pool = RAMP_LINES_NAKIMUSHI;
+    else if (c.traits.includes('gunsuki'))     pool = RAMP_LINES_GUNSUKI;
+    else if (c.traits.includes('taiko_kko'))   pool = RAMP_LINES_TAIKO_KKO;
+    const line = pool[Math.floor(Math.random() * pool.length)]!;
+    spawnBubble(world.bubbles, c.pos, line, 'speech', 1.6);
+  }
 }
 
 type ToastKind = 'info' | 'discovery';

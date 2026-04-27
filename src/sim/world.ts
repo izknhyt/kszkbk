@@ -1,4 +1,4 @@
-import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FeatureKind, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
+import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FeatureKind, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, RampDir, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
 import { seedFromRunId } from './terrain/noise';
 import { generateTerrain } from './terrain/generators';
 import { findDryTile, isSeaAt, setQueryTerrain } from './terrain/query';
@@ -1211,6 +1211,49 @@ export function enqueueTerraformLower(w: WorldState, tx: number, ty: number): bo
   const jobId = `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   w.terraformJobs.push({ id: jobId, tx, ty, target: 'lower', progress: 0 });
   markTerraformPriority(jobId, 300);  // 新規登録時は 5 分間優先
+  return true;
+}
+
+// =========================================================================
+// Σ-8-b-2 ramp 設置 API
+// 仕様: 対象タイル（低い側）と方向の隣接タイル（高い側）の elev 差が
+// ELEV_STEP (25) ちょうど のときだけ成立。それ以外は失敗理由を返す。
+// 成功で terrainVersion++ して chibi の path を再計算させる。
+// =========================================================================
+export type RampSetResult =
+  | 'ok'
+  | 'out-of-bounds'
+  | 'is-sea'
+  | 'no-step'           // 隣接との高低差が 0 段差
+  | 'wrong-direction'   // 隣接が低い（自分が高い側）
+  | 'too-steep';        // 隣接との高低差が 2 段以上
+
+export function setRampOnTile(w: WorldState, tx: number, ty: number, dir: RampDir): RampSetResult {
+  const t = getTile(w.terrain, tx, ty);
+  if (!t) return 'out-of-bounds';
+  if (t.isSea) return 'is-sea';
+  let nx = tx, ny = ty;
+  if (dir === 'N') ny--;
+  else if (dir === 'S') ny++;
+  else if (dir === 'E') nx++;
+  else if (dir === 'W') nx--;
+  const neighbor = getTile(w.terrain, nx, ny);
+  if (!neighbor) return 'out-of-bounds';
+  const diff = neighbor.elev - t.elev;
+  if (diff === 0) return 'no-step';
+  if (diff < 0) return 'wrong-direction';   // 設置タイルが高い側になっている
+  if (diff > ELEV_STEP) return 'too-steep'; // 2 段差以上は不可
+  // ok
+  t.ramp = dir;
+  w.terrainVersion++;
+  return 'ok';
+}
+
+export function clearRampOnTile(w: WorldState, tx: number, ty: number): boolean {
+  const t = getTile(w.terrain, tx, ty);
+  if (!t || !t.ramp) return false;
+  t.ramp = null;
+  w.terrainVersion++;
   return true;
 }
 

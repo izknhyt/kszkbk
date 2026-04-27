@@ -260,6 +260,44 @@ function tileRgb(mat: string, elev: number): [number,number,number] {
   return [r[0]*0.85 + m[0]*0.15, r[1]*0.85 + m[1]*0.15, r[2]*0.85 + m[2]*0.15];
 }
 
+// Σ-8-b-2 ramp 対応: タイル (c, r) の指定コーナー (NW/NE/SW/SE) における
+// 「ramp 加味済み」の頂点 elev を返す。ramp が無いなら tile.elev、ramp の
+// 高い辺側のコーナーなら elev + ELEV_STEP、低い辺側のコーナーなら elev そのまま。
+const ELEV_STEP_RENDER = 25;
+type Corner = 'NW' | 'NE' | 'SW' | 'SE';
+function tileCornerElev(tile: import('../types').TerrainTile, corner: Corner): number {
+  if (!tile.ramp) return tile.elev;
+  const high = tile.elev + ELEV_STEP_RENDER;
+  switch (tile.ramp) {
+    case 'N': return (corner === 'NW' || corner === 'NE') ? high : tile.elev;
+    case 'S': return (corner === 'SW' || corner === 'SE') ? high : tile.elev;
+    case 'E': return (corner === 'NE' || corner === 'SE') ? high : tile.elev;
+    case 'W': return (corner === 'NW' || corner === 'SW') ? high : tile.elev;
+  }
+}
+
+// 頂点 (ui, vi) に寄与する隣接 4 タイルそれぞれの「該当コーナーでの ramp 加味済 elev」max。
+function vertexRampAwareElev(terrain: import('../types').TerrainTile[][], ui: number, vi: number, ROWS: number, COLS: number): number {
+  let mx = -1, cnt = 0;
+  // タイル (ui-1, vi-1) → そのタイルから見て頂点 (ui, vi) は SE
+  // タイル (ui,   vi-1) → SW
+  // タイル (ui-1, vi  ) → NE
+  // タイル (ui,   vi  ) → NW
+  const probes: Array<[number, number, Corner]> = [
+    [ui - 1, vi - 1, 'SE'],
+    [ui    , vi - 1, 'SW'],
+    [ui - 1, vi    , 'NE'],
+    [ui    , vi    , 'NW'],
+  ];
+  for (const [tc, tr, corner] of probes) {
+    if (tr < 0 || tr >= ROWS || tc < 0 || tc >= COLS) continue;
+    const e = tileCornerElev(terrain[tr]![tc]!, corner);
+    if (e > mx) mx = e;
+    cnt++;
+  }
+  return cnt > 0 ? mx : 0;
+}
+
 // ============================================================
 // 地形 BufferGeometry 構築
 // ============================================================
@@ -274,30 +312,34 @@ function buildTerrainGeo(terrain: import('../types').TerrainTile[][]): THREE.Buf
   for (let vi=0; vi<VH; vi++) {
     for (let ui=0; ui<VW; ui++) {
       const vIdx = vi*VW+ui;
-      // Σ-8: 段々地形を強調するため、頂点 elev は隣接 4 タイルの max を取る。
-      // これで境界が高い側のタイルに揃い、自然と段差/崖面が垂直に立ち上がる。
-      let eMax=-1, eMin=999, cnt=0;
+      // Σ-8: 頂点 elev は隣接 4 タイルの max（ramp 加味）を取る。
+      // 段々地形を強調しつつ、ramp タイルの低辺/高辺を斜面に反映する。
+      const elev = vertexRampAwareElev(terrain, ui, vi, ROWS, COLS);
+      // cliff シェーディング用に「ramp を考慮しない素の elev range」も計測
+      let eMin=999, eMax=-1;
       for (let dr=-1; dr<=0; dr++) for (let dc=-1; dc<=0; dc++) {
         const tr=vi+dr, tc=ui+dc;
         if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){
           const e = terrain[tr]![tc]!.elev;
           if (e>eMax) eMax=e;
           if (e<eMin) eMin=e;
-          cnt++;
         }
       }
-      const elev = cnt>0 ? eMax : 0;
       pos[vIdx*3]   = ui*TERRAIN_TILE_SIZE;
       pos[vIdx*3+1] = elev*ELEV_SCALE;
       pos[vIdx*3+2] = vi*TERRAIN_TILE_SIZE;
       const nr = Math.min(ROWS-1, vi===VH-1?vi-1:vi);
       const nc = Math.min(COLS-1, ui===VW-1?ui-1:ui);
       const tile = terrain[nr]![nc]!;
-      const [r,g,bv] = tileRgb(tile.material, elev);
-      // 崖面シェーディング：周囲タイルの elev 差が大きいほど暗いブラウンに blend。
-      // Σ-8: 0-255 スケールなので閾値を ELEV_STEP=25 単位（1段=25, 2段=50）に合わせる。
+      // ramp タイルは「土の道」っぽい色寄せ。それ以外は通常 ramp。
+      const [r,g,bv] = tile.ramp
+        ? [0xa8/255*0.55 + 0x6b/255*0.45, 0x7a/255*0.55 + 0x9e/255*0.45, 0x4a/255*0.55 + 0x4a/255*0.45]
+        : tileRgb(tile.material, elev);
+      // 崖面シェーディング：ramp 接続できない箇所のみ崖色に blend。
+      // ramp タイル内部は段差が斜面に解消されるので cliff 強度を抑える。
       const slopeRange = eMax - eMin;
-      const cliff = Math.max(0, Math.min(1, (slopeRange - 30) / 55));  // 30 から効き、85 で max
+      let cliff = Math.max(0, Math.min(1, (slopeRange - 30) / 55));
+      if (tile.ramp) cliff *= 0.25;
       const cliffR = 0x4a/255, cliffG = 0x35/255, cliffB = 0x22/255;
       const k = cliff * 0.65;
       col[vIdx*3]   = r  * (1 - k) + cliffR * k;
@@ -326,24 +368,26 @@ function refreshTerrainGeo(geo: THREE.BufferGeometry, terrain: import('../types'
   const colA = geo.getAttribute('color')    as THREE.BufferAttribute;
   for (let vi=0;vi<VH;vi++) for (let ui=0;ui<VW;ui++) {
     const vIdx=vi*VW+ui;
-    let eMax=-1, eMin=999, cnt=0;
+    const elev = vertexRampAwareElev(terrain, ui, vi, ROWS, COLS);
+    let eMax=-1, eMin=999;
     for (let dr=-1;dr<=0;dr++) for (let dc=-1;dc<=0;dc++) {
       const tr=vi+dr, tc=ui+dc;
       if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){
         const e = terrain[tr]![tc]!.elev;
         if (e>eMax) eMax=e;
         if (e<eMin) eMin=e;
-        cnt++;
       }
     }
-    const elev=cnt>0?eMax:0;
     posA.setXYZ(vIdx, ui*TERRAIN_TILE_SIZE, elev*ELEV_SCALE, vi*TERRAIN_TILE_SIZE);
     const nr=Math.min(ROWS-1,vi===VH-1?vi-1:vi);
     const nc=Math.min(COLS-1,ui===VW-1?ui-1:ui);
     const tile=terrain[nr]![nc]!;
-    const [r,g,bv]=tileRgb(tile.material,elev);
+    const [r,g,bv]= tile.ramp
+      ? [0xa8/255*0.55 + 0x6b/255*0.45, 0x7a/255*0.55 + 0x9e/255*0.45, 0x4a/255*0.55 + 0x4a/255*0.45]
+      : tileRgb(tile.material, elev);
     const slopeRange = eMax - eMin;
-    const cliff = Math.max(0, Math.min(1, (slopeRange - 30) / 55));
+    let cliff = Math.max(0, Math.min(1, (slopeRange - 30) / 55));
+    if (tile.ramp) cliff *= 0.25;
     const cliffR=0x4a/255, cliffG=0x35/255, cliffB=0x22/255;
     const k = cliff * 0.65;
     colA.setXYZ(vIdx, r*(1-k)+cliffR*k, g*(1-k)+cliffG*k, bv*(1-k)+cliffB*k);
@@ -389,19 +433,8 @@ function elevAt(terrain: import('../types').TerrainTile[][], wx: number, wy: num
   const v1 = Math.min(ROWS, v0 + 1);
   const fu = Math.max(0, Math.min(1, u - u0));
   const fv = Math.max(0, Math.min(1, v - v0));
-  const vElev = (ui: number, vi: number): number => {
-    // 頂点 elev = 隣接 4 タイルの max（buildTerrainGeo と同式）
-    let mx = -1, cnt = 0;
-    for (let dr = -1; dr <= 0; dr++) for (let dc = -1; dc <= 0; dc++) {
-      const tr = vi + dr, tc = ui + dc;
-      if (tr >= 0 && tr < ROWS && tc >= 0 && tc < COLS) {
-        const e = terrain[tr]![tc]!.elev;
-        if (e > mx) mx = e;
-        cnt++;
-      }
-    }
-    return cnt > 0 ? mx : 0;
-  };
+  // 頂点 elev = 隣接 4 タイルの max（ramp 加味、buildTerrainGeo と同式）
+  const vElev = (ui: number, vi: number): number => vertexRampAwareElev(terrain, ui, vi, ROWS, COLS);
   const eTL = vElev(u0, v0), eTR = vElev(u1, v0);
   const eBL = vElev(u0, v1), eBR = vElev(u1, v1);
   let elev: number;
@@ -889,6 +922,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   // 地形の前フレーム標高（崩落検出用）
   let prevElevs: number[][] | null = null;
+  let lastTerrainVersion = -1;
 
   // --- バブルオーバーレイ ---
   const bubbleOverlay = document.createElement('div');
@@ -1346,9 +1380,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       obsViews.forEach(m=>applyT(m));
     }
 
-    // ---- 地形（90フレームごとリビルド）----
-    if(world.terrain.length>0 && frameCount-terrainBuiltAt>=90){
+    // ---- 地形（terrainVersion 変更時に即時、それ以外は 90 フレームごと）----
+    const tvChanged = (world.terrainVersion ?? 0) !== lastTerrainVersion;
+    if(world.terrain.length>0 && (tvChanged || frameCount-terrainBuiltAt>=90)){
       terrainBuiltAt=frameCount;
+      lastTerrainVersion = world.terrainVersion ?? 0;
       if(!terrainGeo){
         terrainGeo=buildTerrainGeo(world.terrain);
         terrainMesh.geometry.dispose();
