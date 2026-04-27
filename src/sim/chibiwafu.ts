@@ -452,33 +452,36 @@ function maybeRashLeap(c: Chibiwafu, env: WanderEnv): boolean {
   if (env.bubbles) spawnBubble(env.bubbles, { x: c.pos.x, y: c.pos.y }, line, 'speech', 1.6);
   c.faceLeft = nx < 0;
 
-  // c.flight を直接設定（launchFlight 相当、cliff_fall 死因タグ付）
+  // c.flight を直接設定（launchFlight 相当、cliff_fall 死因タグ付）。
+  // Σ-8-b-1.6: vz を上向きに与えて「ぴょん」と跳ねてから落ちる演出に。
+  // 重力 CLIFF_GRAVITY = 200 unit/sec² と相殺で滞空時間が伸びる。
   if (isDown) {
-    // 高所 → 低所：勢いよく飛び降り、着地で 高低差 × 1.0 のダメージ（cliff_fall 判定で増幅）
+    // 高所 → 低所：勢いよく飛び降り（vz +50 で軽くジャンプしてから滑落）。
+    // 高低差 × 0.6 のダメージは world.ts cliff_fall 判定で上書きされる。
     c.flight = {
-      vx: nx * 80,
-      vy: ny * 80,
-      vz: 0,
+      vx: nx * 90,
+      vy: ny * 90,
+      vz: 50,
       posZ: myE,
       startElev: myE,
-      leftSec: 0.8,
-      totalSec: 0.8,
+      leftSec: 1.2,
+      totalSec: 1.2,
       hitKeys: [],
-      landingDamage: 0,  // 着地時に world.ts 側で cliff_fall ダメージが上書き
+      landingDamage: 0,
       landCauseId: 'cliff_fall',
     };
   } else {
-    // 低所 → 高所：登ろうとしてジャンプ、ほぼ届かず軽ダメージで墜落
+    // 低所 → 高所：登ろうとしてジャンプ（vz +90 で大きくジャンプ）、ほぼ届かず墜落。
     c.flight = {
-      vx: nx * 45,
-      vy: ny * 45,
-      vz: 0,
+      vx: nx * 50,
+      vy: ny * 50,
+      vz: 90,
       posZ: myE,
       startElev: myE,
-      leftSec: 0.55,
-      totalSec: 0.55,
+      leftSec: 0.85,
+      totalSec: 0.85,
       hitKeys: [],
-      landingDamage: 8,  // 登ろうとして転倒する軽ダメージ
+      landingDamage: 8,
       landCauseId: 'cliff_fall',
     };
   }

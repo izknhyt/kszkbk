@@ -372,6 +372,12 @@ function makeGradMap(): THREE.DataTexture {
 // 周囲より低い / 高いタイルでキャラが埋もれたり浮いたりしていた。
 // ============================================================
 function elevAt(terrain: import('../types').TerrainTile[][], wx: number, wy: number): number {
+  // Σ-8-b-1.6: buildTerrainGeo の三角形分割と完全一致させるため、
+  // bilinear ではなく triangle barycentric で補間する。これにより
+  // メッシュ表面とキャラのスプライト Y が完全に一致し「埋もれ」が消える。
+  // 各 quad は対角線 (tr-bl) で 2 三角形に分割：
+  //   T1: tl, bl, tr   (fu+fv < 1)
+  //   T2: tr, bl, br   (fu+fv ≥ 1)
   const ROWS = terrain.length;
   const COLS = terrain[0]?.length ?? 0;
   if (ROWS === 0 || COLS === 0) return 0;
@@ -384,8 +390,7 @@ function elevAt(terrain: import('../types').TerrainTile[][], wx: number, wy: num
   const fu = Math.max(0, Math.min(1, u - u0));
   const fv = Math.max(0, Math.min(1, v - v0));
   const vElev = (ui: number, vi: number): number => {
-    // Σ-8: buildTerrainGeo と同じ「隣接 4 タイルの max」式に揃える。
-    // タイル境界で高い側に持ち上げられるので段々地形でキャラが浮かない/埋もれない。
+    // 頂点 elev = 隣接 4 タイルの max（buildTerrainGeo と同式）
     let mx = -1, cnt = 0;
     for (let dr = -1; dr <= 0; dr++) for (let dc = -1; dc <= 0; dc++) {
       const tr = vi + dr, tc = ui + dc;
@@ -397,11 +402,19 @@ function elevAt(terrain: import('../types').TerrainTile[][], wx: number, wy: num
     }
     return cnt > 0 ? mx : 0;
   };
-  const e00 = vElev(u0, v0), e10 = vElev(u1, v0);
-  const e01 = vElev(u0, v1), e11 = vElev(u1, v1);
-  const e0 = e00 * (1 - fu) + e10 * fu;
-  const e1 = e01 * (1 - fu) + e11 * fu;
-  return (e0 * (1 - fv) + e1 * fv) * ELEV_SCALE;
+  const eTL = vElev(u0, v0), eTR = vElev(u1, v0);
+  const eBL = vElev(u0, v1), eBR = vElev(u1, v1);
+  let elev: number;
+  if (fu + fv < 1) {
+    // T1: tl(0,0), bl(0,1), tr(1,0)。barycentric:
+    //   w_tl = 1 - fu - fv, w_bl = fv, w_tr = fu
+    elev = eTL * (1 - fu - fv) + eBL * fv + eTR * fu;
+  } else {
+    // T2: tr(1,0), bl(0,1), br(1,1)。barycentric:
+    //   w_tr = 1 - fv, w_bl = 1 - fu, w_br = fu + fv - 1
+    elev = eTR * (1 - fv) + eBL * (1 - fu) + eBR * (fu + fv - 1);
+  }
+  return elev * ELEV_SCALE;
 }
 
 // ============================================================

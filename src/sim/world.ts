@@ -3642,6 +3642,26 @@ function compactCorpses(w: WorldState) {
 
 // --- NPC reactions --------------------------------------------------------
 
+// Σ-8-b-1.6: NPC も「2 段差以上の崖は越えない」通行ルールに乗せる。
+// chibi の A* と違い、NPC はステップ移動の都度チェックするだけのライト版。
+// fromX/fromY → toX/toY の elev 差が ELEV_STEP*2 以上なら不可。
+// （NPC は ramp 必須にすると現実的に動けないので、1 段差は暫定 OK）
+function npcCanStepTo(terrain: TerrainTile[][], fromX: number, fromY: number, toX: number, toY: number): boolean {
+  const ROWS = terrain.length;
+  const COLS = terrain[0]?.length ?? 0;
+  if (!ROWS || !COLS) return true;
+  const fTx = Math.max(0, Math.min(COLS - 1, Math.floor(fromX / TERRAIN_TILE_SIZE)));
+  const fTy = Math.max(0, Math.min(ROWS - 1, Math.floor(fromY / TERRAIN_TILE_SIZE)));
+  const tTx = Math.max(0, Math.min(COLS - 1, Math.floor(toX / TERRAIN_TILE_SIZE)));
+  const tTy = Math.max(0, Math.min(ROWS - 1, Math.floor(toY / TERRAIN_TILE_SIZE)));
+  if (fTx === tTx && fTy === tTy) return true;
+  const fromE = terrain[fTy]?.[fTx]?.elev ?? 0;
+  const toTile = terrain[tTy]?.[tTx];
+  if (!toTile) return false;
+  if (toTile.isSea) return false;
+  return Math.abs(toTile.elev - fromE) < ELEV_STEP * 2;  // 2 段差以上 = 崖
+}
+
 function updateNpcs(w: WorldState, dt: number) {
   for (const n of w.npcs) {
     // 飛行中は物理だけ動かして normal updates はスキップ
@@ -3688,7 +3708,15 @@ function updateNpcs(w: WorldState, dt: number) {
       updateFuranaMovement(w, n, dt);
       updateFuranaBehavior(w, n, dt);
     } else {
+      // Σ-8-b-1.6: wanderNpc はテレポート式なので、移動後に崖越え判定して
+      // 不可なら元に戻す。これでスズ/ココン/ルーも崖の向こうへワープしない。
+      const oldX = n.pos.x, oldY = n.pos.y;
       wanderNpc(n, dt);
+      if ((n.pos.x !== oldX || n.pos.y !== oldY) && !npcCanStepTo(w.terrain, oldX, oldY, n.pos.x, n.pos.y)) {
+        n.pos.x = oldX;
+        n.pos.y = oldY;
+        n.wanderTimer = 0.5;
+      }
       if (n.id === 'cocoon') updateCocoonAbuse(w, n, dt);
       if (n.id === 'lou' && Math.random() < 0.0007) {
         spawnBubble(w.bubbles, n.pos, pickLine(LOU_LINES), 'npc-speech', 1.6);
@@ -3721,9 +3749,20 @@ function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
     const dx = n.target.x - n.pos.x;
     const dy = n.target.y - n.pos.y;
     const d = Math.max(0.001, Math.hypot(dx, dy));
-    n.pos.x += (dx / d) * currentSpeed * dt;
-    n.pos.y += (dy / d) * currentSpeed * dt;
-    n.faceLeft = dx < 0;
+    const stepX = (dx / d) * currentSpeed * dt;
+    const stepY = (dy / d) * currentSpeed * dt;
+    const newX = n.pos.x + stepX;
+    const newY = n.pos.y + stepY;
+    // Σ-8-b-1.6: 2 段差以上の崖はフラナでも越えられない（巨人扱いを撤回）
+    if (npcCanStepTo(w.terrain, n.pos.x, n.pos.y, newX, newY)) {
+      n.pos.x = newX;
+      n.pos.y = newY;
+      n.faceLeft = dx < 0;
+    } else {
+      // 崖を越えられない → target を諦めて次の wander を待つ
+      n.target = null;
+      n.wanderTimer = 0.6;
+    }
   }
 }
 
