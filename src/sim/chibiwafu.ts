@@ -1,4 +1,4 @@
-import type { ChibiState, Chibiwafu, TraitId, Vec2 } from '../types';
+import type { ChibiState, Chibiwafu, TerrainTile, TraitId, Vec2 } from '../types';
 import {
   derivedMamaRadius,
   derivedRiverTrespass,
@@ -7,6 +7,7 @@ import {
 } from './personality';
 import type { Season } from '../types';
 import { isSeaAt } from './terrain/query';
+import { findPath, worldToTilePoint, pathToWorldWaypoints } from './pathfinding';
 
 let nextId = 1;
 
@@ -84,7 +85,9 @@ interface WanderEnv {
   priorityConstructionPositions: Vec2[];
   // Σ-7-d 水回避：terrain[row][col].waterLevel を見るためのタイル参照
   // null の場合は回避無効（旧呼び出し互換）
-  terrain?: import('../types').TerrainTile[][];
+  terrain?: TerrainTile[][];
+  // Σ-8-b A* path 用。terrainVersion が変わったら chibi の path を破棄。
+  terrainVersion?: number;
 }
 
 // ============================================================
@@ -94,6 +97,18 @@ interface WanderEnv {
 
 export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: number }, env?: WanderEnv): string | null {
   let announcementKey: string | null = null;
+
+  // Σ-8-b: terrainVersion が変わったら path を捨てて再計算（target は維持して再ルート）
+  if (env?.terrainVersion !== undefined && c.pathVersion !== undefined && c.pathVersion !== env.terrainVersion) {
+    c.pathPoints = undefined;
+    c.pathVersion = undefined;
+  }
+  // Σ-8-b: path 失敗 cooldown を消化中は移動しない（confused/idle）
+  if ((c.pathFailedSec ?? 0) > 0) {
+    c.pathFailedSec = Math.max(0, (c.pathFailedSec ?? 0) - dt);
+    return null;
+  }
+
   if (!c.target || distance(c.pos, c.target) < 4) {
     const margin = 30;
     let newTarget: Vec2 | null = null;
@@ -276,20 +291,84 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
       c.target.y += (Math.random() - 0.5) * 60;
     }
     c.faceLeft = c.target.x < c.pos.x;
+    // Σ-8-b: 新 target に対して A* path を計算
+    requestPath(c, env);
   } else {
     announcementKey = null; // target 継続中は announce しない
   }
   // 低集中のちびわふは途中で target を微調整（ふらふら、寄り道）
-  if (c.params.focus < 35 && Math.random() < 0.015) {
+  // Σ-8-b: requestPath 失敗で c.target が null になっている可能性があるのでガード
+  if (c.target && c.params.focus < 35 && Math.random() < 0.015) {
     c.target.x += (Math.random() - 0.5) * 40;
     c.target.y += (Math.random() - 0.5) * 20;
   }
-  const dx = c.target.x - c.pos.x;
-  const dy = c.target.y - c.pos.y;
-  const d = Math.max(0.001, Math.hypot(dx, dy));
-  c.pos.x += (dx / d) * c.speed * dt;
-  c.pos.y += (dy / d) * c.speed * dt;
+  // Σ-8-b: pathPoints があれば waypoint に向かって移動、なければ旧来の直線 fallback。
+  // path がない状況：terrain 未提供（古い呼び出し互換）/ A* 失敗（cooldown 消化中は上で return 済）/ 計算前。
+  if (c.pathPoints && c.pathPoints.length > 0) {
+    const wp = c.pathPoints[0]!;
+    const wpdx = wp.x - c.pos.x;
+    const wpdy = wp.y - c.pos.y;
+    const wpd = Math.hypot(wpdx, wpdy);
+    if (wpd < 6) {
+      c.pathPoints.shift();
+      if (c.pathPoints.length === 0) {
+        c.target = null;
+      }
+    } else {
+      const inv = 1 / Math.max(0.001, wpd);
+      c.pos.x += wpdx * inv * c.speed * dt;
+      c.pos.y += wpdy * inv * c.speed * dt;
+      c.faceLeft = wpdx < 0;
+    }
+  } else if (c.target) {
+    // path 計算前 / terrain 未提供時の旧来直線 fallback
+    const dx = c.target.x - c.pos.x;
+    const dy = c.target.y - c.pos.y;
+    const d = Math.max(0.001, Math.hypot(dx, dy));
+    c.pos.x += (dx / d) * c.speed * dt;
+    c.pos.y += (dy / d) * c.speed * dt;
+  }
+  // target が null（path 失敗で破棄済み等）は移動せず、次回 wanderStep で再抽選
   return announcementKey;
+}
+
+// Σ-8-b: 新 target に対して A* path を計算し、pathPoints をセット。
+// 失敗時は target を破棄して短い idle/confused cooldown を入れる（仕様 §A* 失敗時）。
+function requestPath(c: Chibiwafu, env?: WanderEnv): void {
+  if (!env?.terrain || env.terrainVersion === undefined || !c.target) {
+    // terrain 未提供の旧互換呼び出し → 直線移動 fallback に任せる
+    c.pathPoints = undefined;
+    c.pathVersion = undefined;
+    return;
+  }
+  const start = worldToTilePoint(c.pos.x, c.pos.y);
+  const goal  = worldToTilePoint(c.target.x, c.target.y);
+  const path = findPath(env.terrain, start, goal);
+  if (!path) {
+    // path 失敗：target 破棄 + 1 秒の idle cooldown（再抽選を防ぐ）
+    // SPEC §A* 失敗時：「短時間の confused/idle」「ログや吹き出しはスパムしない cooldown」
+    c.target = null;
+    c.pathPoints = undefined;
+    c.pathVersion = undefined;
+    c.pathFailedSec = 1.0;
+    if (c.state === 'idle' || c.state === 'surprised') {
+      // dazed で立ち止まる演出。setState を循環 import 避けるため inline 設定
+      c.state = 'dazed';
+      c.stateTimer = 0.8;
+    }
+    return;
+  }
+  // タイル中心 waypoint に変換し、最終 waypoint を実 target に差し替え
+  const waypoints = pathToWorldWaypoints(path);
+  if (waypoints.length > 0) {
+    waypoints[waypoints.length - 1] = { x: c.target.x, y: c.target.y };
+  }
+  // 開始タイル中心は出発位置と近すぎる事が多いので skip
+  if (waypoints.length > 1 && distance(c.pos, waypoints[0]!) < 12) {
+    waypoints.shift();
+  }
+  c.pathPoints = waypoints;
+  c.pathVersion = env.terrainVersion;
 }
 
 export type { WanderEnv };

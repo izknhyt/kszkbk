@@ -221,6 +221,10 @@ export interface WorldState {
   // 0.25 秒毎にフロー計算を行う duty cycle 用カウンタ（transient）。
   // 雨/蒸発/吸収は毎 tick、downhill flow と feature キャッシュは 0.25s 毎。
   hydroTimer: number;
+  // --- Σ-8-b path 無効化バージョン ----------------------------------------
+  // raise/lower/ramp で increment。chibi.pathVersion と不一致なら再計算 or 破棄。
+  // transient（保存しない、ロード後 0 から再開、既存 path もリセットされる）。
+  terrainVersion: number;
 }
 
 // フリー配置障害物：陸地タイルのみ、フラナ拠点付近は除外。
@@ -1373,6 +1377,8 @@ export function updateTerraformJobs(w: WorldState, dt: number): void {
         }
         lowerTile(w.terrain, job.tx, job.ty, RAISE_ELEV_AMOUNT);
       }
+      // Σ-8-b: 地形が変わったので path cache を破棄（chibi 全員が再計算）
+      w.terrainVersion++;
       w.terraformJobs.splice(i, 1);
     }
   }
@@ -1451,6 +1457,8 @@ export function updateTerrainStability(w: WorldState, dt: number): void {
       // 崩落で ramp も壊れる
       tile.ramp = null;
       lowest.ramp = null;
+      // Σ-8-b: 崩落で地形変動 → path cache を破棄
+      w.terrainVersion++;
 
       // 低タイルに buryTimer をセット（生き埋め判定用）
       const buriedTile = getTile(terrain, col + lowestDc, row + lowestDr);
@@ -2088,6 +2096,7 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
     terrainSeed,
     terraformJobs: [],
     hydroTimer: 0,
+    terrainVersion: 0,
   };
 }
 
@@ -3284,6 +3293,7 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       constructionPositions: env.constructionPositions,
       priorityConstructionPositions: env.priorityConstructionPositions,
       terrain: w.terrain,
+      terrainVersion: w.terrainVersion,
     });
     // 40% で行動予告（毎回だと説明口調になるので抑制）
     if (announcementKey && Math.random() < 0.4) {

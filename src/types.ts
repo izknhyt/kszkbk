@@ -61,6 +61,14 @@ export interface Chibiwafu {
   // Σ-7-w 狼警報：直近の警報を無視（起きずに寝続けた）した tick。
   // 設定後 ~10 秒間は pickWolfTarget の優先度が +400（呼び水獲物扱い）。transient。
   wolfAlarmIgnoredTick?: number;
+  // --- Σ-8-b A* path consumer --------------------------------------------
+  // target 設定時に findPath で算出した waypoint 列。先頭から消費。
+  // タイル中心の世界座標。最終要素は target 自体（タイル中心ではなく実位置）に差し替え。
+  pathPoints?: Vec2[];
+  // path を計算したときの terrainVersion。world.terrainVersion と一致しなければ再計算。
+  pathVersion?: number;
+  // path 失敗時の confused/idle 残秒（>0 の間は再計算しない）
+  pathFailedSec?: number;
 }
 
 export interface LifeEvent {
