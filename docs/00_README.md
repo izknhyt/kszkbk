@@ -20,6 +20,7 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `90_qa_checklist.md` | 納品チェックリスト | 納品検品時 |
 | `SIGMA-8-PLAN.md` | M2 地形リワークのロードマップ v2 | Sigma-8 実装時 |
 | `SIGMA-8-DEVELOPMENT-SPEC.md` | Sigma-8 の実装仕様・禁止事項・検証基準 | Sigma-8 実装時 |
+| `SIGMA-8-UI-ASSET-SPEC.md` | Sigma-8 の UI / terrain atlas / prop / icon 仕様 | UI・素材実装/発注時 |
 
 ---
 
