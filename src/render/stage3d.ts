@@ -842,6 +842,27 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     T_COLS*T_ROWS);
   waterDampIM.count = 0; waterShallowIM.count = 0; waterMidIM.count = 0; waterDeepIM.count = 0;
   scene.add(waterDampIM, waterShallowIM, waterMidIM, waterDeepIM);
+
+  // ==========================================================
+  // Σ-8-b-3 崖の壁面 InstancedMesh
+  // 隣接タイルの elev 差が ELEV_STEP*2 (50) 以上の境界に縦壁を立てる。
+  // PlaneGeometry(1,1) を east/south 境界ごとに matrix で配置。
+  // ==========================================================
+  const MAX_CLIFF_WALLS = 2400;  // 5700 タイル × 2 境界の上限見積もり
+  const _cliffWallGeo = new THREE.PlaneGeometry(1, 1);
+  const cliffWallIM = new THREE.InstancedMesh(
+    _cliffWallGeo,
+    new THREE.MeshToonMaterial({
+      color: 0x5a4030,          // 岩壁の暗茶
+      side: THREE.DoubleSide,
+      gradientMap: gradMap,
+    }),
+    MAX_CLIFF_WALLS,
+  );
+  cliffWallIM.count = 0;
+  cliffWallIM.castShadow = false;
+  cliffWallIM.receiveShadow = false;
+  scene.add(cliffWallIM);
   const waterIMs = [waterDampIM, waterShallowIM, waterMidIM, waterDeepIM];
 
   // specular ハイライト：水面に sin(time) で揺らぐ白い斑点。深い水たまりだけ。
@@ -1416,27 +1437,79 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
       prevElevs=world.terrain.map(row=>row.map(t=>t.elev));
 
-      // 崖線（Σ-8: elev 差 ≥ ELEV_STEP*1.5 = 38 で「崖」相当）
-      if(cliffLines){ scene.remove(cliffLines); cliffLines.geometry.dispose(); cliffLines=null; }
+      // Σ-8-b-3: 崖を壁面 InstancedMesh で実体化（黒線 cliffLines は debug 専用へ）
       const ROWS2=world.terrain.length, COLS2=world.terrain[0]?.length??0;
-      const CLIFF_LINE_THRESH = 38;  // 1段差(25) は段差扱い、≥38 で崖の黒線
-      const cPts:number[]=[];
-      for(let r2=0;r2<ROWS2;r2++) for(let c2=0;c2<COLS2;c2++){
-        const e0=world.terrain[r2]![c2]!.elev;
-        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=CLIFF_LINE_THRESH){
-          const x=(c2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ex)*ELEV_SCALE;
-          cPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
-        }}
-        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=CLIFF_LINE_THRESH){
-          const z=(r2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ey)*ELEV_SCALE;
-          cPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
-        }}
+      const CLIFF_WALL_THRESH = 50;  // 2 段差以上 (= ELEV_STEP*2) で壁を立てる
+      const TILE = TERRAIN_TILE_SIZE;
+      const _cliffMat = new THREE.Matrix4();
+      const _cliffPos = new THREE.Vector3();
+      const _cliffQuat = new THREE.Quaternion();
+      const _cliffScale = new THREE.Vector3();
+      const _cliffEulerEW = new THREE.Euler(0, Math.PI / 2, 0); // east/west 境界用
+      const _cliffEulerNS = new THREE.Euler(0, 0, 0);          // north/south 境界用（XY plane normal +Z でそのまま）
+      let cwCount = 0;
+      for (let r2=0; r2<ROWS2; r2++) for (let c2=0; c2<COLS2; c2++){
+        const e0 = world.terrain[r2]![c2]!.elev;
+        // east 境界: タイル(c2,r2) と (c2+1,r2)
+        if (c2+1 < COLS2) {
+          const eE = world.terrain[r2]![c2+1]!.elev;
+          const diff = Math.abs(e0 - eE);
+          if (diff >= CLIFF_WALL_THRESH) {
+            const lo = Math.min(e0, eE), hi = Math.max(e0, eE);
+            const wallH = (hi - lo) * ELEV_SCALE;
+            _cliffPos.set((c2+1)*TILE, (lo + hi)/2 * ELEV_SCALE, (r2 + 0.5)*TILE);
+            _cliffQuat.setFromEuler(_cliffEulerEW);
+            _cliffScale.set(TILE, wallH, 1);
+            _cliffMat.compose(_cliffPos, _cliffQuat, _cliffScale);
+            if (cwCount < MAX_CLIFF_WALLS) {
+              cliffWallIM.setMatrixAt(cwCount, _cliffMat);
+              cwCount++;
+            }
+          }
+        }
+        // south 境界: タイル(c2,r2) と (c2,r2+1)
+        if (r2+1 < ROWS2) {
+          const eS = world.terrain[r2+1]![c2]!.elev;
+          const diff = Math.abs(e0 - eS);
+          if (diff >= CLIFF_WALL_THRESH) {
+            const lo = Math.min(e0, eS), hi = Math.max(e0, eS);
+            const wallH = (hi - lo) * ELEV_SCALE;
+            _cliffPos.set((c2 + 0.5)*TILE, (lo + hi)/2 * ELEV_SCALE, (r2+1)*TILE);
+            _cliffQuat.setFromEuler(_cliffEulerNS);
+            _cliffScale.set(TILE, wallH, 1);
+            _cliffMat.compose(_cliffPos, _cliffQuat, _cliffScale);
+            if (cwCount < MAX_CLIFF_WALLS) {
+              cliffWallIM.setMatrixAt(cwCount, _cliffMat);
+              cwCount++;
+            }
+          }
+        }
       }
-      if(cPts.length){
-        const lg=new THREE.BufferGeometry();
-        lg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(cPts),3));
-        cliffLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x1a1a1a}));
-        scene.add(cliffLines);
+      cliffWallIM.count = cwCount;
+      cliffWallIM.instanceMatrix.needsUpdate = true;
+
+      // 旧 cliffLines: contour トグルが ON のときのみ debug 用に薄く出す
+      if(cliffLines){ scene.remove(cliffLines); cliffLines.geometry.dispose(); cliffLines=null; }
+      if(contourVisible){
+        const CLIFF_LINE_THRESH = 38;
+        const cPts:number[]=[];
+        for(let r2=0;r2<ROWS2;r2++) for(let c2=0;c2<COLS2;c2++){
+          const e0=world.terrain[r2]![c2]!.elev;
+          if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=CLIFF_LINE_THRESH){
+            const x=(c2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ex)*ELEV_SCALE;
+            cPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
+          }}
+          if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=CLIFF_LINE_THRESH){
+            const z=(r2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ey)*ELEV_SCALE;
+            cPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
+          }}
+        }
+        if(cPts.length){
+          const lg=new THREE.BufferGeometry();
+          lg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(cPts),3));
+          cliffLines=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0x1a1a1a,transparent:true,opacity:0.5}));
+          scene.add(cliffLines);
+        }
       }
 
       // 等高線（20 単位、隣接タイルの elev が 20 の倍数を跨いだら線を引く）
