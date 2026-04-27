@@ -39,7 +39,8 @@ export interface StageHandle {
 // ============================================================
 // 定数
 // ============================================================
-const ELEV_SCALE   = 12;   // elev (0-100) → Three.js Y (0-1200)。高低差を強調して 3D 感を出す
+// Σ-8: elev は 0-255 スケール。Y 上限を ~1500 に抑えるため SCALE は 6。
+const ELEV_SCALE   = 6;    // elev (0-255) → Three.js Y (0-1530)。
 const BASE_H       = 1200; // zoomLevel=1 のカメラ高さ
 const CHIBI_W      = 48;
 const CHIBI_H      = 64;
@@ -234,20 +235,19 @@ const MAT_RGB: Record<string, [number,number,number]> = {
   soil: [0xa8/255,0x7a/255,0x4a/255],
   sand: [0xe0/255,0xc9/255,0x8a/255],
   rock: [0x7a/255,0x7a/255,0x7a/255],
-  water:[0x4a/255,0x6b/255,0x9c/255],
+  snow: [0xea/255,0xf2/255,0xff/255],
 };
-// 標高別カラーバンド（5 段階の離散）：地図のように「N 段目」がハッキリ見える。
-// グラデーションだと色が連続的に変わるので「どこが高いか」直感的に読めなかった。
-// 各バンド内では同じ色 → エッジで切り替わる → プレイヤーが標高を「色の階段」として認識できる。
+// 標高別カラーバンド（離散）：Σ-8 で 0-255 スケールに移行。
+// ELEV_STEP=25 単位なので「N 段目」が地図的にハッキリ読める。
 const ELEV_BANDS: Array<{ max: number; rgb: [number,number,number] }> = [
-  { max: 18,  rgb: [0x35/255,0x60/255,0x30/255] },  // 深緑（低地・湿地）
-  { max: 38,  rgb: [0x68/255,0x95/255,0x44/255] },  // 草緑（平野）
-  { max: 58,  rgb: [0xa6/255,0xae/255,0x55/255] },  // 黄緑（丘陵）
-  { max: 76,  rgb: [0xae/255,0x82/255,0x46/255] },  // 茶（山腹）
-  { max: 100, rgb: [0xc8/255,0xc4/255,0xb0/255] },  // 灰岩（山頂）
+  { max: 50,  rgb: [0x35/255,0x60/255,0x30/255] },  // 深緑（低地・湿地）
+  { max: 100, rgb: [0x68/255,0x95/255,0x44/255] },  // 草緑（平野）
+  { max: 150, rgb: [0xa6/255,0xae/255,0x55/255] },  // 黄緑（丘陵）
+  { max: 200, rgb: [0xae/255,0x82/255,0x46/255] },  // 茶（山腹）
+  { max: 255, rgb: [0xc8/255,0xc4/255,0xb0/255] },  // 灰岩（山頂）
 ];
 function rampColor(elev: number): [number,number,number] {
-  const e = Math.max(0, Math.min(100, elev));
+  const e = Math.max(0, Math.min(255, elev));
   for (const band of ELEV_BANDS) {
     if (e <= band.max) return band.rgb;
   }
@@ -274,17 +274,19 @@ function buildTerrainGeo(terrain: import('../types').TerrainTile[][]): THREE.Buf
   for (let vi=0; vi<VH; vi++) {
     for (let ui=0; ui<VW; ui++) {
       const vIdx = vi*VW+ui;
-      let eSum=0, cnt=0, eMin=200, eMax=-1;
+      // Σ-8: 段々地形を強調するため、頂点 elev は隣接 4 タイルの max を取る。
+      // これで境界が高い側のタイルに揃い、自然と段差/崖面が垂直に立ち上がる。
+      let eMax=-1, eMin=999, cnt=0;
       for (let dr=-1; dr<=0; dr++) for (let dc=-1; dc<=0; dc++) {
         const tr=vi+dr, tc=ui+dc;
         if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){
           const e = terrain[tr]![tc]!.elev;
-          eSum+=e; cnt++;
-          if (e<eMin) eMin=e;
           if (e>eMax) eMax=e;
+          if (e<eMin) eMin=e;
+          cnt++;
         }
       }
-      const elev = cnt>0 ? eSum/cnt : 0;
+      const elev = cnt>0 ? eMax : 0;
       pos[vIdx*3]   = ui*TERRAIN_TILE_SIZE;
       pos[vIdx*3+1] = elev*ELEV_SCALE;
       pos[vIdx*3+2] = vi*TERRAIN_TILE_SIZE;
@@ -293,9 +295,9 @@ function buildTerrainGeo(terrain: import('../types').TerrainTile[][]): THREE.Buf
       const tile = terrain[nr]![nc]!;
       const [r,g,bv] = tileRgb(tile.material, elev);
       // 崖面シェーディング：周囲タイルの elev 差が大きいほど暗いブラウンに blend。
-      // 通れない急斜面は線を引かなくても「岩肌」っぽい色で読める。
+      // Σ-8: 0-255 スケールなので閾値を ELEV_STEP=25 単位（1段=25, 2段=50）に合わせる。
       const slopeRange = eMax - eMin;
-      const cliff = Math.max(0, Math.min(1, (slopeRange - 12) / 22));  // 12 から効き始め、34 で max
+      const cliff = Math.max(0, Math.min(1, (slopeRange - 30) / 55));  // 30 から効き、85 で max
       const cliffR = 0x4a/255, cliffG = 0x35/255, cliffB = 0x22/255;
       const k = cliff * 0.65;
       col[vIdx*3]   = r  * (1 - k) + cliffR * k;
@@ -324,24 +326,24 @@ function refreshTerrainGeo(geo: THREE.BufferGeometry, terrain: import('../types'
   const colA = geo.getAttribute('color')    as THREE.BufferAttribute;
   for (let vi=0;vi<VH;vi++) for (let ui=0;ui<VW;ui++) {
     const vIdx=vi*VW+ui;
-    let eSum=0, cnt=0, eMin=200, eMax=-1;
+    let eMax=-1, eMin=999, cnt=0;
     for (let dr=-1;dr<=0;dr++) for (let dc=-1;dc<=0;dc++) {
       const tr=vi+dr, tc=ui+dc;
       if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){
         const e = terrain[tr]![tc]!.elev;
-        eSum+=e; cnt++;
-        if (e<eMin) eMin=e;
         if (e>eMax) eMax=e;
+        if (e<eMin) eMin=e;
+        cnt++;
       }
     }
-    const elev=cnt>0?eSum/cnt:0;
+    const elev=cnt>0?eMax:0;
     posA.setXYZ(vIdx, ui*TERRAIN_TILE_SIZE, elev*ELEV_SCALE, vi*TERRAIN_TILE_SIZE);
     const nr=Math.min(ROWS-1,vi===VH-1?vi-1:vi);
     const nc=Math.min(COLS-1,ui===VW-1?ui-1:ui);
     const tile=terrain[nr]![nc]!;
     const [r,g,bv]=tileRgb(tile.material,elev);
     const slopeRange = eMax - eMin;
-    const cliff = Math.max(0, Math.min(1, (slopeRange - 12) / 22));
+    const cliff = Math.max(0, Math.min(1, (slopeRange - 30) / 55));
     const cliffR=0x4a/255, cliffG=0x35/255, cliffB=0x22/255;
     const k = cliff * 0.65;
     colA.setXYZ(vIdx, r*(1-k)+cliffR*k, g*(1-k)+cliffG*k, bv*(1-k)+cliffB*k);
@@ -382,12 +384,18 @@ function elevAt(terrain: import('../types').TerrainTile[][], wx: number, wy: num
   const fu = Math.max(0, Math.min(1, u - u0));
   const fv = Math.max(0, Math.min(1, v - v0));
   const vElev = (ui: number, vi: number): number => {
-    let sum = 0, cnt = 0;
+    // Σ-8: buildTerrainGeo と同じ「隣接 4 タイルの max」式に揃える。
+    // タイル境界で高い側に持ち上げられるので段々地形でキャラが浮かない/埋もれない。
+    let mx = -1, cnt = 0;
     for (let dr = -1; dr <= 0; dr++) for (let dc = -1; dc <= 0; dc++) {
       const tr = vi + dr, tc = ui + dc;
-      if (tr >= 0 && tr < ROWS && tc >= 0 && tc < COLS) { sum += terrain[tr]![tc]!.elev; cnt++; }
+      if (tr >= 0 && tr < ROWS && tc >= 0 && tc < COLS) {
+        const e = terrain[tr]![tc]!.elev;
+        if (e > mx) mx = e;
+        cnt++;
+      }
     }
-    return cnt > 0 ? sum / cnt : 0;
+    return cnt > 0 ? mx : 0;
   };
   const e00 = vElev(u0, v0), e10 = vElev(u1, v0);
   const e01 = vElev(u0, v1), e11 = vElev(u1, v1);
@@ -1335,7 +1343,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       } else {
         refreshTerrainGeo(terrainGeo, world.terrain);
       }
-      seaMesh.visible=world.terrain.some(row=>row.some(t=>t.material==='water'));
+      seaMesh.visible=world.terrain.some(row=>row.some(t=>t.isSea));
 
       // 崩落検出 → 土煙パーティクル（前フレーム比 elev 差 ≥10 のタイル）
       if(prevElevs){
@@ -1359,17 +1367,18 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
       prevElevs=world.terrain.map(row=>row.map(t=>t.elev));
 
-      // 崖線（elev 差 ≥15 の境界に黒 LineSegments）
+      // 崖線（Σ-8: elev 差 ≥ ELEV_STEP*1.5 = 38 で「崖」相当）
       if(cliffLines){ scene.remove(cliffLines); cliffLines.geometry.dispose(); cliffLines=null; }
       const ROWS2=world.terrain.length, COLS2=world.terrain[0]?.length??0;
+      const CLIFF_LINE_THRESH = 38;  // 1段差(25) は段差扱い、≥38 で崖の黒線
       const cPts:number[]=[];
       for(let r2=0;r2<ROWS2;r2++) for(let c2=0;c2<COLS2;c2++){
         const e0=world.terrain[r2]![c2]!.elev;
-        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=16){
+        if(c2+1<COLS2){ const ex=world.terrain[r2]![c2+1]!.elev; if(Math.abs(e0-ex)>=CLIFF_LINE_THRESH){
           const x=(c2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ex)*ELEV_SCALE;
           cPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
         }}
-        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=16){
+        if(r2+1<ROWS2){ const ey=world.terrain[r2+1]![c2]!.elev; if(Math.abs(e0-ey)>=CLIFF_LINE_THRESH){
           const z=(r2+1)*TERRAIN_TILE_SIZE, ya=Math.max(e0,ey)*ELEV_SCALE;
           cPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);
         }}
@@ -1385,7 +1394,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       // 高低差の視認性を上げる地図的な等高線。茶色細線で控えめに。
       if(contourLines){ scene.remove(contourLines); contourLines.geometry.dispose(); contourLines=null; }
       const conPts:number[]=[];
-      const CONTOUR_STEP = 25;  // 標高 25 単位毎の主要等高線
+      // Σ-8: ELEV_STEP=25 単位で等高線（地形が量子化済みなので、各 25 段の境界に等しい）
+      const CONTOUR_STEP = 25;
+      const CONTOUR_NEAR_FLAT = 38;  // 崖未満の段差にだけ控えめな等高線
       const crossesContour = (a: number, b: number): number | null => {
         const lo = Math.min(a, b), hi = Math.max(a, b);
         const firstStep = Math.ceil(lo / CONTOUR_STEP) * CONTOUR_STEP;
@@ -1397,7 +1408,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(c2+1<COLS2){
           const ex=world.terrain[r2]![c2+1]!.elev;
           const cs = crossesContour(e0, ex);
-          if(cs!==null && Math.abs(e0-ex)<16){
+          if(cs!==null && Math.abs(e0-ex)<CONTOUR_NEAR_FLAT){
             const x=(c2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(x,ya,r2*TERRAIN_TILE_SIZE, x,ya,(r2+1)*TERRAIN_TILE_SIZE);
@@ -1406,7 +1417,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(r2+1<ROWS2){
           const ey=world.terrain[r2+1]![c2]!.elev;
           const cs = crossesContour(e0, ey);
-          if(cs!==null && Math.abs(e0-ey)<16){
+          if(cs!==null && Math.abs(e0-ey)<CONTOUR_NEAR_FLAT){
             const z=(r2+1)*TERRAIN_TILE_SIZE;
             const ya=cs*ELEV_SCALE+0.3;
             conPts.push(c2*TERRAIN_TILE_SIZE,ya,z, (c2+1)*TERRAIN_TILE_SIZE,ya,z);

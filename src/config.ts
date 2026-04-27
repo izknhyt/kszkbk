@@ -95,6 +95,11 @@ export const CONFIG = {
   CAMERA_MIN_SCALE: 0.20,
   CAMERA_MAX_SCALE: 2.0,
   CAMERA_ZOOM_STEP: 1.12,
+
+  // --- Σ-8 タイル高さ ------------------------------------------------------
+  // 編集操作は必ず ELEV_STEP 単位に丸める。MAX_ELEV / ELEV_STEP = 11 段。
+  ELEV_STEP: 25,
+  MAX_ELEV: 255,
 } as const;
 
 export type TimeScale = (typeof CONFIG.DEFAULT_TIME_SCALES)[number];

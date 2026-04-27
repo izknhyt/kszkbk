@@ -1039,7 +1039,12 @@ export function activateTerrain(terrain: TerrainTile[][]): void {
 // world.ts 内から呼ぶ isSeaAt は query.ts の実装を再エクスポート
 export { isSeaAt };
 
-// 既存の procedural 算出式（initTerrain の充填＆ v10 以前の load マイグレーション用）
+// Σ-8 高さスケール定数（config と同期）
+const ELEV_STEP = CONFIG.ELEV_STEP;   // 25
+const MAX_ELEV  = CONFIG.MAX_ELEV;    // 255
+
+// 既存の procedural 算出式（initTerrain の充填＆ v10 以前の load マイグレーション用）。
+// 戻り値は Σ-8 の 0-255 スケール（25 単位に量子化済み）。
 export function proceduralElevation(x: number, y: number): number {
   const dryLimit = CONFIG.DRY_Y_LIMIT;
   const southness = Math.max(0, Math.min(1, y / dryLimit));
@@ -1048,16 +1053,23 @@ export function proceduralElevation(x: number, y: number): number {
   if (y > dryLimit) base = 0;
   if (x < 600) base += (600 - x) / 600 * 15;
   const noise = Math.sin(x * 0.003) * 2 + Math.cos(y * 0.004 + x * 0.002) * 2;
-  return Math.max(0, Math.min(100, base + noise));
+  const raw01_100 = Math.max(0, Math.min(100, base + noise));
+  // 0-100 → 0-255 へ持ち上げ、ELEV_STEP 単位に量子化
+  return Math.round((raw01_100 * MAX_ELEV / 100) / ELEV_STEP) * ELEV_STEP;
 }
 
-// elev から材質を決定（初期充填で使う）
-function elevToMaterial(elev: number, isRiver: boolean): TerrainMaterial {
-  if (isRiver) return 'water';
-  if (elev > 60) return 'rock';
-  if (elev > 25) return 'grass';
-  if (elev > 10) return 'soil';
+// elev (0-255) から材質を決定（初期充填で使う）。海は別フラグで扱う。
+function elevToMaterial(elev: number, isSea: boolean): TerrainMaterial {
+  if (isSea) return 'sand';                      // 海底は砂で固定
+  if (elev >= 200) return 'rock';                // 山頂岩
+  if (elev >= 75)  return 'grass';
+  if (elev >= 25)  return 'soil';
   return 'sand';
+}
+
+// 25 単位への正規化ユーティリティ
+export function snapElev(e: number): number {
+  return Math.max(0, Math.min(MAX_ELEV, Math.round(e / ELEV_STEP) * ELEV_STEP));
 }
 
 // タイルを初期化する。
@@ -1079,13 +1091,18 @@ export function initTerrain(
       const cx = (col + 0.5) * TERRAIN_TILE_SIZE;
       const cy = (row + 0.5) * TERRAIN_TILE_SIZE;
       const elev = proceduralElevation(cx, cy);
-      const isRiver = cy > CONFIG.DRY_Y_LIMIT;
+      const isSea = cy > CONFIG.DRY_Y_LIMIT;
       rowArr.push({
-        elev,
-        material: elevToMaterial(elev, isRiver),
+        elev: isSea ? 0 : elev,
+        material: elevToMaterial(isSea ? 0 : elev, isSea),
+        ramp: null,
         stability: 1.0,
-        waterLevel: isRiver ? 1.0 : 0,
+        waterLevel: isSea ? 1.0 : 0,
+        wetness: 0,
+        mud: 0,
+        snowCoverage: 0,
         buryTimer: 0,
+        isSea,
       });
     }
     grid.push(rowArr);
@@ -1137,7 +1154,8 @@ export function worldToTile(x: number, y: number): { tx: number; ty: number } {
 }
 
 const RAISE_COST_SOIL = 10;
-const RAISE_ELEV_AMOUNT = 5;
+// Σ-8: ELEV_STEP=25 単位（旧 5 から 25 へ）
+const RAISE_ELEV_AMOUNT = ELEV_STEP;
 export const LOWER_SOIL_GAIN = 18;
 export const LOWER_STONE_GAIN = 7;  // rock タイルから
 
@@ -1192,22 +1210,26 @@ export function enqueueTerraformLower(w: WorldState, tx: number, ty: number): bo
   return true;
 }
 
-// タイルの elev を変更し stability を減衰
+// タイルの elev を変更し stability を減衰。Σ-8 で 25 単位に正規化。
 export function raiseTile(terrain: TerrainTile[][], tx: number, ty: number, amount: number): void {
   const tile = getTile(terrain, tx, ty);
   if (!tile) return;
-  tile.elev = Math.min(100, tile.elev + amount);
+  if (tile.isSea) return;  // 海は盛れない
+  tile.elev = snapElev(Math.min(MAX_ELEV, tile.elev + amount));
   tile.stability = Math.min(tile.stability, 0.6);
-  // 永続的な海/水路マスのみ 'water' を維持（雨水蓄積で水路化はしない）
-  tile.material = elevToMaterial(tile.elev, tile.material === 'water');
+  tile.material = elevToMaterial(tile.elev, tile.isSea);
+  // 不正な ramp は無効化（高い側が消えた等）
+  tile.ramp = null;
 }
 
 export function lowerTile(terrain: TerrainTile[][], tx: number, ty: number, amount: number): void {
   const tile = getTile(terrain, tx, ty);
   if (!tile) return;
-  tile.elev = Math.max(0, tile.elev - amount);
+  if (tile.isSea) return;  // 海はこれ以上削れない
+  tile.elev = snapElev(Math.max(0, tile.elev - amount));
   tile.stability = Math.min(tile.stability, 0.75);
-  tile.material = elevToMaterial(tile.elev, tile.material === 'water');
+  tile.material = elevToMaterial(tile.elev, tile.isSea);
+  tile.ramp = null;
 }
 
 // ちびわふ労働：ジョブ近傍 28px 以内の生存ちびわふが進捗を進める
@@ -1363,13 +1385,18 @@ export function updateTerraformJobs(w: WorldState, dt: number): void {
 // =========================================================================
 
 const LANDSLIDE_STABILITY_THRESHOLD = 0.4;
-const LANDSLIDE_ELEV_DIFF_MIN = 20;      // 崩落が起きる最低高低差
-const LANDSLIDE_INSTANT_KILL_DIFF = 30;  // この差以上なら即死級
-const LANDSLIDE_RATE_PER_SEC = 0.005;    // 不安定タイル 1 個あたりの崩落確率/sec
+// Σ-8: 旧 elev 0-100 スケール基準値を 0-255 スケールへ拡大（×2.55）。
+// 1段=25、2段=50、3段=75 として崖判定 (≥2段) で崩落、≥3段で即死級。
+const LANDSLIDE_ELEV_DIFF_MIN = 50;       // 2 段差以上で崩落
+const LANDSLIDE_INSTANT_KILL_DIFF = 75;   // 3 段差以上なら即死級
+const LANDSLIDE_RATE_PER_SEC = 0.005;     // 不安定タイル 1 個あたりの崩落確率/sec
 const LANDSLIDE_DAMAGE_RADIUS_PX = 48;
 const LANDSLIDE_HP_DAMAGE = 40;
 const LANDSLIDE_BURY_DURATION_SEC = 5;
 const STABILITY_RECOVER_PER_SEC = 0.02;
+// 崩落で動く土量（旧 -10/+8 を ELEV_STEP 単位へ。1 段=25 単位）
+const LANDSLIDE_DROP_AMOUNT = ELEV_STEP;
+const LANDSLIDE_RISE_AMOUNT = ELEV_STEP;
 
 export function updateTerrainStability(w: WorldState, dt: number): void {
   const terrain = w.terrain;
@@ -1413,14 +1440,17 @@ export function updateTerrainStability(w: WorldState, dt: number): void {
       }
       if (!lowest) continue;
 
-      // 崩落実行
-      tile.elev = Math.max(0, tile.elev - 10);
+      // 崩落実行（Σ-8: ELEV_STEP 単位で動く）
+      tile.elev = snapElev(Math.max(0, tile.elev - LANDSLIDE_DROP_AMOUNT));
       tile.stability = 0.3;
-      lowest.elev = Math.min(100, lowest.elev + 8);
+      lowest.elev = snapElev(Math.min(MAX_ELEV, lowest.elev + LANDSLIDE_RISE_AMOUNT));
       lowest.stability = Math.min(lowest.stability, 0.5);
-      // 雨水での自動 water 化はしない（永続海のみ維持）
-      tile.material = elevToMaterial(tile.elev, tile.material === 'water');
-      lowest.material = elevToMaterial(lowest.elev, lowest.material === 'water');
+      // 海フラグは維持、material のみ標高に応じて再計算
+      tile.material = elevToMaterial(tile.elev, tile.isSea);
+      lowest.material = elevToMaterial(lowest.elev, lowest.isSea);
+      // 崩落で ramp も壊れる
+      tile.ramp = null;
+      lowest.ramp = null;
 
       // 低タイルに buryTimer をセット（生き埋め判定用）
       const buriedTile = getTile(terrain, col + lowestDc, row + lowestDr);
@@ -1495,14 +1525,15 @@ function evapRate(k: WeatherKind): number {
   }
 }
 
-// 材質×標高別の吸収速度（/sec）— sand は早抜け、rock はほぼ溜まる
+// 材質×標高別の吸収速度（/sec）— sand は早抜け、rock はほぼ溜まる。
+// Σ-8: elev は 0-255 スケール。旧 60/40 (elev01_100) を 150/100 (elev0_255) に対応。
 function absorpRate(material: TerrainMaterial, elev: number): number {
   if (material === 'sand') return 0.010;
   if (material === 'rock') return 0.0005;
-  if (material === 'water') return 0;  // 水路タイル → 漏出なし
+  if (material === 'snow') return 0.0008;
   // soil / grass：標高で軽く変化
-  if (elev > 60) return 0.001;
-  if (elev > 40) return 0.003;
+  if (elev > 150) return 0.001;
+  if (elev > 100) return 0.003;
   return 0.004;
 }
 
@@ -1538,7 +1569,7 @@ export function updateHydrology(w: WorldState, dt: number): void {
       const row = terrain[r]!;
       for (let c = 0; c < COLS; c++) {
         const tile = row[c]!;
-        if (tile.material === 'rock' && tile.elev > 80) continue; // 岩肌は浸透せず流れる扱い
+        if (tile.material === 'rock' && tile.elev > 200) continue; // 岩肌は浸透せず流れる扱い
         tile.waterLevel = Math.min(1.0, tile.waterLevel + add);
       }
     }
@@ -1622,9 +1653,11 @@ export function updateHydrology(w: WorldState, dt: number): void {
 
       if (wl < 0.01) continue;
 
-      // downhill flow：水面高さ (elev + wl×5) が隣より高ければ流す
+      // downhill flow：水面高さ (elev + wl×WL_SCALE) が隣より高ければ流す
+      // Σ-8: elev が 0-255 スケールになったので wl の寄与も *2.55 ≒ 13 に
+      const WL_SCALE = 13;
       // 全体の outflow を wl の 30% に制限（タイル丸ごと流れて水たまりが消える事を防ぐ）
-      const myLevel = tile.elev + wl * 5;
+      const myLevel = tile.elev + wl * WL_SCALE;
       const flowBoost = channelSet.has(idx) ? 2.0 : 1.0;
       const maxOutflow = wl * 0.30;
       let outAcc = 0;
@@ -1634,11 +1667,12 @@ export function updateHydrology(w: WorldState, dt: number): void {
         if (nr < 0 || nr >= ROWS || nc < 0 || nc >= COLS) continue;
         const nIdx = nr * COLS + nc;
         const ntile = terrain[nr]![nc]!;
-        const nLevel = ntile.elev + ntile.waterLevel * 5;
+        const nLevel = ntile.elev + ntile.waterLevel * WL_SCALE;
         if (nLevel >= myLevel) continue;
 
         const diff = myLevel - nLevel;
-        let transfer = diff * 0.06 * flowBoost * flowDt;
+        // diff が新スケールで 2.55 倍に比例して大きくなるので transfer 係数を /2.55 = 0.0235 に
+        let transfer = diff * 0.0235 * flowBoost * flowDt;
         if (outAcc + transfer > maxOutflow) transfer = Math.max(0, maxOutflow - outAcc);
         if (transfer > 0.0005) {
           _hydroDelta[idx] -= transfer;
@@ -2424,11 +2458,12 @@ function flightStep(
   const groundZ = getElevation(entity.pos.x, entity.pos.y);
   const zLanded = f.posZ <= groundZ;
   if (f.leftSec <= 0 || entity.pos.y >= w.bounds.h - 10 || zLanded) {
-    // Σ-1-a 崖落下チェック：発射地点 vs 着地地点の高低差 >= 15 で即死級ダメージ
+    // Σ-1-a 崖落下チェック：発射地点 vs 着地地点の高低差 ≥ ELEV_STEP*1.5 (=38) で即死級ダメージ
+    // Σ-8 で elev 0-255 スケールに移行したので、旧 15 (旧 0-100 スケール) を比例倍した。
     if (isChibi) {
       const drop = f.startElev - groundZ;
-      if (drop >= 15) {
-        const cliffDmg = Math.floor(30 + drop * 1.5);
+      if (drop >= 38) {
+        const cliffDmg = Math.floor(30 + drop * 0.6);  // 旧 1.5 を 1/2.55 に
         f.landingDamage = Math.max(f.landingDamage, cliffDmg);
         f.landCauseId = 'cliff_fall';
       }
@@ -3276,22 +3311,23 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
       const slope = maxSlope;
       const fwdElev = maxFwdElev;
 
-      // Σ-7-fix: 崖（slope > 0.5）は本当に登れない。今 tick の移動を完全 reject + target を捨てる。
-      // courage 90+ の冒険家のみ slope 0.5-0.7 を強行突破できる（くそざこの中の挑戦者）。
-      const cliffLimit = c.params.courage >= 90 ? 0.7 : 0.5;
+      // Σ-8: elev が 0-255 スケールに拡大したので slope 閾値も *2.55 にリスケール。
+      // 1 段差(25)/32px ≒ 0.78、2 段差(50)/32px ≒ 1.56。ELEV_STEP の境界を狙う。
+      // courage 90+ の冒険家のみ崖直前まで挑戦できる（くそざこの中の挑戦者）。
+      const cliffLimit = c.params.courage >= 90 ? 1.78 : 1.27;
       if (slope > cliffLimit && fwdElev > curElev) {
         // 崖を登ろうとしてる → このティックの移動を取り消し + ターゲット破棄
         c.pos.x -= nx * c.speed * dt;
         c.pos.y -= ny * c.speed * dt;
         c.target = null;
         c.fatigue = Math.min(100, c.fatigue + dt * 0.5);
-      } else if (slope > 0.3) {
+      } else if (slope > 0.77) {
         // 急坂：このティックの移動量の半分を戻す（実質 0.5× 速度）
         c.pos.x -= nx * c.speed * dt * 0.5;
         c.pos.y -= ny * c.speed * dt * 0.5;
         c.fatigue = Math.min(100, c.fatigue + dt * 1.5);
       }
-      if (slope > 0.6 && !c.flight && Math.random() < dt * 0.008) {
+      if (slope > 1.53 && !c.flight && Math.random() < dt * 0.008) {
         // 急坂から滑落：courage チェック、失敗したら下方向に launchFlight
         if (Math.random() > c.params.courage / 100) {
           const gx = getElevation(c.pos.x + 5, c.pos.y) - getElevation(c.pos.x - 5, c.pos.y);
@@ -3337,12 +3373,12 @@ function updateChibi(w: WorldState, c: Chibiwafu, dt: number, hazards: HazardZon
         }
       }
 
-      // 崖端判定：流れ方向 15px 先が 20+ 急落なら滝落下（cliff_fall）
+      // 崖端判定：流れ方向 15px 先が 2 段差 (50 単位) 急落なら滝落下（cliff_fall）
       const downX = -gx / gLen;
       const downY = -gy / gLen;
       const curElev = getElevation(c.pos.x, c.pos.y);
       const aheadElev = getElevation(c.pos.x + downX * 15, c.pos.y + downY * 15);
-      if (curElev - aheadElev >= 20) {
+      if (curElev - aheadElev >= 50) {
         spawnBubble(w.bubbles, c.pos, 'たきわふっ！！', 'speech', 1.5);
         pushLife(c, Math.floor(c.ageSec), '激流に押されて崖から落下した');
         launchFlight(c, downX * 80, downY * 80, 0.8, 0, 'cliff_fall');

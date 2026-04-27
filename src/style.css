@@ -1224,3 +1224,219 @@ button:active { transform: translateY(1px); }
 /* resource-row is replaced by resource-bar; hide if still present for safety */
 .stat-grid.resource-row { display: none; }
 
+/* =========================================================================
+ * Σ-8 — UI Asset Spec v1 に準拠した最小骨格
+ * Time HUD / Toolbar / Tool Settings Panel。既存 HUD を消さずに上書きで併存。
+ * ========================================================================= */
+:root {
+  --s8-ui-bg: rgba(39, 35, 28, 0.78);
+  --s8-ui-bg-soft: rgba(255, 247, 224, 0.92);
+  --s8-ui-border: rgba(92, 67, 43, 0.70);
+  --s8-ui-text: #fff4d8;
+  --s8-ui-text-dark: #3f2d1e;
+  --s8-ui-accent: #f3b447;
+  --s8-ui-good: #7fcf6b;
+  --s8-ui-warn: #f0c14a;
+  --s8-ui-danger: #e45f4f;
+  --s8-ui-water: #4fa8d8;
+}
+
+/* --- Time HUD (top-left) --- */
+.sigma8-time-hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  min-width: 280px;
+  max-width: 360px;
+  padding: 8px 12px;
+  background: var(--s8-ui-bg);
+  color: var(--s8-ui-text);
+  border: 1px solid var(--s8-ui-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  line-height: 1.5;
+  z-index: 9;
+  pointer-events: none;
+  font-feature-settings: 'tnum';
+}
+.sigma8-time-hud .s8-time-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+}
+.sigma8-time-hud .s8-tag {
+  background: rgba(255, 244, 216, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.sigma8-time-hud .s8-clock {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--s8-ui-accent);
+  margin-left: auto;
+}
+.sigma8-time-hud .s8-risk-row {
+  margin-top: 4px;
+  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  align-items: center;
+}
+.sigma8-time-hud .s8-sep {
+  opacity: 0.5;
+}
+.sigma8-time-hud.is-water-warn { background: rgba(40, 70, 110, 0.85); }
+.sigma8-time-hud.is-collapse-warn { background: rgba(110, 60, 30, 0.85); }
+.sigma8-time-hud.is-night { background: rgba(20, 22, 40, 0.85); }
+.sigma8-time-hud .s8-warn { color: var(--s8-ui-warn); }
+.sigma8-time-hud .s8-danger { color: var(--s8-ui-danger); font-weight: 700; }
+
+/* --- Main Toolbar (bottom-center) --- */
+.sigma8-toolbar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  background: var(--s8-ui-bg);
+  border: 1px solid var(--s8-ui-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.22);
+  z-index: 11;
+}
+.sigma8-toolbar .s8-tool {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px 2px;
+  background: rgba(255, 244, 216, 0.05);
+  color: var(--s8-ui-text);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  position: relative;
+  transition: background 0.12s, border-color 0.12s;
+}
+.sigma8-toolbar .s8-tool small {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+.sigma8-toolbar .s8-tool kbd {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  font-size: 9px;
+  font-family: inherit;
+  background: rgba(0, 0, 0, 0.30);
+  color: var(--s8-ui-accent);
+  padding: 0 3px;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+.sigma8-toolbar .s8-tool:hover {
+  background: rgba(255, 244, 216, 0.14);
+  border-color: var(--s8-ui-border);
+}
+.sigma8-toolbar .s8-tool.active {
+  background: var(--s8-ui-accent);
+  color: var(--s8-ui-text-dark);
+  border-color: var(--s8-ui-accent);
+}
+.sigma8-toolbar .s8-tool.active kbd {
+  background: rgba(63, 45, 30, 0.22);
+  color: var(--s8-ui-text-dark);
+}
+
+/* --- Tool Settings Panel (right-center) --- */
+.sigma8-tool-panel {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  width: 280px;
+  background: var(--s8-ui-bg-soft);
+  color: var(--s8-ui-text-dark);
+  border: 1px solid var(--s8-ui-border);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  z-index: 9;
+}
+.sigma8-tool-panel .s8-panel-head {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(92, 67, 43, 0.25);
+}
+.sigma8-tool-panel .s8-panel-head b {
+  font-size: 15px;
+  display: block;
+}
+.sigma8-tool-panel .s8-panel-head small {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.sigma8-tool-panel .s8-panel-body {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sigma8-tool-panel .s8-panel-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 28px;
+  align-items: center;
+  gap: 6px;
+}
+.sigma8-tool-panel .s8-panel-row label {
+  font-size: 12px;
+  color: var(--s8-ui-text-dark);
+  opacity: 0.85;
+}
+.sigma8-tool-panel .s8-panel-row input[type='range'] {
+  width: 100%;
+}
+.sigma8-tool-panel .s8-panel-row select {
+  width: 100%;
+  padding: 2px 4px;
+}
+.sigma8-tool-panel .s8-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  font-weight: 600;
+}
+.sigma8-tool-panel .s8-row-actions {
+  display: flex;
+  gap: 6px;
+  grid-template-columns: none;
+  margin-top: 4px;
+}
+.sigma8-tool-panel .s8-row-actions button {
+  flex: 1;
+  padding: 4px 6px;
+  background: rgba(63, 45, 30, 0.08);
+  color: var(--s8-ui-text-dark);
+  border: 1px solid var(--s8-ui-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.sigma8-tool-panel .s8-row-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.sigma8-tool-panel .s8-row-ramp {
+  display: none; /* ramp ツール選択時に main.ts が表示する */
+}
+

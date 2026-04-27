@@ -33,6 +33,67 @@
     <div id="app">
       <div id="stage"></div>
 
+      <!-- Σ-8 Time / Risk HUD (top-left, minimal skeleton) -->
+      <div id="sigma8-time-hud" class="sigma8-time-hud">
+        <div class="s8-time-row">
+          <span id="s8-season" class="s8-tag">春</span>
+          <span id="s8-day" class="s8-tag">1日</span>
+          <span id="s8-clock" class="s8-clock">12:00</span>
+          <span id="s8-weather">☀ 晴れ</span>
+        </div>
+        <div class="s8-risk-row">
+          <span id="s8-water-risk">水位: 通常</span>
+          <span class="s8-sep">・</span>
+          <span id="s8-collapse-risk">崩落: なし</span>
+          <span class="s8-sep">・</span>
+          <span id="s8-phase-count">夜まで —</span>
+        </div>
+      </div>
+
+      <!-- Σ-8 Main Toolbar (bottom-center, skeleton) -->
+      <div id="sigma8-toolbar" class="sigma8-toolbar" role="toolbar" aria-label="地形編集ツール">
+        <button class="s8-tool" data-s8tool="raise" title="盛る (1)">⛰<small>盛る</small><kbd>1</kbd></button>
+        <button class="s8-tool" data-s8tool="lower" title="削る (2)">⛏<small>削る</small><kbd>2</kbd></button>
+        <button class="s8-tool" data-s8tool="flatten" title="平坦 (3)">▭<small>平坦</small><kbd>3</kbd></button>
+        <button class="s8-tool" data-s8tool="smooth" title="整地 (4)">〰<small>整地</small><kbd>4</kbd></button>
+        <button class="s8-tool" data-s8tool="ramp" title="坂道 (5)">📐<small>坂道</small><kbd>5</kbd></button>
+        <button class="s8-tool" data-s8tool="channel" title="水路 (6)">💧<small>水路</small><kbd>6</kbd></button>
+        <button class="s8-tool" data-s8tool="build" title="建設 (7)">🔨<small>建設</small><kbd>7</kbd></button>
+      </div>
+
+      <!-- Σ-8 Tool Settings Panel (right, skeleton) -->
+      <aside id="sigma8-tool-panel" class="sigma8-tool-panel" aria-label="ツール設定">
+        <div class="s8-panel-head">
+          <b id="s8-tool-name">未選択</b>
+          <small id="s8-tool-hint">ツールを選んでね</small>
+        </div>
+        <div class="s8-panel-body">
+          <div class="s8-panel-row">
+            <label for="s8-brush-radius">半径</label>
+            <input type="range" id="s8-brush-radius" min="1" max="5" step="1" value="1" />
+            <span id="s8-brush-radius-val" class="s8-num">1</span>
+          </div>
+          <div class="s8-panel-row">
+            <label for="s8-brush-strength">強度</label>
+            <input type="range" id="s8-brush-strength" min="1" max="3" step="1" value="1" />
+            <span id="s8-brush-strength-val" class="s8-num">1</span>
+          </div>
+          <div class="s8-panel-row s8-row-ramp" id="s8-ramp-row">
+            <label for="s8-ramp-dir">方向</label>
+            <select id="s8-ramp-dir">
+              <option value="N">北</option>
+              <option value="S">南</option>
+              <option value="E">東</option>
+              <option value="W">西</option>
+            </select>
+          </div>
+          <div class="s8-panel-row s8-row-actions">
+            <button id="s8-undo" disabled title="戻す (Ctrl+Z)">↶ 戻す</button>
+            <button id="s8-redo" disabled title="進む (Ctrl+Y)">↷ 進む</button>
+          </div>
+        </div>
+      </aside>
+
       <!-- Warning panel: top-left of stage area -->
       <div id="warning-panel" class="warning-panel"></div>
 

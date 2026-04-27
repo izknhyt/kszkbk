@@ -85,16 +85,25 @@ export interface FlightState {
 }
 
 // =========================================================================
-// Σ-2 タイル式ハイトマップ
+// Σ-2 タイル式ハイトマップ（Σ-8 で 0-255 / step 25 / ramp に拡張）
 // =========================================================================
-export type TerrainMaterial = 'grass' | 'soil' | 'sand' | 'rock' | 'water';
+export type TerrainMaterial = 'grass' | 'soil' | 'rock' | 'sand' | 'snow';
+
+// ramp は「高い側」を向く 1 タイル 1 方向。
+// N=北隣が 1 段高い時、南低地<->北高地を接続。S/E/W も同様。
+export type RampDir = 'N' | 'S' | 'E' | 'W';
 
 export interface TerrainTile {
-  elev: number;        // 0-100 標高
+  elev: number;             // 0-255。通常編集は ELEV_STEP=25 単位
   material: TerrainMaterial;
-  stability: number;   // 0-1.0。1.0 = 安定、<0.4 で崩落リスク（Σ-2-c で使用）
-  waterLevel: number;  // 0-1.0。1.0 = 水没タイル（川・海）
-  buryTimer: number;   // Σ-2-c：崩落直後の生き埋め判定 残秒（0=通常、transient）
+  ramp: RampDir | null;     // null=平地/段差、非null=通れる坂
+  stability: number;        // 0-1.0
+  waterLevel: number;       // 0-1.0
+  wetness: number;          // 0-1.0 visual + movement cost
+  mud: number;              // 0-1.0 visual + slip risk
+  snowCoverage: number;     // 0-1.0 visual + movement cost
+  buryTimer: number;        // 崩落直後の生き埋め判定 残秒（transient）
+  isSea: boolean;           // 永続水域（海/恒久水）。雨水溜まりとは区別
 }
 
 // プレイヤーが発行し、ちびわふが近傍で労働して進める地形編集ジョブ

@@ -1,26 +1,34 @@
-import type { Difficulty, TerrainMaterial, TerrainTile, TerraformJob } from '../types';
+import type { Difficulty, RampDir, TerrainMaterial, TerrainTile, TerraformJob } from '../types';
 import type { WorldState } from '../sim/world';
 import { activateTerrain, TERRAIN_COLS, TERRAIN_ROWS } from '../sim/world';
 import { peekNextId, resetIdCounter } from '../sim/chibiwafu';
+import { CONFIG } from '../config';
 
 // 3 スロット制のローグライク向けセーブ。スロット毎に独立した run / difficulty を持つ。
 export type SlotId = 1 | 2 | 3;
 
 const OLD_SINGLE_KEY = 'kszkbk:save:v1';
 const slotKey = (slot: SlotId) => `kszkbk:save:slot${slot}`;
-const CURRENT_VERSION = 13;
+const CURRENT_VERSION = 14;
 
 // v1-v8 の履歴は README 省略。v9：スロット制、runId/difficulty 追加
 // v10：weather / weatherForecast 追加
 // v11：Σ-2 タイル式ハイトマップ（terrain RLE + terraformJobs + soil リソース）
 // v12：Σ-3 terrainSeed（procedural ジェネレータ切り替え）
 // v13：Σ-7 タイル水位を 0/10 binary → 0-100 細粒度化（雨/蒸発/flow を persist）
-type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
+// v14：Σ-8 elev 0-100 → 0-255 (×2.55, ELEV_STEP=25 量子化) /
+//      material から 'water' 撤去（isSea フラグへ） /
+//      ramp/wetness/mud/snowCoverage/isSea を persist
+type SaveVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
 
 // =========================================================================
 // Σ-2 地形 RLE 圧縮ユーティリティ
 // =========================================================================
-const MAT_CODES: TerrainMaterial[] = ['grass', 'soil', 'sand', 'rock', 'water'];
+// v14: 'snow' 追加、旧 v13 までの 'water' (旧 index 4) はロード時に isSea+sand に変換
+const MAT_CODES: TerrainMaterial[] = ['grass', 'soil', 'sand', 'rock', 'snow'];
+// 旧 v13 までは ['grass','soil','sand','rock','water']。互換用に index 4 = water として読む。
+const LEGACY_MAT_INDEX_WATER = 4;
+const RAMP_CODES: Array<RampDir | null> = [null, 'N', 'S', 'E', 'W'];
 
 function rleEncode(arr: number[]): Array<[number, number]> {
   const out: Array<[number, number]> = [];
@@ -46,12 +54,18 @@ function rleDecode(rle: Array<[number, number]>): number[] {
 interface TerrainSave {
   cols: number;
   rows: number;
-  elevRle: Array<[number, number]>;  // round(elev)
+  elevRle: Array<[number, number]>;  // round(elev) — v14 以降は 0-255 スケール
   matRle: Array<[number, number]>;   // MAT_CODES index
   stabRle: Array<[number, number]>;  // round(stability*100)
   // v12 以前：0 or 10（waterLevel * 10 rounded、binary 扱い）
   // v13 以降：0-100（waterLevel * 100 rounded、細粒度）
   waterRle: Array<[number, number]>;
+  // v14+: Σ-8 拡張フィールド
+  rampRle?: Array<[number, number]>;     // RAMP_CODES index (0=null, 1=N, 2=S, 3=E, 4=W)
+  wetRle?:  Array<[number, number]>;     // wetness * 100
+  mudRle?:  Array<[number, number]>;     // mud * 100
+  snowRle?: Array<[number, number]>;     // snowCoverage * 100
+  seaRle?:  Array<[number, number]>;     // isSea: 0 or 1
 }
 
 function serializeTerrain(terrain: TerrainTile[][]): TerrainSave {
@@ -61,13 +75,22 @@ function serializeTerrain(terrain: TerrainTile[][]): TerrainSave {
   const matFlat: number[] = [];
   const stabFlat: number[] = [];
   const waterFlat: number[] = [];
+  const rampFlat: number[] = [];
+  const wetFlat: number[] = [];
+  const mudFlat: number[] = [];
+  const snowFlat: number[] = [];
+  const seaFlat: number[] = [];
   for (const row of terrain) {
     for (const tile of row) {
       elevFlat.push(Math.round(tile.elev));
-      matFlat.push(MAT_CODES.indexOf(tile.material));
+      matFlat.push(Math.max(0, MAT_CODES.indexOf(tile.material)));
       stabFlat.push(Math.round(tile.stability * 100));
-      // Σ-7-e v13: 0-100 細粒度（waterLevel * 100 rounded）
       waterFlat.push(Math.max(0, Math.min(100, Math.round(tile.waterLevel * 100))));
+      rampFlat.push(Math.max(0, RAMP_CODES.indexOf(tile.ramp)));
+      wetFlat.push(Math.max(0, Math.min(100, Math.round(tile.wetness * 100))));
+      mudFlat.push(Math.max(0, Math.min(100, Math.round(tile.mud * 100))));
+      snowFlat.push(Math.max(0, Math.min(100, Math.round(tile.snowCoverage * 100))));
+      seaFlat.push(tile.isSea ? 1 : 0);
     }
   }
   return {
@@ -77,28 +100,61 @@ function serializeTerrain(terrain: TerrainTile[][]): TerrainSave {
     matRle: rleEncode(matFlat),
     stabRle: rleEncode(stabFlat),
     waterRle: rleEncode(waterFlat),
+    rampRle: rleEncode(rampFlat),
+    wetRle: rleEncode(wetFlat),
+    mudRle: rleEncode(mudFlat),
+    snowRle: rleEncode(snowFlat),
+    seaRle: rleEncode(seaFlat),
   };
 }
 
-// v12 以前は water 値が 0/10 (binary)、v13 以降は 0-100 (細粒度)。
-// version 引数で除算スケールを切り替える。
+// version 別に水スケール / elev スケール / 拡張フィールドを切り替え。
 function deserializeTerrain(s: TerrainSave, version: number): TerrainTile[][] {
   const elevFlat = rleDecode(s.elevRle);
   const matFlat = rleDecode(s.matRle);
   const stabFlat = rleDecode(s.stabRle);
   const waterFlat = rleDecode(s.waterRle);
+  const rampFlat = s.rampRle ? rleDecode(s.rampRle) : null;
+  const wetFlat  = s.wetRle  ? rleDecode(s.wetRle)  : null;
+  const mudFlat  = s.mudRle  ? rleDecode(s.mudRle)  : null;
+  const snowFlat = s.snowRle ? rleDecode(s.snowRle) : null;
+  const seaFlat  = s.seaRle  ? rleDecode(s.seaRle)  : null;
   const waterScale = version >= 13 ? 100 : 10;
+  // v13 以下は elev が旧 0-100 スケール → 新 0-255 へ持ち上げて ELEV_STEP に量子化
+  const STEP = CONFIG.ELEV_STEP;
+  const MAX_E = CONFIG.MAX_ELEV;
+  const upgradeElev = (e: number): number => {
+    if (version >= 14) return Math.max(0, Math.min(MAX_E, e));
+    const scaled = e * (MAX_E / 100);
+    return Math.max(0, Math.min(MAX_E, Math.round(scaled / STEP) * STEP));
+  };
   const terrain: TerrainTile[][] = [];
   for (let row = 0; row < s.rows; row++) {
     const rowArr: TerrainTile[] = [];
     for (let col = 0; col < s.cols; col++) {
       const idx = row * s.cols + col;
+      const matIdx = matFlat[idx] ?? 0;
+      // v13 以下では index 4 = 'water'（恒久水域）。v14+ では index 4 = 'snow'。
+      let material: TerrainMaterial;
+      let isSeaFromMat = false;
+      if (version < 14 && matIdx === LEGACY_MAT_INDEX_WATER) {
+        material = 'sand';   // 海底材質を砂で固定
+        isSeaFromMat = true;
+      } else {
+        material = MAT_CODES[matIdx] ?? 'grass';
+      }
+      const isSea = seaFlat ? (seaFlat[idx] === 1) : isSeaFromMat;
       rowArr.push({
-        elev: elevFlat[idx] ?? 0,
-        material: MAT_CODES[matFlat[idx] ?? 0] ?? 'grass',
+        elev: upgradeElev(elevFlat[idx] ?? 0),
+        material,
+        ramp: rampFlat ? (RAMP_CODES[rampFlat[idx] ?? 0] ?? null) : null,
         stability: (stabFlat[idx] ?? 100) / 100,
         waterLevel: (waterFlat[idx] ?? 0) / waterScale,
+        wetness: wetFlat ? (wetFlat[idx] ?? 0) / 100 : 0,
+        mud: mudFlat ? (mudFlat[idx] ?? 0) / 100 : 0,
+        snowCoverage: snowFlat ? (snowFlat[idx] ?? 0) / 100 : 0,
         buryTimer: 0,
+        isSea,
       });
     }
     terrain.push(rowArr);
@@ -237,7 +293,7 @@ export function load(w: WorldState, slot: SlotId): boolean {
   if (!raw) return false;
   try {
     const data = JSON.parse(raw) as SaveData;
-    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(data.version)) return false;
+    if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(data.version)) return false;
     if (data.runId) w.runId = data.runId;
     if (typeof data.runStartedAtMs === 'number') w.runStartedAtMs = data.runStartedAtMs;
     if (data.difficulty) w.difficulty = data.difficulty;

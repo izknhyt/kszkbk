@@ -62,6 +62,107 @@ export function refreshUI(world: WorldState, cb: UICallbacks) {
   renderBuildList(world, cb);
   renderRecent(world);
   renderDex(world);
+  renderSigma8TimeHud(world);
+}
+
+// =========================================================================
+// Σ-8 Time / Risk HUD（左上、最小骨格）
+// SIGMA-8-UI-ASSET-SPEC.md の "Time / Risk HUD" 仕様に準拠。
+// season / day / HH:MM / weather / 水位 / 崩落 / 次位相カウントダウン。
+// =========================================================================
+const PHASE_LABELS_SHORT: Record<string, string> = {
+  morning: '昼まで',
+  noon:    '夕まで',
+  evening: '夜まで',
+  night:   '朝まで',
+};
+function nextPhaseFromProgress(p: number): { label: string; remaining: number } {
+  // dayProgress 0-1 → morning(0-0.25)/noon(0.25-0.55)/evening(0.55-0.80)/night(0.80-1.0)
+  let nextThr: number;
+  let phase: string;
+  if (p < 0.25) { phase = 'morning'; nextThr = 0.25; }
+  else if (p < 0.55) { phase = 'noon'; nextThr = 0.55; }
+  else if (p < 0.80) { phase = 'evening'; nextThr = 0.80; }
+  else { phase = 'night'; nextThr = 1.0; }
+  const remaining = (nextThr - p) * CONFIG.SECONDS_PER_DAY;
+  return { label: PHASE_LABELS_SHORT[phase] ?? '次まで', remaining };
+}
+function fmtMMSS(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return `${m}:${ss}`;
+}
+function fmtClockHHMM(progress: number): string {
+  // progress 0-1 を 00:00-23:59 に写像
+  const totalMin = Math.floor(progress * 24 * 60);
+  const hh = String(Math.floor(totalMin / 60) % 24).padStart(2, '0');
+  const mm = String(totalMin % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+function renderSigma8TimeHud(w: WorldState) {
+  const root = document.getElementById('sigma8-time-hud');
+  if (!root) return;
+  const seasonEl = document.getElementById('s8-season');
+  const dayEl = document.getElementById('s8-day');
+  const clockEl = document.getElementById('s8-clock');
+  const weatherEl = document.getElementById('s8-weather');
+  const waterEl = document.getElementById('s8-water-risk');
+  const collapseEl = document.getElementById('s8-collapse-risk');
+  const phaseEl = document.getElementById('s8-phase-count');
+
+  if (seasonEl) seasonEl.textContent = SEASON_LABEL[w.season];
+  if (dayEl) dayEl.textContent = `${w.dayCount}日`;
+  if (clockEl) clockEl.textContent = fmtClockHHMM(w.dayProgress);
+  if (weatherEl) weatherEl.textContent = `${WEATHER_ICON[w.weather.kind]} ${WEATHER_LABEL[w.weather.kind]}`;
+
+  // --- 水位リスク：terrain.waterLevel の最大値で判定 ---
+  let maxWl = 0;
+  let riskTiles = 0;
+  if (w.terrain && w.terrain.length > 0) {
+    for (const row of w.terrain) {
+      for (const t of row) {
+        if (t.isSea) continue;
+        if (t.waterLevel > maxWl) maxWl = t.waterLevel;
+        if (t.waterLevel >= 0.35) riskTiles++;
+      }
+    }
+  }
+  let waterLabel = '水位: 通常';
+  let waterClass = '';
+  if (maxWl >= 0.85) { waterLabel = `水位: 洪水危険 (${riskTiles})`; waterClass = 's8-danger'; }
+  else if (maxWl >= 0.5) { waterLabel = `水位: 高い (${riskTiles})`; waterClass = 's8-warn'; }
+  else if (maxWl >= 0.3) { waterLabel = `水位: やや高い`; waterClass = 's8-warn'; }
+  if (waterEl) {
+    waterEl.textContent = waterLabel;
+    waterEl.className = waterClass;
+  }
+  root.classList.toggle('is-water-warn', maxWl >= 0.5);
+
+  // --- 崩落リスク：stability < 0.5 のタイル数 ---
+  let unstable = 0;
+  if (w.terrain && w.terrain.length > 0) {
+    for (const row of w.terrain) {
+      for (const t of row) {
+        if (!t.isSea && t.stability < 0.5) unstable++;
+      }
+    }
+  }
+  let collapseLabel = '崩落: なし';
+  let collapseClass = '';
+  if (unstable > 12) { collapseLabel = `崩落: 危険 (${unstable})`; collapseClass = 's8-danger'; }
+  else if (unstable > 4) { collapseLabel = `崩落: 注意 (${unstable})`; collapseClass = 's8-warn'; }
+  if (collapseEl) {
+    collapseEl.textContent = collapseLabel;
+    collapseEl.className = collapseClass;
+  }
+  root.classList.toggle('is-collapse-warn', unstable > 12);
+
+  // --- 位相カウントダウン ---
+  const np = nextPhaseFromProgress(w.dayProgress);
+  if (phaseEl) phaseEl.textContent = `${np.label} ${fmtMMSS(np.remaining)}`;
+
+  root.classList.toggle('is-night', w.dayPhase === 'night');
 }
 
 // 危険天候（赤マーカー対象）

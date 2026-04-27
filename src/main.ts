@@ -745,6 +745,8 @@ async function start() {
     });
     // アクションバーの地形ボタン active 状態
     document.getElementById('ab-terrain')?.classList.toggle('active', m !== null);
+    // Σ-8 toolbar の active を raise/lower と同期
+    setSigma8ToolActive(m);
     if (m) {
       setBuildMode(null);
       const hint = document.getElementById('plot-build-hint');
@@ -762,6 +764,94 @@ async function start() {
       const kind = btn.dataset.terraform as NonNullable<TerraformMode>;
       setTerraformMode(terraformMode === kind ? null : kind);
     });
+  });
+
+  // ========= Σ-8 Toolbar / Tool Panel（骨格）=============================
+  // 7 ツールのうち raise/lower は既存 setTerraformMode に橋渡し。
+  // flatten/smooth/ramp/channel/build は Σ-8-b/c/d で実装、現状はスタブ。
+  type S8Tool = 'raise' | 'lower' | 'flatten' | 'smooth' | 'ramp' | 'channel' | 'build';
+  const S8_TOOL_LABELS: Record<S8Tool, { name: string; hint: string }> = {
+    raise:   { name: '⛰ 盛る',   hint: 'タイルを 1 段(25)上げる' },
+    lower:   { name: '⛏ 削る',   hint: 'タイルを 1 段(25)下げる' },
+    flatten: { name: '▭ 平坦',   hint: '対象を基準 elev に揃える（Σ-8-d）' },
+    smooth:  { name: '〰 整地',   hint: '段差を整理する（Σ-8-d）' },
+    ramp:    { name: '📐 坂道',  hint: '高さ差 1 段の隣接に ramp を作る（Σ-8-b）' },
+    channel: { name: '💧 水路',  hint: 'drag で溝を掘る（Σ-8-d）' },
+    build:   { name: '🔨 建設',  hint: '建物パネルへ' },
+  };
+  function setSigma8ToolActive(m: TerraformMode) {
+    document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((b) => {
+      const t = b.dataset.s8tool as S8Tool | undefined;
+      b.classList.toggle('active', (m === 'raise' && t === 'raise') || (m === 'lower' && t === 'lower'));
+    });
+    updateSigma8Panel(m);
+  }
+  function updateSigma8Panel(m: TerraformMode | S8Tool | null) {
+    const nameEl = document.getElementById('s8-tool-name');
+    const hintEl = document.getElementById('s8-tool-hint');
+    const rampRow = document.getElementById('s8-ramp-row');
+    if (!nameEl || !hintEl) return;
+    if (!m) {
+      nameEl.textContent = '未選択';
+      hintEl.textContent = 'ツールを選んでね';
+      if (rampRow) rampRow.style.display = 'none';
+      return;
+    }
+    const def = S8_TOOL_LABELS[m as S8Tool];
+    if (!def) return;
+    nameEl.textContent = def.name;
+    hintEl.textContent = def.hint;
+    if (rampRow) rampRow.style.display = (m === 'ramp') ? 'grid' : 'none';
+  }
+  document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tool = btn.dataset.s8tool as S8Tool;
+      if (tool === 'raise' || tool === 'lower') {
+        setTerraformMode(terraformMode === tool ? null : tool);
+        return;
+      }
+      if (tool === 'build') {
+        // 既存 build パネルへ誘導
+        setTerraformMode(null);
+        flashToast('右の建設パネルから建物を選んでわふ', 'info');
+        updateSigma8Panel('build');
+        document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((b) => {
+          b.classList.toggle('active', b === btn);
+        });
+        return;
+      }
+      // flatten / smooth / ramp / channel：骨格段階。Σ-8-b/c/d で本実装。
+      setTerraformMode(null);
+      flashToast(`${S8_TOOL_LABELS[tool].name} は Σ-8 後続フェーズで実装予定`, 'info');
+      updateSigma8Panel(tool);
+      document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((b) => {
+        b.classList.toggle('active', b === btn);
+      });
+    });
+  });
+
+  // 半径/強度スライダー：表示同期のみ（Σ-8-a 段階では値は未使用）
+  const bindSlider = (id: string, valId: string) => {
+    const sl = document.getElementById(id) as HTMLInputElement | null;
+    const val = document.getElementById(valId);
+    if (!sl || !val) return;
+    val.textContent = sl.value;
+    sl.addEventListener('input', () => { val.textContent = sl.value; });
+  };
+  bindSlider('s8-brush-radius', 's8-brush-radius-val');
+  bindSlider('s8-brush-strength', 's8-brush-strength-val');
+
+  // キーボード 1-7 で Σ-8 toolbar 切替
+  window.addEventListener('keydown', (ev) => {
+    if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLSelectElement) return;
+    const map: Record<string, S8Tool> = {
+      '1': 'raise', '2': 'lower', '3': 'flatten', '4': 'smooth',
+      '5': 'ramp',  '6': 'channel', '7': 'build',
+    };
+    const tool = map[ev.key];
+    if (!tool) return;
+    const btn = document.querySelector<HTMLButtonElement>(`.s8-tool[data-s8tool="${tool}"]`);
+    btn?.click();
   });
 
   // 空クリック → 建設 or 地形編集モード処理

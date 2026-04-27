@@ -6,25 +6,41 @@
 // island   (hell)     : 四方海・中央小山・縁は切り立つ崖
 
 import type { Difficulty, TerrainMaterial, TerrainTile } from '../../types';
+import { CONFIG } from '../../config';
 import { noise2D, octaveNoise } from './noise';
 
 const TILE_SIZE = 32;
+const STEP = CONFIG.ELEV_STEP;
+const MAX_E = CONFIG.MAX_ELEV;
 
-function elevToMaterial(elev: number, isWater: boolean): TerrainMaterial {
-  if (isWater) return 'water';
-  if (elev > 60) return 'rock';
-  if (elev > 25) return 'grass';
-  if (elev > 10) return 'soil';
+// 旧 generator は elev 0-100 で書かれている。新 0-255 スケールへ持ち上げ、
+// 25 単位に量子化して階段地形を生成する。
+function quantize(oldElev01_100: number): number {
+  const scaled = oldElev01_100 * (MAX_E / 100);
+  return Math.max(0, Math.min(MAX_E, Math.round(scaled / STEP) * STEP));
+}
+
+// elev 段（0..MAX_E、STEP 刻み）から材質を決める。海は別フラグで扱う。
+function elevToMaterial(elev: number): TerrainMaterial {
+  if (elev >= 200) return 'rock';   // 旧 elev>78 相当 → 山頂岩
+  if (elev >= 75)  return 'grass';
+  if (elev >= 25)  return 'soil';
   return 'sand';
 }
 
-function tile(elev: number, isWater: boolean): TerrainTile {
+function tile(rawElev01_100: number, isSea: boolean): TerrainTile {
+  const elev = isSea ? 0 : quantize(Math.max(2, Math.min(100, rawElev01_100)));
   return {
-    elev: Math.max(isWater ? 0 : 2, Math.min(100, elev)),
-    material: elevToMaterial(Math.max(isWater ? 0 : 2, Math.min(100, elev)), isWater),
+    elev,
+    material: isSea ? 'sand' : elevToMaterial(elev),
+    ramp: null,
     stability: 1.0,
-    waterLevel: isWater ? 1.0 : 0,
+    waterLevel: isSea ? 1.0 : 0,
+    wetness: 0,
+    mud: 0,
+    snowCoverage: 0,
     buryTimer: 0,
+    isSea,
   };
 }
 
@@ -188,5 +204,5 @@ export function isSeaTile(terrain: TerrainTile[][], x: number, y: number): boole
   const row = Math.floor(y / TILE_SIZE);
   const t = terrain[row]?.[col];
   if (!t) return false;
-  return t.waterLevel >= 0.5 || t.material === 'water';
+  return t.isSea;
 }
