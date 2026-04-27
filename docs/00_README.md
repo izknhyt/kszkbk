@@ -18,6 +18,8 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `40_accessory_library.md` | 小物 20 種の仕様 | 個体差 overlay 発注時 |
 | `50_prompt_templates.md` | 発注マスタープロンプト（コピペ用） | 発注時 |
 | `90_qa_checklist.md` | 納品チェックリスト | 納品検品時 |
+| `SIGMA-8-PLAN.md` | M2 地形リワークのロードマップ v2 | Sigma-8 実装時 |
+| `SIGMA-8-DEVELOPMENT-SPEC.md` | Sigma-8 の実装仕様・禁止事項・検証基準 | Sigma-8 実装時 |
 
 ---
 
