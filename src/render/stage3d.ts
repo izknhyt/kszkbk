@@ -226,39 +226,35 @@ const FURANA_URLS = [
   '/furana/09_dead.png',
 ];
 
-// ============================================================
-// 地形カラー — 標高で色を「層別に」変える地図的アプローチ。
-// 低地は緑、中腹は薄い緑、高地は乾いた茶〜岩、頂上は明るい灰。
-// material は補正係数として軽く効かせる程度（rock は灰寄り、sand は黄寄り）。
-const MAT_RGB: Record<string, [number,number,number]> = {
-  grass:[0x6b/255,0x9e/255,0x4a/255],
-  soil: [0xa8/255,0x7a/255,0x4a/255],
-  sand: [0xe0/255,0xc9/255,0x8a/255],
-  rock: [0x7a/255,0x7a/255,0x7a/255],
-  snow: [0xea/255,0xf2/255,0xff/255],
+// Σ-8-c で atlas lookup に移行したため、旧 elev band / material RGB は撤去。
+// vertex color は tile.ramp の有無に応じた tint のみで、テクスチャは atlas が担う。
+
+// =========================================================================
+// Σ-8-c Atlas セルマップ
+// 1024×1024 PNG / 4×4 grid / 256px cell。col/row は 0-indexed。
+// 各セル内に 16/256 = 6.25% の inset を取り、隣接セルへの blee
+// (テクスチャブリード) を避ける。
+// =========================================================================
+const ATLAS_GRID = 4;
+const ATLAS_INSET = (1 / 16) / ATLAS_GRID;  // セル内寸 1/4 の 1/16 = 0.015625
+function atlasUVBounds(col: number, row: number): { uMin: number; uMax: number; vMin: number; vMax: number } {
+  const cell = 1 / ATLAS_GRID;
+  return {
+    uMin: col * cell + ATLAS_INSET,
+    uMax: (col + 1) * cell - ATLAS_INSET,
+    vMin: 1 - (row + 1) * cell + ATLAS_INSET,
+    vMax: 1 - row * cell - ATLAS_INSET,
+  };
+}
+const MAT_CELL: Record<string, [number, number]> = {
+  // material → (col, row)
+  grass: [0, 0], soil: [1, 0], rock: [2, 0], sand: [3, 0],
+  snow:  [0, 1],
 };
-// 標高別カラーバンド（離散）：Σ-8 で 0-255 スケールに移行。
-// ELEV_STEP=25 単位なので「N 段目」が地図的にハッキリ読める。
-const ELEV_BANDS: Array<{ max: number; rgb: [number,number,number] }> = [
-  { max: 50,  rgb: [0x35/255,0x60/255,0x30/255] },  // 深緑（低地・湿地）
-  { max: 100, rgb: [0x68/255,0x95/255,0x44/255] },  // 草緑（平野）
-  { max: 150, rgb: [0xa6/255,0xae/255,0x55/255] },  // 黄緑（丘陵）
-  { max: 200, rgb: [0xae/255,0x82/255,0x46/255] },  // 茶（山腹）
-  { max: 255, rgb: [0xc8/255,0xc4/255,0xb0/255] },  // 灰岩（山頂）
-];
-function rampColor(elev: number): [number,number,number] {
-  const e = Math.max(0, Math.min(255, elev));
-  for (const band of ELEV_BANDS) {
-    if (e <= band.max) return band.rgb;
-  }
-  return ELEV_BANDS[ELEV_BANDS.length - 1]!.rgb;
-}
-function tileRgb(mat: string, elev: number): [number,number,number] {
-  // 標高バンドが主、material は 15% だけブレンド（rock タイルが灰寄り、sand が黄寄り 等の微調整）
-  const r = rampColor(elev);
-  const m = MAT_RGB[mat] ?? MAT_RGB['soil']!;
-  return [r[0]*0.85 + m[0]*0.15, r[1]*0.85 + m[1]*0.15, r[2]*0.85 + m[2]*0.15];
-}
+const CLIFF_CELL: [number, number] = [1, 1];
+// reserved for Σ-8-c-2:
+//   rampN: [2, 1], rampE: [3, 1]
+//   waterOv: [0, 2], mudOv: [1, 2], snowOv: [2, 2], wetOv: [3, 2]
 
 // Σ-8-b-2 ramp 対応: タイル (c, r) の指定コーナー (NW/NE/SW/SE) における
 // 「ramp 加味済み」の頂点 elev を返す。ramp が無いなら tile.elev、ramp の
@@ -276,125 +272,114 @@ function tileCornerElev(tile: import('../types').TerrainTile, corner: Corner): n
   }
 }
 
-// 頂点 (ui, vi) に寄与する隣接 4 タイルそれぞれの「該当コーナーでの ramp 加味済 elev」max。
-function vertexRampAwareElev(terrain: import('../types').TerrainTile[][], ui: number, vi: number, ROWS: number, COLS: number): number {
-  let mx = -1, cnt = 0;
-  // タイル (ui-1, vi-1) → そのタイルから見て頂点 (ui, vi) は SE
-  // タイル (ui,   vi-1) → SW
-  // タイル (ui-1, vi  ) → NE
-  // タイル (ui,   vi  ) → NW
-  const probes: Array<[number, number, Corner]> = [
-    [ui - 1, vi - 1, 'SE'],
-    [ui    , vi - 1, 'SW'],
-    [ui - 1, vi    , 'NE'],
-    [ui    , vi    , 'NW'],
-  ];
-  for (const [tc, tr, corner] of probes) {
-    if (tr < 0 || tr >= ROWS || tc < 0 || tc >= COLS) continue;
-    const e = tileCornerElev(terrain[tr]![tc]!, corner);
-    if (e > mx) mx = e;
-    cnt++;
-  }
-  return cnt > 0 ? mx : 0;
-}
+// （Σ-8-c で per-tile geometry に移行、頂点共有を止めたので不要に）
 
 // ============================================================
-// 地形 BufferGeometry 構築
+// 地形 BufferGeometry 構築（Σ-8-c per-tile 独立頂点型）
+// 4 頂点/タイル × ROWS × COLS。共有頂点を持たないので、隣接タイルとの elev gap が
+// あれば視覚的にギャップが出るが、≥1 段差は cliffWallIM が壁面で埋める。
+// 各頂点に atlas UV を割り当てて material 別のテクスチャを per-tile で貼る。
 // ============================================================
 function buildTerrainGeo(terrain: import('../types').TerrainTile[][]): THREE.BufferGeometry {
   const ROWS = terrain.length || T_ROWS;
   const COLS = (terrain[0]?.length) || T_COLS;
-  const VW = COLS+1, VH = ROWS+1, nV = VW*VH;
-  const pos = new Float32Array(nV*3);
-  const col = new Float32Array(nV*3);
-  const idx = new Uint32Array(ROWS*COLS*6);
-
-  for (let vi=0; vi<VH; vi++) {
-    for (let ui=0; ui<VW; ui++) {
-      const vIdx = vi*VW+ui;
-      // Σ-8: 頂点 elev は隣接 4 タイルの max（ramp 加味）を取る。
-      // 段々地形を強調しつつ、ramp タイルの低辺/高辺を斜面に反映する。
-      const elev = vertexRampAwareElev(terrain, ui, vi, ROWS, COLS);
-      // cliff シェーディング用に「ramp を考慮しない素の elev range」も計測
-      let eMin=999, eMax=-1;
-      for (let dr=-1; dr<=0; dr++) for (let dc=-1; dc<=0; dc++) {
-        const tr=vi+dr, tc=ui+dc;
-        if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){
-          const e = terrain[tr]![tc]!.elev;
-          if (e>eMax) eMax=e;
-          if (e<eMin) eMin=e;
-        }
-      }
-      pos[vIdx*3]   = ui*TERRAIN_TILE_SIZE;
-      pos[vIdx*3+1] = elev*ELEV_SCALE;
-      pos[vIdx*3+2] = vi*TERRAIN_TILE_SIZE;
-      const nr = Math.min(ROWS-1, vi===VH-1?vi-1:vi);
-      const nc = Math.min(COLS-1, ui===VW-1?ui-1:ui);
-      const tile = terrain[nr]![nc]!;
-      // ramp タイルは「土の道」っぽい色寄せ。それ以外は通常 ramp。
-      const [r,g,bv] = tile.ramp
-        ? [0xa8/255*0.55 + 0x6b/255*0.45, 0x7a/255*0.55 + 0x9e/255*0.45, 0x4a/255*0.55 + 0x4a/255*0.45]
-        : tileRgb(tile.material, elev);
-      // 崖面シェーディング：ramp 接続できない箇所のみ崖色に blend。
-      // ramp タイル内部は段差が斜面に解消されるので cliff 強度を抑える。
-      const slopeRange = eMax - eMin;
-      let cliff = Math.max(0, Math.min(1, (slopeRange - 30) / 55));
-      if (tile.ramp) cliff *= 0.25;
-      const cliffR = 0x4a/255, cliffG = 0x35/255, cliffB = 0x22/255;
-      const k = cliff * 0.65;
-      col[vIdx*3]   = r  * (1 - k) + cliffR * k;
-      col[vIdx*3+1] = g  * (1 - k) + cliffG * k;
-      col[vIdx*3+2] = bv * (1 - k) + cliffB * k;
-    }
-  }
-  let ii=0;
-  for (let row=0; row<ROWS; row++) for (let c2=0; c2<COLS; c2++) {
-    const tl=row*VW+c2, tr=tl+1, bl=(row+1)*VW+c2, br=bl+1;
-    idx[ii++]=tl; idx[ii++]=bl; idx[ii++]=tr;
-    idx[ii++]=tr; idx[ii++]=bl; idx[ii++]=br;
-  }
+  const N = ROWS * COLS;
+  const pos = new Float32Array(N * 4 * 3);
+  const col = new Float32Array(N * 4 * 3);
+  const uv  = new Float32Array(N * 4 * 2);
+  const idx = new Uint32Array(N * 6);
+  fillTerrainAttrs(terrain, ROWS, COLS, pos, col, uv, idx);
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
-  geo.setAttribute('color',    new THREE.BufferAttribute(col,3));
-  geo.setIndex(new THREE.BufferAttribute(idx,1));
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('uv',       new THREE.BufferAttribute(uv,  2));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
   geo.computeVertexNormals();
   return geo;
 }
 
 function refreshTerrainGeo(geo: THREE.BufferGeometry, terrain: import('../types').TerrainTile[][]): void {
-  const ROWS=terrain.length||T_ROWS, COLS=(terrain[0]?.length)||T_COLS;
-  const VW=COLS+1, VH=ROWS+1;
+  const ROWS = terrain.length || T_ROWS;
+  const COLS = (terrain[0]?.length) || T_COLS;
   const posA = geo.getAttribute('position') as THREE.BufferAttribute;
   const colA = geo.getAttribute('color')    as THREE.BufferAttribute;
-  for (let vi=0;vi<VH;vi++) for (let ui=0;ui<VW;ui++) {
-    const vIdx=vi*VW+ui;
-    const elev = vertexRampAwareElev(terrain, ui, vi, ROWS, COLS);
-    let eMax=-1, eMin=999;
-    for (let dr=-1;dr<=0;dr++) for (let dc=-1;dc<=0;dc++) {
-      const tr=vi+dr, tc=ui+dc;
-      if (tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){
-        const e = terrain[tr]![tc]!.elev;
-        if (e>eMax) eMax=e;
-        if (e<eMin) eMin=e;
-      }
-    }
-    posA.setXYZ(vIdx, ui*TERRAIN_TILE_SIZE, elev*ELEV_SCALE, vi*TERRAIN_TILE_SIZE);
-    const nr=Math.min(ROWS-1,vi===VH-1?vi-1:vi);
-    const nc=Math.min(COLS-1,ui===VW-1?ui-1:ui);
-    const tile=terrain[nr]![nc]!;
-    const [r,g,bv]= tile.ramp
-      ? [0xa8/255*0.55 + 0x6b/255*0.45, 0x7a/255*0.55 + 0x9e/255*0.45, 0x4a/255*0.55 + 0x4a/255*0.45]
-      : tileRgb(tile.material, elev);
-    const slopeRange = eMax - eMin;
-    let cliff = Math.max(0, Math.min(1, (slopeRange - 30) / 55));
-    if (tile.ramp) cliff *= 0.25;
-    const cliffR=0x4a/255, cliffG=0x35/255, cliffB=0x22/255;
-    const k = cliff * 0.65;
-    colA.setXYZ(vIdx, r*(1-k)+cliffR*k, g*(1-k)+cliffG*k, bv*(1-k)+cliffB*k);
+  const uvA  = geo.getAttribute('uv')       as THREE.BufferAttribute;
+  // attribute サイズが旧 shared-vertex 形式と一致しない場合は丸ごと作り直す
+  const expectedV = ROWS * COLS * 4;
+  if (posA.count !== expectedV) {
+    const N = ROWS * COLS;
+    const pos = new Float32Array(N * 4 * 3);
+    const col = new Float32Array(N * 4 * 3);
+    const uv  = new Float32Array(N * 4 * 2);
+    const idx = new Uint32Array(N * 6);
+    fillTerrainAttrs(terrain, ROWS, COLS, pos, col, uv, idx);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('uv',       new THREE.BufferAttribute(uv,  2));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.computeVertexNormals();
+    return;
   }
-  posA.needsUpdate=true; colA.needsUpdate=true;
+  fillTerrainAttrs(terrain, ROWS, COLS,
+    posA.array as Float32Array, colA.array as Float32Array,
+    uvA.array as Float32Array, geo.index!.array as Uint32Array);
+  posA.needsUpdate = true; colA.needsUpdate = true; uvA.needsUpdate = true;
+  geo.index!.needsUpdate = true;
   geo.computeVertexNormals();
 }
+
+function fillTerrainAttrs(
+  terrain: import('../types').TerrainTile[][],
+  ROWS: number, COLS: number,
+  pos: Float32Array, col: Float32Array, uv: Float32Array, idx: Uint32Array,
+): void {
+  const TILE = TERRAIN_TILE_SIZE;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const tile = terrain[r]![c]!;
+      const baseV = (r * COLS + c) * 4;
+      const baseI = (r * COLS + c) * 6;
+      // 4 corners (ramp 加味の corner elev)
+      const xL = c * TILE, xR = (c + 1) * TILE;
+      const zN = r * TILE, zS = (r + 1) * TILE;
+      const eNW = tileCornerElev(tile, 'NW') * ELEV_SCALE;
+      const eNE = tileCornerElev(tile, 'NE') * ELEV_SCALE;
+      const eSW = tileCornerElev(tile, 'SW') * ELEV_SCALE;
+      const eSE = tileCornerElev(tile, 'SE') * ELEV_SCALE;
+      // vertex 順: 0=NW, 1=NE, 2=SW, 3=SE
+      pos[(baseV+0)*3] = xL; pos[(baseV+0)*3+1] = eNW; pos[(baseV+0)*3+2] = zN;
+      pos[(baseV+1)*3] = xR; pos[(baseV+1)*3+1] = eNE; pos[(baseV+1)*3+2] = zN;
+      pos[(baseV+2)*3] = xL; pos[(baseV+2)*3+1] = eSW; pos[(baseV+2)*3+2] = zS;
+      pos[(baseV+3)*3] = xR; pos[(baseV+3)*3+1] = eSE; pos[(baseV+3)*3+2] = zS;
+      // UV: material 別 atlas cell。ramp タイルは現状 material のまま（Σ-8-c-2 で rampN/E に切替）。
+      const cell = MAT_CELL[tile.material] ?? MAT_CELL['grass']!;
+      const uvB = atlasUVBounds(cell[0], cell[1]);
+      uv[(baseV+0)*2] = uvB.uMin; uv[(baseV+0)*2+1] = uvB.vMax;
+      uv[(baseV+1)*2] = uvB.uMax; uv[(baseV+1)*2+1] = uvB.vMax;
+      uv[(baseV+2)*2] = uvB.uMin; uv[(baseV+2)*2+1] = uvB.vMin;
+      uv[(baseV+3)*2] = uvB.uMax; uv[(baseV+3)*2+1] = uvB.vMin;
+      // tint: vertex color。atlas が貼られたら multiply されるので白が基準。
+      // ramp タイルは「土の道」気味に少し暖色化、cliff 隣接で陰る箇所は既存 vertex_color に依らず
+      // atlas のまま見せる（光源で陰影が出る）。
+      const tintR = tile.ramp ? 1.05 : 1.0;
+      const tintG = tile.ramp ? 0.95 : 1.0;
+      const tintB = tile.ramp ? 0.85 : 1.0;
+      for (let k = 0; k < 4; k++) {
+        col[(baseV+k)*3]   = tintR;
+        col[(baseV+k)*3+1] = tintG;
+        col[(baseV+k)*3+2] = tintB;
+      }
+      // indices: 2 triangles. 対角線 NE-SW で分割
+      idx[baseI+0] = baseV + 0;  // NW
+      idx[baseI+1] = baseV + 2;  // SW
+      idx[baseI+2] = baseV + 1;  // NE
+      idx[baseI+3] = baseV + 1;  // NE
+      idx[baseI+4] = baseV + 2;  // SW
+      idx[baseI+5] = baseV + 3;  // SE
+    }
+  }
+}
+
 
 // ============================================================
 // Toon グラジェントマップ（4段階）
@@ -416,36 +401,28 @@ function makeGradMap(): THREE.DataTexture {
 // 周囲より低い / 高いタイルでキャラが埋もれたり浮いたりしていた。
 // ============================================================
 function elevAt(terrain: import('../types').TerrainTile[][], wx: number, wy: number): number {
-  // Σ-8-b-1.6: buildTerrainGeo の三角形分割と完全一致させるため、
-  // bilinear ではなく triangle barycentric で補間する。これにより
-  // メッシュ表面とキャラのスプライト Y が完全に一致し「埋もれ」が消える。
-  // 各 quad は対角線 (tr-bl) で 2 三角形に分割：
-  //   T1: tl, bl, tr   (fu+fv < 1)
-  //   T2: tr, bl, br   (fu+fv ≥ 1)
+  // Σ-8-c per-tile geometry に同期。各タイルが独立 4 頂点を持つので、その内側で
+  // 三角形 barycentric 補間する（対角線 NE-SW 分割、buildTerrainGeo と同じ）。
   const ROWS = terrain.length;
   const COLS = terrain[0]?.length ?? 0;
   if (ROWS === 0 || COLS === 0) return 0;
-  const u = wx / TERRAIN_TILE_SIZE;
-  const v = wy / TERRAIN_TILE_SIZE;
-  const u0 = Math.max(0, Math.min(COLS, Math.floor(u)));
-  const v0 = Math.max(0, Math.min(ROWS, Math.floor(v)));
-  const u1 = Math.min(COLS, u0 + 1);
-  const v1 = Math.min(ROWS, v0 + 1);
-  const fu = Math.max(0, Math.min(1, u - u0));
-  const fv = Math.max(0, Math.min(1, v - v0));
-  // 頂点 elev = 隣接 4 タイルの max（ramp 加味、buildTerrainGeo と同式）
-  const vElev = (ui: number, vi: number): number => vertexRampAwareElev(terrain, ui, vi, ROWS, COLS);
-  const eTL = vElev(u0, v0), eTR = vElev(u1, v0);
-  const eBL = vElev(u0, v1), eBR = vElev(u1, v1);
+  const tx = Math.max(0, Math.min(COLS - 1, Math.floor(wx / TERRAIN_TILE_SIZE)));
+  const ty = Math.max(0, Math.min(ROWS - 1, Math.floor(wy / TERRAIN_TILE_SIZE)));
+  const tile = terrain[ty]![tx]!;
+  const fu = Math.max(0, Math.min(1, (wx - tx * TERRAIN_TILE_SIZE) / TERRAIN_TILE_SIZE));
+  const fv = Math.max(0, Math.min(1, (wy - ty * TERRAIN_TILE_SIZE) / TERRAIN_TILE_SIZE));
+  const eNW = tileCornerElev(tile, 'NW');
+  const eNE = tileCornerElev(tile, 'NE');
+  const eSW = tileCornerElev(tile, 'SW');
+  const eSE = tileCornerElev(tile, 'SE');
+  // 三角形分割：対角線 NE-SW（fu + fv < 1 → NW三角形 / fu + fv >= 1 → SE三角形）
   let elev: number;
   if (fu + fv < 1) {
-    // T1: tl(0,0), bl(0,1), tr(1,0)。barycentric:
-    //   w_tl = 1 - fu - fv, w_bl = fv, w_tr = fu
-    elev = eTL * (1 - fu - fv) + eBL * fv + eTR * fu;
+    // T1: NW(0,0), SW(0,1), NE(1,0)
+    elev = eNW * (1 - fu - fv) + eSW * fv + eNE * fu;
   } else {
-    // T2: tr(1,0), bl(0,1), br(1,1)。barycentric:
-    //   w_tr = 1 - fv, w_bl = 1 - fu, w_br = fu + fv - 1
-    elev = eTR * (1 - fv) + eBL * (1 - fu) + eBR * (fu + fv - 1);
+    // T2: NE(1,0), SW(0,1), SE(1,1)
+    elev = eNE * (1 - fv) + eSW * (1 - fu) + eSE * (fu + fv - 1);
   }
   return elev * ELEV_SCALE;
 }
@@ -805,6 +782,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const gradMap = makeGradMap();
 
   // --- 地形メッシュ ---
+  // Σ-8-c: vertexColors は light/cliff tint を残しつつ、map に atlas を貼ると multiply される。
   const terrainMat = new THREE.MeshToonMaterial({ vertexColors:true, gradientMap:gradMap });
   const terrainMesh = new THREE.Mesh(new THREE.BufferGeometry(), terrainMat);
   scene.add(terrainMesh);
@@ -850,10 +828,22 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // ==========================================================
   const MAX_CLIFF_WALLS = 2400;  // 5700 タイル × 2 境界の上限見積もり
   const _cliffWallGeo = new THREE.PlaneGeometry(1, 1);
+  // PlaneGeometry の UV はデフォ (0,1)/(1,1)/(0,0)/(1,0)。これを atlas の
+  // cliff cell (col=1, row=1) の bounds に書き換えて、texture 貼った時に正しい
+  // 範囲を取れるように。読み込み前は color tint で岩茶のまま。
+  {
+    const cuv = atlasUVBounds(CLIFF_CELL[0], CLIFF_CELL[1]);
+    const ua = _cliffWallGeo.attributes.uv as THREE.BufferAttribute;
+    ua.setXY(0, cuv.uMin, cuv.vMax);
+    ua.setXY(1, cuv.uMax, cuv.vMax);
+    ua.setXY(2, cuv.uMin, cuv.vMin);
+    ua.setXY(3, cuv.uMax, cuv.vMin);
+    ua.needsUpdate = true;
+  }
   const cliffWallIM = new THREE.InstancedMesh(
     _cliffWallGeo,
     new THREE.MeshToonMaterial({
-      color: 0x5a4030,          // 岩壁の暗茶
+      color: 0x5a4030,          // 岩壁の暗茶（atlas 読込前のフォールバック）
       side: THREE.DoubleSide,
       gradientMap: gradMap,
     }),
@@ -863,6 +853,25 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   cliffWallIM.castShadow = false;
   cliffWallIM.receiveShadow = false;
   scene.add(cliffWallIM);
+
+  // --- Σ-8-c atlas テクスチャ ---
+  // 1024×1024 RGBA / 4×4 / 256px cell の処理済アセットを地形 mesh と
+  // 崖壁面 mesh の map にぶら下げる。読込前は vertexColors のみで描画、
+  // 完了で map を inject（一度切り替わるとそのまま）。
+  const ATLAS_URL = '/terrain/sigma8_terrain_atlas_v1_processed.png';
+  new THREE.TextureLoader().load(ATLAS_URL, (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.generateMipmaps = false;
+    terrainMat.map = tex;
+    terrainMat.needsUpdate = true;
+    const cwMat = cliffWallIM.material as THREE.MeshToonMaterial;
+    cwMat.map = tex;
+    cwMat.color.setHex(0xffffff);  // map に色を任せる
+    cwMat.needsUpdate = true;
+  });
   const waterIMs = [waterDampIM, waterShallowIM, waterMidIM, waterDeepIM];
 
   // specular ハイライト：水面に sin(time) で揺らぐ白い斑点。深い水たまりだけ。
@@ -1437,50 +1446,68 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
       prevElevs=world.terrain.map(row=>row.map(t=>t.elev));
 
-      // Σ-8-b-3: 崖を壁面 InstancedMesh で実体化（黒線 cliffLines は debug 専用へ）
+      // Σ-8-b-3 / Σ-8-c: 崖を壁面 InstancedMesh で実体化。
+      // per-tile geometry になったので 1 段差(25) でも視覚 gap が出る → 閾値も 25 に。
+      // ただし lower 側のタイルが境界方向を指す ramp を持っているなら通行可、壁は不要。
       const ROWS2=world.terrain.length, COLS2=world.terrain[0]?.length??0;
-      const CLIFF_WALL_THRESH = 50;  // 2 段差以上 (= ELEV_STEP*2) で壁を立てる
+      const CLIFF_WALL_THRESH = 25;  // 1 段差以上で壁（ramp で接続される境界は除く）
       const TILE = TERRAIN_TILE_SIZE;
       const _cliffMat = new THREE.Matrix4();
       const _cliffPos = new THREE.Vector3();
       const _cliffQuat = new THREE.Quaternion();
       const _cliffScale = new THREE.Vector3();
       const _cliffEulerEW = new THREE.Euler(0, Math.PI / 2, 0); // east/west 境界用
-      const _cliffEulerNS = new THREE.Euler(0, 0, 0);          // north/south 境界用（XY plane normal +Z でそのまま）
+      const _cliffEulerNS = new THREE.Euler(0, 0, 0);          // north/south 境界用
       let cwCount = 0;
       for (let r2=0; r2<ROWS2; r2++) for (let c2=0; c2<COLS2; c2++){
-        const e0 = world.terrain[r2]![c2]!.elev;
+        const t0 = world.terrain[r2]![c2]!;
+        const e0 = t0.elev;
         // east 境界: タイル(c2,r2) と (c2+1,r2)
         if (c2+1 < COLS2) {
-          const eE = world.terrain[r2]![c2+1]!.elev;
+          const tE = world.terrain[r2]![c2+1]!;
+          const eE = tE.elev;
           const diff = Math.abs(e0 - eE);
           if (diff >= CLIFF_WALL_THRESH) {
-            const lo = Math.min(e0, eE), hi = Math.max(e0, eE);
-            const wallH = (hi - lo) * ELEV_SCALE;
-            _cliffPos.set((c2+1)*TILE, (lo + hi)/2 * ELEV_SCALE, (r2 + 0.5)*TILE);
-            _cliffQuat.setFromEuler(_cliffEulerEW);
-            _cliffScale.set(TILE, wallH, 1);
-            _cliffMat.compose(_cliffPos, _cliffQuat, _cliffScale);
-            if (cwCount < MAX_CLIFF_WALLS) {
-              cliffWallIM.setMatrixAt(cwCount, _cliffMat);
-              cwCount++;
+            // ramp 接続チェック：低い側が境界方向を指す ramp を持っていれば壁省略
+            const lowerLeft = e0 < eE;
+            const lower = lowerLeft ? t0 : tE;
+            const requiredDir = lowerLeft ? 'E' : 'W';
+            const rampConnects = (diff === 25 && lower.ramp === requiredDir);
+            if (!rampConnects) {
+              const lo = Math.min(e0, eE), hi = Math.max(e0, eE);
+              const wallH = (hi - lo) * ELEV_SCALE;
+              _cliffPos.set((c2+1)*TILE, (lo + hi)/2 * ELEV_SCALE, (r2 + 0.5)*TILE);
+              _cliffQuat.setFromEuler(_cliffEulerEW);
+              _cliffScale.set(TILE, wallH, 1);
+              _cliffMat.compose(_cliffPos, _cliffQuat, _cliffScale);
+              if (cwCount < MAX_CLIFF_WALLS) {
+                cliffWallIM.setMatrixAt(cwCount, _cliffMat);
+                cwCount++;
+              }
             }
           }
         }
         // south 境界: タイル(c2,r2) と (c2,r2+1)
         if (r2+1 < ROWS2) {
-          const eS = world.terrain[r2+1]![c2]!.elev;
+          const tS = world.terrain[r2+1]![c2]!;
+          const eS = tS.elev;
           const diff = Math.abs(e0 - eS);
           if (diff >= CLIFF_WALL_THRESH) {
-            const lo = Math.min(e0, eS), hi = Math.max(e0, eS);
-            const wallH = (hi - lo) * ELEV_SCALE;
-            _cliffPos.set((c2 + 0.5)*TILE, (lo + hi)/2 * ELEV_SCALE, (r2+1)*TILE);
-            _cliffQuat.setFromEuler(_cliffEulerNS);
-            _cliffScale.set(TILE, wallH, 1);
-            _cliffMat.compose(_cliffPos, _cliffQuat, _cliffScale);
-            if (cwCount < MAX_CLIFF_WALLS) {
-              cliffWallIM.setMatrixAt(cwCount, _cliffMat);
-              cwCount++;
+            const lowerTop = e0 < eS;
+            const lower = lowerTop ? t0 : tS;
+            const requiredDir = lowerTop ? 'S' : 'N';
+            const rampConnects = (diff === 25 && lower.ramp === requiredDir);
+            if (!rampConnects) {
+              const lo = Math.min(e0, eS), hi = Math.max(e0, eS);
+              const wallH = (hi - lo) * ELEV_SCALE;
+              _cliffPos.set((c2 + 0.5)*TILE, (lo + hi)/2 * ELEV_SCALE, (r2+1)*TILE);
+              _cliffQuat.setFromEuler(_cliffEulerNS);
+              _cliffScale.set(TILE, wallH, 1);
+              _cliffMat.compose(_cliffPos, _cliffQuat, _cliffScale);
+              if (cwCount < MAX_CLIFF_WALLS) {
+                cliffWallIM.setMatrixAt(cwCount, _cliffMat);
+                cwCount++;
+              }
             }
           }
         }
