@@ -1,4 +1,4 @@
-import type { DeathCauseId, Vec2 } from '../types';
+import type { Vec2 } from '../types';
 import type { HazardZone } from '../sim/hazards';
 
 export interface BuildingDef {
@@ -77,28 +77,16 @@ export const BUILDINGS: Record<string, BuildingDef> = {
 } as const;
 
 export function buildingsToHazards(placed: { defId: string; pos: Vec2; level: number }[]): HazardZone[] {
+  // M2.1 Step 4.3: 旧 BUILDINGS 起源のハザード（noukou_mud / kouba_spark /
+  // taiko_crush 等）は新規発火停止。新 Feature 起源のハザードは別関数で管理する。
+  // 既存セーブ由来の `placed` 配列は読み取りで残るが、ここから zone を出さない
+  // ことで「既に建っている旧建物の周辺で死ぬ」事故が止まる。
+  void placed;
+  return [];
+  // --- LEGACY M2.1 旧ロジック（unreachable、復元するならこのコメント解除）---
+  /*
   const out: HazardZone[] = [];
-  for (let i = 0; i < placed.length; i++) {
-    const p = placed[i]!;
-    const def = BUILDINGS[p.defId];
-    if (!def?.hazard) continue;
-    // Lv で危険度が伸びる。sqrt スケーリングで Lv99 でも ~2.5× 程度に抑える。
-    // Lv1=1.0×, Lv3=1.21×, Lv10=1.45×, Lv50=2.06×, Lv99=2.49×
-    const lvMul = 1 + Math.sqrt(Math.max(0, p.level - 1)) * 0.15;
-    const radiusMul = 1 + Math.sqrt(Math.max(0, p.level - 1)) * 0.05;
-    const zone: HazardZone = {
-      id: `${def.id}-${i}`,
-      kind: 'circle',
-      center: { ...p.pos },
-      radius: def.hazard.radius * radiusMul,
-      ratePerSec: def.hazard.ratePerSec * lvMul,
-      causeId: def.hazard.causeId as DeathCauseId,
-      bypassSafeZone: true,
-      note: `${def.name}の危険地帯 (Lv${p.level})`,
-    };
-    if (def.hazard.traitMultipliers) zone.traitMultipliers = { ...def.hazard.traitMultipliers };
-    if (def.hazard.requiresAnyTrait) zone.requiresAnyTrait = [...def.hazard.requiresAnyTrait];
-    out.push(zone);
-  }
+  for (let i = 0; i < placed.length; i++) { ... }
   return out;
+  */
 }
