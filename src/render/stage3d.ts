@@ -401,21 +401,27 @@ function makeGradMap(): THREE.DataTexture {
 // 周囲より低い / 高いタイルでキャラが埋もれたり浮いたりしていた。
 // ============================================================
 function elevAt(terrain: import('../types').TerrainTile[][], wx: number, wy: number): number {
-  // Σ-8-c per-tile geometry に同期。各タイルが独立 4 頂点を持つので、その内側で
-  // 三角形 barycentric 補間する（対角線 NE-SW 分割、buildTerrainGeo と同じ）。
+  // Σ-8-c per-tile geometry に同期。各タイルは独立 4 頂点で：
+  //   - flat タイル: 4 corner が同じ elev → タイル内は完全平面 → tile.elev 固定で返す
+  //   - ramp タイル: 4 corner が傾斜 → 三角形 barycentric で補間
+  // これでメッシュ表面と elevAt() が完全一致。崖の境界で補間で「低い側の値」を
+  // 返してしまい chibi が壁にめり込む問題が解消する。
   const ROWS = terrain.length;
   const COLS = terrain[0]?.length ?? 0;
   if (ROWS === 0 || COLS === 0) return 0;
   const tx = Math.max(0, Math.min(COLS - 1, Math.floor(wx / TERRAIN_TILE_SIZE)));
   const ty = Math.max(0, Math.min(ROWS - 1, Math.floor(wy / TERRAIN_TILE_SIZE)));
   const tile = terrain[ty]![tx]!;
+  if (!tile.ramp) {
+    return tile.elev * ELEV_SCALE;  // flat タイルは平面、補間しない
+  }
+  // ramp タイル：対角線 NE-SW で 2 三角形分割の barycentric
   const fu = Math.max(0, Math.min(1, (wx - tx * TERRAIN_TILE_SIZE) / TERRAIN_TILE_SIZE));
   const fv = Math.max(0, Math.min(1, (wy - ty * TERRAIN_TILE_SIZE) / TERRAIN_TILE_SIZE));
   const eNW = tileCornerElev(tile, 'NW');
   const eNE = tileCornerElev(tile, 'NE');
   const eSW = tileCornerElev(tile, 'SW');
   const eSE = tileCornerElev(tile, 'SE');
-  // 三角形分割：対角線 NE-SW（fu + fv < 1 → NW三角形 / fu + fv >= 1 → SE三角形）
   let elev: number;
   if (fu + fv < 1) {
     // T1: NW(0,0), SW(0,1), NE(1,0)
@@ -436,7 +442,9 @@ function spriteMesh(w: number, h: number, tex: THREE.Texture): THREE.Mesh {
     map: tex, transparent: true, alphaTest: 0.08,
     side: THREE.DoubleSide, depthWrite: false,
   });
-  return new THREE.Mesh(geo, mat);
+  const m = new THREE.Mesh(geo, mat);
+  m.renderOrder = 2;  // Σ-8-c: 崖壁面 (renderOrder 0) より後に描いて手前に出す
+  return m;
 }
 
 // ============================================================
@@ -846,12 +854,18 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       color: 0x5a4030,          // 岩壁の暗茶（atlas 読込前のフォールバック）
       side: THREE.DoubleSide,
       gradientMap: gradMap,
+      // Σ-8-c-1.5: 壁面が深さ的に少し奥に描画されるよう polygonOffset を入れて、
+      // タイル境界の真上に立つビルボードちびわふが「壁の中に埋もれる」視覚事故を抑える。
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
     }),
     MAX_CLIFF_WALLS,
   );
   cliffWallIM.count = 0;
   cliffWallIM.castShadow = false;
   cliffWallIM.receiveShadow = false;
+  cliffWallIM.renderOrder = 0;  // ビルボード (default 0) より先に描く
   scene.add(cliffWallIM);
 
   // --- Σ-8-c atlas テクスチャ ---
@@ -1948,7 +1962,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         corpseGrp.add(m); corpseViews.set(c.id,m);
       }
       const m=corpseViews.get(c.id)!;
-      m.position.set(c.pos.x, elevAt(world.terrain,c.pos.x,c.pos.y)+CHIBI_H*0.42, c.pos.y);
+      m.position.set(c.pos.x, elevAt(world.terrain,c.pos.x,c.pos.y)+CHIBI_H*0.42+3, c.pos.y);
     }
 
     // ---- Chibis ----
@@ -1963,7 +1977,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       let wx=c.pos.x, wz=c.pos.y;
       if(ondo) wx+=Math.sin(world.timeSec*6+c.id*0.7)*8;
       const baseY=c.flight ? c.flight.posZ*ELEV_SCALE : elevAt(world.terrain,wx,wz);
-      let posY=baseY+CHIBI_H*0.5;
+      // Σ-8-c-1.5: 壁面と被った時に浮いて見える余裕として +4 lift
+      let posY=baseY+CHIBI_H*0.5+4;
       if(c.state==='idle'||c.state==='chatting'){
         posY+=Math.abs(Math.sin(world.timeSec*3+c.id*0.4))*(c.params.energy*0.0008)*4;
       }
