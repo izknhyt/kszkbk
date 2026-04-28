@@ -1214,6 +1214,32 @@ export function enqueueTerraformLower(w: WorldState, tx: number, ty: number): bo
   return true;
 }
 
+// Σ-8-g: undo 用にジョブ ID を取得できる薄いラッパー（既存の enqueue は boolean を返すので）
+export function enqueueTerraformRaiseAndGetId(w: WorldState, tx: number, ty: number): string | null {
+  if (!enqueueTerraformRaise(w, tx, ty)) return null;
+  const last = w.terraformJobs[w.terraformJobs.length - 1];
+  return last ? last.id : null;
+}
+export function enqueueTerraformLowerAndGetId(w: WorldState, tx: number, ty: number): string | null {
+  if (!enqueueTerraformLower(w, tx, ty)) return null;
+  const last = w.terraformJobs[w.terraformJobs.length - 1];
+  return last ? last.id : null;
+}
+
+// Σ-8-g: 任意のジョブを取り消す。raise なら soil を refund、進捗は破棄。
+// 戻り値: 取り消したジョブの位置情報（redo 用）か null。
+export function cancelTerraformJob(w: WorldState, jobId: string): { target: 'raise' | 'lower'; tx: number; ty: number } | null {
+  const idx = w.terraformJobs.findIndex((j) => j.id === jobId);
+  if (idx < 0) return null;
+  const j = w.terraformJobs[idx]!;
+  if (j.target === 'raise') {
+    w.resources.soil += RAISE_COST_SOIL;
+  }
+  terraformPriorityExpire.delete(j.id);
+  w.terraformJobs.splice(idx, 1);
+  return { target: j.target, tx: j.tx, ty: j.ty };
+}
+
 // =========================================================================
 // Σ-8-b-2 ramp 設置 API
 // 仕様: 対象タイル（低い側）と方向の隣接タイル（高い側）の elev 差が

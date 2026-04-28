@@ -6,13 +6,14 @@ import {
   damageChibi,
   damageNpc,
   damageWolf,
-  enqueueTerraformLower,
-  enqueueTerraformRaise,
   ensurePlots,
   setRampOnTile,
   flattenTile,
   smoothTile,
   channelTile,
+  enqueueTerraformRaiseAndGetId,
+  enqueueTerraformLowerAndGetId,
+  cancelTerraformJob,
   forceSpawn,
   launchFlight,
   LOWER_SOIL_GAIN,
@@ -988,11 +989,15 @@ async function start() {
     mud: number;
     snowCoverage: number;
   };
-  type UndoGroup = { snapshots: TileSnapshot[]; description: string };
+  type UndoGroupTiles = { kind: 'tiles'; snapshots: TileSnapshot[]; description: string };
+  type JobRedoEntry = { target: 'raise' | 'lower'; tx: number; ty: number };
+  type UndoGroupJobs = { kind: 'jobs'; jobIds: string[]; description: string };
+  type UndoGroupJobsCancelled = { kind: 'jobs-cancelled'; entries: JobRedoEntry[]; description: string };
+  type UndoGroup = UndoGroupTiles | UndoGroupJobs | UndoGroupJobsCancelled;
   const MAX_UNDO = 30;
   const undoStack: UndoGroup[] = [];
   const redoStack: UndoGroup[] = [];
-  let _currentEditGroup: UndoGroup | null = null;
+  let _currentEditGroup: UndoGroupTiles | UndoGroupJobs | null = null;
   const _editedInGroup = new Set<string>();
   function captureSnapshot(tx: number, ty: number): TileSnapshot | null {
     const t = world.terrain[ty]?.[tx];
@@ -1017,23 +1022,36 @@ async function start() {
     t.snowCoverage = s.snowCoverage;
   }
   function rememberPreEdit(tx: number, ty: number) {
-    if (!_currentEditGroup) return;
+    if (!_currentEditGroup || _currentEditGroup.kind !== 'tiles') return;
     const key = `${tx},${ty}`;
     if (_editedInGroup.has(key)) return;
     _editedInGroup.add(key);
     const snap = captureSnapshot(tx, ty);
     if (snap) _currentEditGroup.snapshots.push(snap);
   }
-  function beginEditGroup(description: string) {
-    _currentEditGroup = { snapshots: [], description };
+  function rememberJobId(jobId: string) {
+    if (!_currentEditGroup || _currentEditGroup.kind !== 'jobs') return;
+    _currentEditGroup.jobIds.push(jobId);
+  }
+  function beginEditGroupTiles(description: string) {
+    _currentEditGroup = { kind: 'tiles', snapshots: [], description };
+    _editedInGroup.clear();
+  }
+  function beginEditGroupJobs(description: string) {
+    _currentEditGroup = { kind: 'jobs', jobIds: [], description };
     _editedInGroup.clear();
   }
   function endEditGroup() {
-    if (_currentEditGroup && _currentEditGroup.snapshots.length > 0) {
-      undoStack.push(_currentEditGroup);
-      if (undoStack.length > MAX_UNDO) undoStack.shift();
-      redoStack.length = 0;  // 新規操作で redo 履歴は破棄
-      updateUndoButtons();
+    if (_currentEditGroup) {
+      const isEmpty =
+        (_currentEditGroup.kind === 'tiles' && _currentEditGroup.snapshots.length === 0) ||
+        (_currentEditGroup.kind === 'jobs' && _currentEditGroup.jobIds.length === 0);
+      if (!isEmpty) {
+        undoStack.push(_currentEditGroup);
+        if (undoStack.length > MAX_UNDO) undoStack.shift();
+        redoStack.length = 0;  // 新規操作で redo 履歴は破棄
+        updateUndoButtons();
+      }
     }
     _currentEditGroup = null;
     _editedInGroup.clear();
@@ -1041,28 +1059,72 @@ async function start() {
   function undo() {
     const g = undoStack.pop();
     if (!g) return;
-    // redo 用に「現在の状態」を取って redo stack に積む
-    const redoG: UndoGroup = {
-      snapshots: g.snapshots.map((s) => captureSnapshot(s.tx, s.ty)).filter((s): s is TileSnapshot => s !== null),
-      description: g.description,
-    };
-    redoStack.push(redoG);
-    for (const s of g.snapshots) restoreSnapshot(s);
-    world.terrainVersion++;
-    flashToast(`↶ ${g.description}（${g.snapshots.length} タイル）`, 'info');
+    if (g.kind === 'tiles') {
+      // redo 用に「現在の状態」を取って redo stack に積む
+      const redoG: UndoGroupTiles = {
+        kind: 'tiles',
+        snapshots: g.snapshots.map((s) => captureSnapshot(s.tx, s.ty)).filter((s): s is TileSnapshot => s !== null),
+        description: g.description,
+      };
+      redoStack.push(redoG);
+      for (const s of g.snapshots) restoreSnapshot(s);
+      world.terrainVersion++;
+      flashToast(`↶ ${g.description}（${g.snapshots.length} タイル）`, 'info');
+    } else if (g.kind === 'jobs') {
+      // job を取り消して、redo 用に元の (target, tx, ty) を保存
+      const entries: JobRedoEntry[] = [];
+      for (const id of g.jobIds) {
+        const e = cancelTerraformJob(world, id);
+        if (e) entries.push(e);
+      }
+      redoStack.push({ kind: 'jobs-cancelled', entries, description: g.description });
+      flashToast(`↶ ${g.description}（ジョブ ${entries.length} 件取消）`, 'info');
+    } else {
+      // jobs-cancelled: 元のジョブを再 enqueue
+      const newIds: string[] = [];
+      for (const e of g.entries) {
+        const id = e.target === 'raise'
+          ? enqueueTerraformRaiseAndGetId(world, e.tx, e.ty)
+          : enqueueTerraformLowerAndGetId(world, e.tx, e.ty);
+        if (id) newIds.push(id);
+      }
+      redoStack.push({ kind: 'jobs', jobIds: newIds, description: g.description });
+      flashToast(`↶ ${g.description}（ジョブ ${newIds.length} 件復活）`, 'info');
+    }
     updateUndoButtons();
   }
   function redo() {
     const g = redoStack.pop();
     if (!g) return;
-    const undoG: UndoGroup = {
-      snapshots: g.snapshots.map((s) => captureSnapshot(s.tx, s.ty)).filter((s): s is TileSnapshot => s !== null),
-      description: g.description,
-    };
-    undoStack.push(undoG);
-    for (const s of g.snapshots) restoreSnapshot(s);
-    world.terrainVersion++;
-    flashToast(`↷ ${g.description}（${g.snapshots.length} タイル）`, 'info');
+    if (g.kind === 'tiles') {
+      const undoG: UndoGroupTiles = {
+        kind: 'tiles',
+        snapshots: g.snapshots.map((s) => captureSnapshot(s.tx, s.ty)).filter((s): s is TileSnapshot => s !== null),
+        description: g.description,
+      };
+      undoStack.push(undoG);
+      for (const s of g.snapshots) restoreSnapshot(s);
+      world.terrainVersion++;
+      flashToast(`↷ ${g.description}（${g.snapshots.length} タイル）`, 'info');
+    } else if (g.kind === 'jobs') {
+      const entries: JobRedoEntry[] = [];
+      for (const id of g.jobIds) {
+        const e = cancelTerraformJob(world, id);
+        if (e) entries.push(e);
+      }
+      undoStack.push({ kind: 'jobs-cancelled', entries, description: g.description });
+      flashToast(`↷ ${g.description}（ジョブ ${entries.length} 件取消）`, 'info');
+    } else {
+      const newIds: string[] = [];
+      for (const e of g.entries) {
+        const id = e.target === 'raise'
+          ? enqueueTerraformRaiseAndGetId(world, e.tx, e.ty)
+          : enqueueTerraformLowerAndGetId(world, e.tx, e.ty);
+        if (id) newIds.push(id);
+      }
+      undoStack.push({ kind: 'jobs', jobIds: newIds, description: g.description });
+      flashToast(`↷ ${g.description}（ジョブ ${newIds.length} 件復活）`, 'info');
+    }
     updateUndoButtons();
   }
   function updateUndoButtons() {
@@ -1086,15 +1148,17 @@ async function start() {
   // ramp だけは drag で連続発動しない（方向選択を慎重にする UX）。
   function applyEditAtTile(tx: number, ty: number, isFirstTile: boolean) {
     if (terraformMode === 'raise') {
-      const ok = enqueueTerraformRaise(world, tx, ty);
+      const id = enqueueTerraformRaiseAndGetId(world, tx, ty);
+      if (id) rememberJobId(id);
       if (isFirstTile) {
-        if (!ok) flashToast('土が足りない（soil×10 必要）', 'info');
+        if (!id) flashToast('土が足りない（soil×10 必要）', 'info');
         else flashToast(`盛り土 ジョブ [${tx},${ty}]`, 'info');
       }
       return;
     }
     if (terraformMode === 'lower') {
-      enqueueTerraformLower(world, tx, ty);
+      const id = enqueueTerraformLowerAndGetId(world, tx, ty);
+      if (id) rememberJobId(id);
       if (isFirstTile) flashToast(`切り土 ジョブ [${tx},${ty}]`, 'info');
       return;
     }
@@ -1164,13 +1228,16 @@ async function start() {
     _editDragActive = true;
     _editDragLastTx = tx; _editDragLastTy = ty;
     _editDragHandledClick = true;  // この後の kszk-empty-click は無視
-    // Σ-8-g: タイル直接編集系のみ undo group を開始（raise/lower はジョブなので除外）
+    // Σ-8-g: undo group を開始。タイル編集系は 'tiles'、raise/lower は 'jobs'。
     if (s8EditMode === 'flatten' || s8EditMode === 'smooth' ||
         s8EditMode === 'channel' || s8EditMode === 'ramp') {
       const desc = ({
         flatten: '平坦', smooth: '整地', channel: '水路', ramp: '坂道',
       } as const)[s8EditMode] ?? s8EditMode;
-      beginEditGroup(desc);
+      beginEditGroupTiles(desc);
+    } else if (terraformMode === 'raise' || terraformMode === 'lower') {
+      const desc = terraformMode === 'raise' ? '盛り土' : '切り土';
+      beginEditGroupJobs(desc);
     }
     applyEditAtTile(tx, ty, true);
   });
