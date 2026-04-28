@@ -7,6 +7,43 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 
 ---
 
+## ドキュメントの読み分け（Σ-8 以降）
+
+ファイルは目的別に 3 系統に分かれている。Claude / Codex セッションを開くときは
+**該当系統の正本を最初に読む** こと。
+
+### 1. 実装正本（コード実装が参照する根拠）
+
+| ファイル | 役割 | 読むタイミング |
+|---|---|---|
+| `../CLAUDE.md` | プロジェクト全体ガイド、最優先正本 | 新セッション必読 |
+| `SIGMA-8-IMPLEMENTATION-STATUS.md` | **実装側の事実**（Done / Gap / Deferred） | 実装着手前 |
+| `SIGMA-8-DEVELOPMENT-SPEC.md` | **目標仕様**（型 / 通行ルール / 描画 / ブラシ）| 実装中の判断基準 |
+| `SIGMA-8-PLAN.md` | M2 ロードマップと判断記録 | 全体方針確認時 |
+
+**ズレ検出ルール**: SPEC と STATUS が食い違っていれば STATUS が事実、SPEC は目標。
+両者ズレが見つかったら STATUS の Gap セクションに記載する。
+
+### 2. 素材正本（ChatGPT 発注 / 検品の根拠）
+
+| ファイル | 対象 |
+|---|---|
+| `10_character_design.md` | ちびわふ / フラナの固定デザイン（種族特徴・色・プロポーション）|
+| `20_technical_spec.md` | PNG 形式・解像度・命名規則・納品要件 |
+| `30_pose_catalog.md` | 40 ポーズのプロンプト辞書 |
+| `40_accessory_library.md` | 小物 20 種の仕様 |
+| `50_prompt_templates.md` | 発注マスタープロンプト（コピペ用）|
+| `90_qa_checklist.md` | 納品検品チェックリスト |
+| `SIGMA-8-UI-ASSET-SPEC.md` | 地形 atlas / Ground props / 工事ポーズ / UI Icons の仕様 |
+| `sigma-8-mockup.png` | 画風基準の参考画像（pixel-perfect ではない、構図の手本） |
+
+### 3. 古い / 参考扱い（読まなくていい）
+
+特になし。旧バージョンの HANDOFF.md は廃止済み。
+過去の判断記録は各 SIGMA-8-*.md の「経緯」「変更履歴」セクションに統合済み。
+
+---
+
 ## ファイル構成
 
 | ファイル | 内容 | 想定利用者 |
@@ -20,6 +57,7 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `90_qa_checklist.md` | 納品チェックリスト | 納品検品時 |
 | `SIGMA-8-PLAN.md` | M2 地形リワークのロードマップ v2 | Sigma-8 実装時 |
 | `SIGMA-8-DEVELOPMENT-SPEC.md` | Sigma-8 の実装仕様・禁止事項・検証基準 | Sigma-8 実装時 |
+| `SIGMA-8-IMPLEMENTATION-STATUS.md` | Sigma-8 の Done / Gap / Deferred 一覧 | Sigma-8 実装着手前 |
 | `SIGMA-8-UI-ASSET-SPEC.md` | Sigma-8 の UI / terrain atlas / prop / icon 仕様 | UI・素材実装/発注時 |
 
 ---
@@ -115,3 +153,8 @@ Codex が `image_gen.py`、OpenAI Image API、`OPENAI_API_KEY`、その他 API �
 - v1.0 画像保存運用と手足肉球仕様を訂正：
   - built-in 生成の一時出力は `.codex/generated_images/...` に残し、採用確定まで public へコピーしない
   - ちびわふの手足先端には小さなピンク肉球パッドがあると明記
+- v1.1 ドキュメントの読み分けセクションを追加：
+  - 実装正本（CLAUDE.md / SIGMA-8-IMPLEMENTATION-STATUS / SPEC / PLAN）
+  - 素材正本（キャラ系 + UI-ASSET-SPEC + mockup）
+  - 古い/参考扱いは現状なし
+  - ファイル構成表に SIGMA-8-IMPLEMENTATION-STATUS.md を追加
