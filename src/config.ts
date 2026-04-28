@@ -92,7 +92,9 @@ export const CONFIG = {
   DRY_Y_LIMIT: 1150,
   // カメラのズーム段階。1.0 = 等倍（世界座標 1px = 画面 1px）。
   // 広いワールドなので MIN_SCALE を下げて全体俯瞰できるように。
-  CAMERA_MIN_SCALE: 0.20,
+  // M2.1 Step 7: 最遠景でワールド外が見えて画面下破綻が起きるため、
+  //              MIN を 0.20 → 0.30 に上げて遠景過剰を緩和。
+  CAMERA_MIN_SCALE: 0.30,
   CAMERA_MAX_SCALE: 2.0,
   CAMERA_ZOOM_STEP: 1.12,
 
