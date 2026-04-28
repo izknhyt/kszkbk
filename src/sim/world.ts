@@ -2411,14 +2411,17 @@ function computeFireInterval(w: WorldState): number {
 
 function scheduleEvents(w: WorldState, dt: number) {
   if (w.event) return;
+  // M2.1 Step 3: ondo は新規発火停止。fireCooldown だけを進めて自動火事のみ残す。
+  // ondoCooldown は legacy で進めるが pickOndo を常に false 化する。
   w.ondoCooldown -= dt;
   w.fireCooldown -= dt;
-  const ondoReady = w.ondoCooldown <= 0;
   const fireReady = w.fireCooldown <= 0;
-  if (!ondoReady && !fireReady) return;
-  // 両方来たら先に来てたほう（より負のほう）を選ぶ
-  const pickOndo = ondoReady && (!fireReady || w.ondoCooldown <= w.fireCooldown);
+  if (!fireReady) return;
+  // M2.1: pickOndo 常に false（旧条件 ondoReady && (!fireReady || ...)）
+  const pickOndo = false;
   if (pickOndo) {
+    // LEGACY M2.1: 旧 ondo 自動発火コード（scheduleEvents 経由）。
+    // triggerOndo 直接呼び出しは debug ボタンで残るが、自動 schedule は停止。
     w.event = {
       kind: 'ondo',
       duration: CONFIG.ONDO_DURATION_SEC,
@@ -2512,7 +2515,11 @@ function maybeTriggerBokaigi(w: WorldState, dt: number) {
 }
 
 // 太鼓祭り：太鼓やぐら所持＆季節が夏/秋に入る瞬間に発動。
+// LEGACY M2.1 Step 3: 太鼓やぐら廃止予定に伴い発動停止。
+//   旧条件はそのまま残すが、フラグで完全 disable する。
+const M2_TAIKO_FESTIVAL_ENABLED = false;
 function maybeStartTaikoFestival(w: WorldState) {
+  if (!M2_TAIKO_FESTIVAL_ENABLED) return;
   if (w.event) return;
   if (w.season === w.lastSeason) return;
   if (w.season !== 'summer' && w.season !== 'autumn') return;
