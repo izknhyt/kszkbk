@@ -868,6 +868,19 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // rippleTex 適用は後で（rippleTex 定義後に行う必要があるため、参照は draw() 内で）。
   const _waterTileGeo = new THREE.PlaneGeometry(TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE);
   _waterTileGeo.rotateX(-Math.PI/2);
+  // Σ-8-d-2: atlas water overlay cell (0, 2) に UV を合わせる。読込前は
+  // map=null で MeshBasicMaterial の color が出るだけ、読込後にこの UV で
+  // 波模様が貼られる。
+  {
+    const wuv = atlasUVBounds(0, 2);
+    const ua = _waterTileGeo.attributes.uv as THREE.BufferAttribute;
+    // 4 vertices の順序は PlaneGeometry default：(0,1)/(1,1)/(0,0)/(1,0)
+    ua.setXY(0, wuv.uMin, wuv.vMax);
+    ua.setXY(1, wuv.uMax, wuv.vMax);
+    ua.setXY(2, wuv.uMin, wuv.vMin);
+    ua.setXY(3, wuv.uMax, wuv.vMin);
+    ua.needsUpdate = true;
+  }
   // 色彩度+20%、opacity 強化で水っぽさアップ
   const waterDampIM = new THREE.InstancedMesh(_waterTileGeo,
     new THREE.MeshBasicMaterial({color:0x8fc8e8,transparent:true,opacity:0.35,depthWrite:false,side:THREE.DoubleSide}),
@@ -940,6 +953,14 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     cwMat.map = tex;
     cwMat.color.setHex(0xffffff);  // map に色を任せる
     cwMat.needsUpdate = true;
+    // Σ-8-d-2: water tile IM 4 種にも atlas (0,2) water overlay を貼る。
+    // 既存の青色 tint に重ねる形で「波模様」が見えるはず（atlas v1 で water
+    // overlay が控えめなら現状の青も透けて残る）。
+    for (const im of [waterDampIM, waterShallowIM, waterMidIM, waterDeepIM]) {
+      const m = im.material as THREE.MeshBasicMaterial;
+      m.map = tex;
+      m.needsUpdate = true;
+    }
   });
   const waterIMs = [waterDampIM, waterShallowIM, waterMidIM, waterDeepIM];
 

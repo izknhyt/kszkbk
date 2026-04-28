@@ -12,6 +12,7 @@ import {
   setRampOnTile,
   flattenTile,
   smoothTile,
+  channelTile,
   forceSpawn,
   launchFlight,
   LOWER_SOIL_GAIN,
@@ -809,9 +810,9 @@ async function start() {
     hintEl.textContent = def.hint;
     if (rampRow) rampRow.style.display = (m === 'ramp') ? 'grid' : 'none';
   }
-  // Σ-8-b-2 / Σ-8-d-1: 排他モード管理。raise/lower は terraformMode 側、
-  // ramp / flatten / smooth は s8EditMode 側で持つ。
-  type S8EditMode = 'ramp' | 'flatten' | 'smooth' | null;
+  // Σ-8-b-2 / Σ-8-d-1 / Σ-8-d-2: 排他モード管理。raise/lower は terraformMode 側、
+  // ramp / flatten / smooth / channel は s8EditMode 側で持つ。
+  type S8EditMode = 'ramp' | 'flatten' | 'smooth' | 'channel' | null;
   let s8EditMode: S8EditMode = null;
   function setS8EditMode(mode: S8EditMode) {
     s8EditMode = mode;
@@ -833,13 +834,14 @@ async function start() {
         setTerraformMode(terraformMode === tool ? null : tool);
         return;
       }
-      if (tool === 'ramp' || tool === 'flatten' || tool === 'smooth') {
-        // Σ-8-b-2 / Σ-8-d-1: タイル単位の編集ブラシ群。同じものを 2 度押しで OFF。
+      if (tool === 'ramp' || tool === 'flatten' || tool === 'smooth' || tool === 'channel') {
+        // Σ-8-b-2 / Σ-8-d-1 / Σ-8-d-2: タイル単位の編集ブラシ群。同じものを 2 度押しで OFF。
         const next = (s8EditMode === tool) ? null : tool;
         setS8EditMode(next);
         if (next === 'ramp')    flashToast('坂道化モード：方向を選んで低い側のタイルをクリック', 'info');
         if (next === 'flatten') flashToast('平坦モード：クリックしたタイルを周囲の中央値に揃える', 'info');
         if (next === 'smooth')  flashToast('整地モード：2 段差以上の崖を 1 段ずつ均す', 'info');
+        if (next === 'channel') flashToast('水路モード：タイルを溝にする（土が出る、水が溜まる）', 'info');
         return;
       }
       if (tool === 'build') {
@@ -853,11 +855,10 @@ async function start() {
         });
         return;
       }
-      // channel: Σ-8-d-2 で本実装予定
-      if (s8EditMode) setS8EditMode(null);
-      setTerraformMode(null);
-      flashToast(`${S8_TOOL_LABELS[tool].name} は次フェーズで実装予定`, 'info');
-      updateSigma8Panel(tool);
+      // 全 7 ツール (raise/lower/flatten/smooth/ramp/channel/build) はそれぞれ
+      // 上の分岐で処理済み。ここに来るのは予期しないツール ID（追加忘れ）。
+      const _exhaustive: never = tool;
+      void _exhaustive;
       document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((b) => {
         b.classList.toggle('active', b === btn);
       });
@@ -921,6 +922,14 @@ async function start() {
           announceTileEdited(world, tx, ty, 'smooth');
         } else if (r === 'is-sea')         flashToast('海は整地できないわふ', 'info');
         else if (r === 'no-change')        flashToast('崖じゃないから整地不要わふ', 'info');
+        else                                flashToast('範囲外わふ', 'info');
+      } else if (s8EditMode === 'channel') {
+        const r = channelTile(world, tx, ty);
+        if (r === 'ok') {
+          flashToast(`水路 [${tx},${ty}]（土+${LOWER_SOIL_GAIN}）`, 'info');
+          announceTileEdited(world, tx, ty, 'channel');
+        } else if (r === 'is-sea')         flashToast('海はもう水路わふ', 'info');
+        else if (r === 'no-change')        flashToast('もう深い溝になってるわふ', 'info');
         else                                flashToast('範囲外わふ', 'info');
       }
       return;
@@ -1532,7 +1541,7 @@ async function start() {
 // Σ-8-b-2 / Σ-8-d-1: タイル編集時の周辺ちびわふ反応（trait 別の個性反映）。
 // ramp / flatten / smooth で別々のセリフプールを持つ。半径 110px 内の最大 3 体だけ
 // 反応する（連打でうるさくならないように抑制）。
-type EditEventKind = 'ramp' | 'flatten' | 'smooth';
+type EditEventKind = 'ramp' | 'flatten' | 'smooth' | 'channel';
 
 const EDIT_LINES: Record<EditEventKind, Record<string, string[]>> = {
   ramp: {
@@ -1567,6 +1576,17 @@ const EDIT_LINES: Record<EditEventKind, Record<string, string[]>> = {
     gunsuki:   ['みんなでみるわふ！'],
     taiko_kko: ['まつりだわふー！'],
     generic:   ['ならしたわふ！', 'なめらかわふ'],
+  },
+  channel: {
+    noumin:    ['みずがながれるわふ！', 'はたけにいいわふ！', 'うるおうわふ！'],
+    sekkachi:  ['はやくみずきたわふ！', 'もっとほるわふ！', 'いそぐわふ！'],
+    nonbiri:   ['ちゃぷちゃぷわふ', 'みずおとわふ…', 'すずしいわふ'],
+    shinpai:   ['あふれないかわふ？', 'のまれないか心配わふ', 'こわいわふ…'],
+    bouken:    ['みずあそびわふ！', 'おちていくわふー！'],
+    nakimushi: ['ぬれるわふ…', 'こわいわふ…', 'ママ〜わふ'],
+    gunsuki:   ['みずべあつまるわふ！', 'いっしょにあそぶわふ！'],
+    taiko_kko: ['みずたまわふ！', 'まつりわふ！'],
+    generic:   ['みぞほったわふ！', 'ながれるわふ', 'みずわふ！'],
   },
 };
 

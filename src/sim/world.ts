@@ -1325,6 +1325,28 @@ export function smoothTile(w: WorldState, tx: number, ty: number): EditTileResul
   return 'ok';
 }
 
+// Σ-8-d-2 channel ブラシ：タイルを 1 段下げて、初期水位 0.5 を仕込む。
+// 周辺から Σ-7 hydrology が水を集めて流れる「溝」になる。切り土相当の土が出る。
+export function channelTile(w: WorldState, tx: number, ty: number): EditTileResult {
+  const t = getTile(w.terrain, tx, ty);
+  if (!t) return 'out-of-bounds';
+  if (t.isSea) return 'is-sea';
+  // 既に深い溝（waterLevel ≥ 0.4）かつ最下層なら、それ以上掘れない
+  if (t.waterLevel >= 0.4 && t.elev <= 0) return 'no-change';
+  // 1 段下げる（既に 0 なら elev は触らず、水位だけ上げる）
+  if (t.elev >= ELEV_STEP) {
+    t.elev = snapElev(Math.max(0, t.elev - ELEV_STEP));
+    w.resources.soil += LOWER_SOIL_GAIN;
+    if (t.material === 'rock') w.resources.stone += LOWER_STONE_GAIN;
+  }
+  t.waterLevel = Math.max(t.waterLevel, 0.5);
+  t.material = elevToMaterial(t.elev, t.isSea);
+  t.ramp = null;
+  t.stability = Math.min(t.stability, 0.6);
+  w.terrainVersion++;
+  return 'ok';
+}
+
 // タイルの elev を変更し stability を減衰。Σ-8 で 25 単位に正規化。
 export function raiseTile(terrain: TerrainTile[][], tx: number, ty: number, amount: number): void {
   const tile = getTile(terrain, tx, ty);
