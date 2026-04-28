@@ -1360,13 +1360,13 @@ button:active { transform: translateY(1px); }
   color: var(--s8-ui-text-dark);
 }
 
-/* --- Tool Settings Panel (right-center) --- */
+/* --- Tool Settings Panel (左下、未選択時は非表示) --- */
 .sigma8-tool-panel {
+  display: none;  /* ツール未選択時は出ない */
   position: absolute;
-  top: 50%;
-  right: 16px;
-  transform: translateY(-50%);
-  width: 280px;
+  left: 16px;
+  bottom: 88px;   /* 下ツールバー（高さ ~64px + 16px 余白）の上 */
+  width: 268px;
   background: var(--s8-ui-bg-soft);
   color: var(--s8-ui-text-dark);
   border: 1px solid var(--s8-ui-border);
@@ -1374,6 +1374,9 @@ button:active { transform: translateY(1px); }
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
   font-size: 13px;
   z-index: 9;
+}
+.sigma8-tool-panel.is-active {
+  display: block;
 }
 .sigma8-tool-panel .s8-panel-head {
   padding: 8px 12px;

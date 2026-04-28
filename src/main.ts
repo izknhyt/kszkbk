@@ -788,10 +788,13 @@ async function start() {
     updateSigma8Panel(m);
   }
   function updateSigma8Panel(m: TerraformMode | S8Tool | null) {
+    const root = document.getElementById('sigma8-tool-panel');
     const nameEl = document.getElementById('s8-tool-name');
     const hintEl = document.getElementById('s8-tool-hint');
     const rampRow = document.getElementById('s8-ramp-row');
-    if (!nameEl || !hintEl) return;
+    if (!root || !nameEl || !hintEl) return;
+    // ツール未選択時はパネル自体を隠す（HUD と被らない）
+    root.classList.toggle('is-active', m !== null && m !== undefined);
     if (!m) {
       nameEl.textContent = '未選択';
       hintEl.textContent = 'ツールを選んでね';
