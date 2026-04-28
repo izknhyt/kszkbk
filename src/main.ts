@@ -973,6 +973,115 @@ async function start() {
     }
   });
 
+  // ========= Σ-8-g: Undo / Redo（タイル直接編集系のみ）====================
+  // SPEC §ブラシ仕様 共通：「操作前 snapshot を undo stack に保存」。
+  // raise/lower は terraformJobs に積むだけで即時 elev 変更しないので、
+  // ここでは flatten / smooth / ramp / channel の直接編集だけを履歴に取る。
+  type TileSnapshot = {
+    tx: number; ty: number;
+    elev: number;
+    material: import('./types').TerrainMaterial;
+    ramp: import('./types').RampDir | null;
+    stability: number;
+    waterLevel: number;
+    wetness: number;
+    mud: number;
+    snowCoverage: number;
+  };
+  type UndoGroup = { snapshots: TileSnapshot[]; description: string };
+  const MAX_UNDO = 30;
+  const undoStack: UndoGroup[] = [];
+  const redoStack: UndoGroup[] = [];
+  let _currentEditGroup: UndoGroup | null = null;
+  const _editedInGroup = new Set<string>();
+  function captureSnapshot(tx: number, ty: number): TileSnapshot | null {
+    const t = world.terrain[ty]?.[tx];
+    if (!t) return null;
+    return {
+      tx, ty,
+      elev: t.elev, material: t.material, ramp: t.ramp,
+      stability: t.stability, waterLevel: t.waterLevel,
+      wetness: t.wetness, mud: t.mud, snowCoverage: t.snowCoverage,
+    };
+  }
+  function restoreSnapshot(s: TileSnapshot) {
+    const t = world.terrain[s.ty]?.[s.tx];
+    if (!t) return;
+    t.elev = s.elev;
+    t.material = s.material;
+    t.ramp = s.ramp;
+    t.stability = s.stability;
+    t.waterLevel = s.waterLevel;
+    t.wetness = s.wetness;
+    t.mud = s.mud;
+    t.snowCoverage = s.snowCoverage;
+  }
+  function rememberPreEdit(tx: number, ty: number) {
+    if (!_currentEditGroup) return;
+    const key = `${tx},${ty}`;
+    if (_editedInGroup.has(key)) return;
+    _editedInGroup.add(key);
+    const snap = captureSnapshot(tx, ty);
+    if (snap) _currentEditGroup.snapshots.push(snap);
+  }
+  function beginEditGroup(description: string) {
+    _currentEditGroup = { snapshots: [], description };
+    _editedInGroup.clear();
+  }
+  function endEditGroup() {
+    if (_currentEditGroup && _currentEditGroup.snapshots.length > 0) {
+      undoStack.push(_currentEditGroup);
+      if (undoStack.length > MAX_UNDO) undoStack.shift();
+      redoStack.length = 0;  // 新規操作で redo 履歴は破棄
+      updateUndoButtons();
+    }
+    _currentEditGroup = null;
+    _editedInGroup.clear();
+  }
+  function undo() {
+    const g = undoStack.pop();
+    if (!g) return;
+    // redo 用に「現在の状態」を取って redo stack に積む
+    const redoG: UndoGroup = {
+      snapshots: g.snapshots.map((s) => captureSnapshot(s.tx, s.ty)).filter((s): s is TileSnapshot => s !== null),
+      description: g.description,
+    };
+    redoStack.push(redoG);
+    for (const s of g.snapshots) restoreSnapshot(s);
+    world.terrainVersion++;
+    flashToast(`↶ ${g.description}（${g.snapshots.length} タイル）`, 'info');
+    updateUndoButtons();
+  }
+  function redo() {
+    const g = redoStack.pop();
+    if (!g) return;
+    const undoG: UndoGroup = {
+      snapshots: g.snapshots.map((s) => captureSnapshot(s.tx, s.ty)).filter((s): s is TileSnapshot => s !== null),
+      description: g.description,
+    };
+    undoStack.push(undoG);
+    for (const s of g.snapshots) restoreSnapshot(s);
+    world.terrainVersion++;
+    flashToast(`↷ ${g.description}（${g.snapshots.length} タイル）`, 'info');
+    updateUndoButtons();
+  }
+  function updateUndoButtons() {
+    const u = document.getElementById('s8-undo') as HTMLButtonElement | null;
+    const r = document.getElementById('s8-redo') as HTMLButtonElement | null;
+    if (u) u.disabled = undoStack.length === 0;
+    if (r) r.disabled = redoStack.length === 0;
+  }
+  document.getElementById('s8-undo')?.addEventListener('click', () => undo());
+  document.getElementById('s8-redo')?.addEventListener('click', () => redo());
+  // キーボード Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z
+  window.addEventListener('keydown', (ev) => {
+    if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLSelectElement) return;
+    if (!ev.ctrlKey && !ev.metaKey) return;
+    if (ev.key === 'z' && !ev.shiftKey) { ev.preventDefault(); undo(); }
+    else if ((ev.key === 'y') || (ev.key === 'z' && ev.shiftKey)) { ev.preventDefault(); redo(); }
+  });
+  updateUndoButtons();
+
   // Σ-8-f: drag paint 統合 handler。click も drag も同じ applyEditAtTile を呼ぶ。
   // ramp だけは drag で連続発動しない（方向選択を慎重にする UX）。
   function applyEditAtTile(tx: number, ty: number, isFirstTile: boolean) {
@@ -990,6 +1099,7 @@ async function start() {
       return;
     }
     if (s8EditMode === 'flatten') {
+      rememberPreEdit(tx, ty);
       const r = flattenTile(world, tx, ty);
       if (r === 'ok' && isFirstTile) {
         flashToast(`平坦 [${tx},${ty}]`, 'info');
@@ -999,6 +1109,7 @@ async function start() {
       return;
     }
     if (s8EditMode === 'smooth') {
+      rememberPreEdit(tx, ty);
       const r = smoothTile(world, tx, ty);
       if (r === 'ok' && isFirstTile) {
         flashToast(`整地 [${tx},${ty}]`, 'info');
@@ -1008,6 +1119,7 @@ async function start() {
       return;
     }
     if (s8EditMode === 'channel') {
+      rememberPreEdit(tx, ty);
       const r = channelTile(world, tx, ty);
       if (r === 'ok' && isFirstTile) {
         flashToast(`水路 [${tx},${ty}]（土+${LOWER_SOIL_GAIN}）`, 'info');
@@ -1019,6 +1131,7 @@ async function start() {
     if (s8EditMode === 'ramp' && isFirstTile) {
       const dirSel = document.getElementById('s8-ramp-dir') as HTMLSelectElement | null;
       const dir = (dirSel?.value ?? 'N') as 'N' | 'S' | 'E' | 'W';
+      rememberPreEdit(tx, ty);
       const r = setRampOnTile(world, tx, ty, dir);
       if (r === 'ok') {
         flashToast(`坂道化 [${tx},${ty}] → ${dir}`, 'info');
@@ -1051,6 +1164,14 @@ async function start() {
     _editDragActive = true;
     _editDragLastTx = tx; _editDragLastTy = ty;
     _editDragHandledClick = true;  // この後の kszk-empty-click は無視
+    // Σ-8-g: タイル直接編集系のみ undo group を開始（raise/lower はジョブなので除外）
+    if (s8EditMode === 'flatten' || s8EditMode === 'smooth' ||
+        s8EditMode === 'channel' || s8EditMode === 'ramp') {
+      const desc = ({
+        flatten: '平坦', smooth: '整地', channel: '水路', ramp: '坂道',
+      } as const)[s8EditMode] ?? s8EditMode;
+      beginEditGroup(desc);
+    }
     applyEditAtTile(tx, ty, true);
   });
   stage.canvas.addEventListener('pointermove', (e) => {
@@ -1071,6 +1192,7 @@ async function start() {
     if (_editDragActive) {
       _editDragActive = false;
       _editDragLastTx = -1; _editDragLastTy = -1;
+      endEditGroup();  // Σ-8-g: 編集グループ確定（or 空ならスキップ）
     }
   }
   stage.canvas.addEventListener('pointerup', _endEditDrag);
