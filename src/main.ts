@@ -21,7 +21,6 @@ import {
   triggerFire,
   triggerOndo,
   upgradeOne,
-  worldToTile,
 } from './sim/world';
 import { pushLife } from './sim/world';
 import { isAlive as isChibiAlive, setState } from './sim/chibiwafu';
@@ -974,63 +973,119 @@ async function start() {
     }
   });
 
+  // Σ-8-f: drag paint 統合 handler。click も drag も同じ applyEditAtTile を呼ぶ。
+  // ramp だけは drag で連続発動しない（方向選択を慎重にする UX）。
+  function applyEditAtTile(tx: number, ty: number, isFirstTile: boolean) {
+    if (terraformMode === 'raise') {
+      const ok = enqueueTerraformRaise(world, tx, ty);
+      if (isFirstTile) {
+        if (!ok) flashToast('土が足りない（soil×10 必要）', 'info');
+        else flashToast(`盛り土 ジョブ [${tx},${ty}]`, 'info');
+      }
+      return;
+    }
+    if (terraformMode === 'lower') {
+      enqueueTerraformLower(world, tx, ty);
+      if (isFirstTile) flashToast(`切り土 ジョブ [${tx},${ty}]`, 'info');
+      return;
+    }
+    if (s8EditMode === 'flatten') {
+      const r = flattenTile(world, tx, ty);
+      if (r === 'ok' && isFirstTile) {
+        flashToast(`平坦 [${tx},${ty}]`, 'info');
+        announceTileEdited(world, tx, ty, 'flatten');
+      } else if (r === 'is-sea' && isFirstTile)  flashToast('海は平坦化できないわふ', 'info');
+      else if (r === 'no-change' && isFirstTile) flashToast('もう揃ってるわふ', 'info');
+      return;
+    }
+    if (s8EditMode === 'smooth') {
+      const r = smoothTile(world, tx, ty);
+      if (r === 'ok' && isFirstTile) {
+        flashToast(`整地 [${tx},${ty}]`, 'info');
+        announceTileEdited(world, tx, ty, 'smooth');
+      } else if (r === 'is-sea' && isFirstTile)  flashToast('海は整地できないわふ', 'info');
+      else if (r === 'no-change' && isFirstTile) flashToast('崖じゃないから整地不要わふ', 'info');
+      return;
+    }
+    if (s8EditMode === 'channel') {
+      const r = channelTile(world, tx, ty);
+      if (r === 'ok' && isFirstTile) {
+        flashToast(`水路 [${tx},${ty}]（土+${LOWER_SOIL_GAIN}）`, 'info');
+        announceTileEdited(world, tx, ty, 'channel');
+      } else if (r === 'is-sea' && isFirstTile)  flashToast('海はもう水路わふ', 'info');
+      else if (r === 'no-change' && isFirstTile) flashToast('もう深い溝になってるわふ', 'info');
+      return;
+    }
+    if (s8EditMode === 'ramp' && isFirstTile) {
+      const dirSel = document.getElementById('s8-ramp-dir') as HTMLSelectElement | null;
+      const dir = (dirSel?.value ?? 'N') as 'N' | 'S' | 'E' | 'W';
+      const r = setRampOnTile(world, tx, ty, dir);
+      if (r === 'ok') {
+        flashToast(`坂道化 [${tx},${ty}] → ${dir}`, 'info');
+        announceRampPlaced(world, tx, ty);
+      } else if (r === 'no-step')         flashToast('高さ差がないわふ（隣との段差が必要）', 'info');
+      else if (r === 'wrong-direction')   flashToast('方向を逆にしてわふ（低い側にだけ坂道化できる）', 'info');
+      else if (r === 'too-steep')         flashToast('段差が大きすぎるわふ（高さ差 1 段だけ）', 'info');
+      else if (r === 'is-sea')            flashToast('海には立てられないわふ', 'info');
+      else                                flashToast('範囲外わふ', 'info');
+      return;
+    }
+  }
+
+  // Σ-8-f: drag paint state
+  let _editDragActive = false;
+  let _editDragLastTx = -1, _editDragLastTy = -1;
+  // edit/terraform mode で pointerdown 開始されたとき：drag 経由で処理した印
+  let _editDragHandledClick = false;
+
+  stage.canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if (!terraformMode && !s8EditMode) return;
+    const rect = stage.canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const w = stage.screenToWorld(cx, cy);
+    const ROWS = world.terrain.length, COLS = world.terrain[0]?.length ?? 0;
+    const tx = clamp(Math.floor(w.x / 32), 0, COLS - 1);
+    const ty = clamp(Math.floor(w.y / 32), 0, ROWS - 1);
+    _editDragActive = true;
+    _editDragLastTx = tx; _editDragLastTy = ty;
+    _editDragHandledClick = true;  // この後の kszk-empty-click は無視
+    applyEditAtTile(tx, ty, true);
+  });
+  stage.canvas.addEventListener('pointermove', (e) => {
+    if (!_editDragActive) return;
+    if (s8EditMode === 'ramp') return;  // ramp は drag で連続発動しない
+    const rect = stage.canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const w = stage.screenToWorld(cx, cy);
+    const ROWS = world.terrain.length, COLS = world.terrain[0]?.length ?? 0;
+    const tx = clamp(Math.floor(w.x / 32), 0, COLS - 1);
+    const ty = clamp(Math.floor(w.y / 32), 0, ROWS - 1);
+    if (tx === _editDragLastTx && ty === _editDragLastTy) return;
+    _editDragLastTx = tx; _editDragLastTy = ty;
+    applyEditAtTile(tx, ty, false);
+  });
+  function _endEditDrag() {
+    if (_editDragActive) {
+      _editDragActive = false;
+      _editDragLastTx = -1; _editDragLastTy = -1;
+    }
+  }
+  stage.canvas.addEventListener('pointerup', _endEditDrag);
+  stage.canvas.addEventListener('pointercancel', _endEditDrag);
+
   // 空クリック → 建設 or 地形編集モード処理
   stage.canvas.addEventListener('kszk-empty-click', (e) => {
     const detail = (e as CustomEvent).detail as { worldX: number; worldY: number };
-    // Σ-8-b-2 / Σ-8-d-1: タイル編集ブラシ（terraform より優先）
-    if (s8EditMode) {
-      const { tx, ty } = worldToTile(detail.worldX, detail.worldY);
-      if (s8EditMode === 'ramp') {
-        const dirSel = document.getElementById('s8-ramp-dir') as HTMLSelectElement | null;
-        const dir = (dirSel?.value ?? 'N') as 'N' | 'S' | 'E' | 'W';
-        const r = setRampOnTile(world, tx, ty, dir);
-        if (r === 'ok') {
-          flashToast(`坂道化 [${tx},${ty}] → ${dir}`, 'info');
-          announceRampPlaced(world, tx, ty);
-        } else if (r === 'no-step')         flashToast('高さ差がないわふ（隣との段差が必要）', 'info');
-        else if (r === 'wrong-direction')   flashToast('方向を逆にしてわふ（低い側にだけ坂道化できる）', 'info');
-        else if (r === 'too-steep')         flashToast('段差が大きすぎるわふ（高さ差 1 段だけ）', 'info');
-        else if (r === 'is-sea')            flashToast('海には立てられないわふ', 'info');
-        else                                flashToast('範囲外わふ', 'info');
-      } else if (s8EditMode === 'flatten') {
-        const r = flattenTile(world, tx, ty);
-        if (r === 'ok') {
-          flashToast(`平坦 [${tx},${ty}]`, 'info');
-          announceTileEdited(world, tx, ty, 'flatten');
-        } else if (r === 'is-sea')         flashToast('海は平坦化できないわふ', 'info');
-        else if (r === 'no-change')        flashToast('もう揃ってるわふ', 'info');
-        else                                flashToast('範囲外わふ', 'info');
-      } else if (s8EditMode === 'smooth') {
-        const r = smoothTile(world, tx, ty);
-        if (r === 'ok') {
-          flashToast(`整地 [${tx},${ty}]（1段近づけた）`, 'info');
-          announceTileEdited(world, tx, ty, 'smooth');
-        } else if (r === 'is-sea')         flashToast('海は整地できないわふ', 'info');
-        else if (r === 'no-change')        flashToast('崖じゃないから整地不要わふ', 'info');
-        else                                flashToast('範囲外わふ', 'info');
-      } else if (s8EditMode === 'channel') {
-        const r = channelTile(world, tx, ty);
-        if (r === 'ok') {
-          flashToast(`水路 [${tx},${ty}]（土+${LOWER_SOIL_GAIN}）`, 'info');
-          announceTileEdited(world, tx, ty, 'channel');
-        } else if (r === 'is-sea')         flashToast('海はもう水路わふ', 'info');
-        else if (r === 'no-change')        flashToast('もう深い溝になってるわふ', 'info');
-        else                                flashToast('範囲外わふ', 'info');
-      }
+    // Σ-8-f: edit/terraform mode の click は pointerdown 経由で処理済み（drag handler）。
+    // ここでは build mode 専用の振る舞いだけを残す。
+    if (_editDragHandledClick) {
+      _editDragHandledClick = false;
       return;
     }
-    if (terraformMode) {
-      const { tx, ty } = worldToTile(detail.worldX, detail.worldY);
-      if (terraformMode === 'raise') {
-        const ok = enqueueTerraformRaise(world, tx, ty);
-        if (!ok) flashToast('土が足りない（soil×20 必要）', 'info');
-        else flashToast(`盛り土 ジョブ追加 [${tx},${ty}]`, 'info');
-      } else {
-        enqueueTerraformLower(world, tx, ty);
-        flashToast(`切り土 ジョブ追加 [${tx},${ty}]`, 'info');
-      }
-      return;
-    }
+    if (s8EditMode || terraformMode) return;
     if (!buildMode) return;
     const x = detail.worldX;
     const y = detail.worldY;
