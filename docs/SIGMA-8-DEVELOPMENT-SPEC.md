@@ -350,3 +350,40 @@ npm run build
 
 見た目だけ先に豪華にしない。描画、通行、水、事故が同じルールを見ることを最優先にする。
 
+## 実装ステータス（このファイルは目標、進捗は STATUS.md 参照）
+
+このファイルは Σ-8 の **目標仕様** を定義する。
+**現在の実装事実 / Gap / Deferred** は別ファイルで管理する：
+
+→ **`docs/SIGMA-8-IMPLEMENTATION-STATUS.md`**（実装正本）
+
+現時点（Σ-8-fix-8 / commit `6e4e7e9` まで）の概況：
+
+### 概ね SPEC 準拠（Done）
+
+- データ構造（5 材質 / RampDir / wetness/mud/snow / isSea / ELEV_STEP=25）
+- 通行ルール（隣接タイル判定、passCost テーブル、canRampConnect）
+- A*（MinHeap、Manhattan、weighted h*1.001、maxNodes=ROWS*COLS）
+- 描画（atlas lookup、per-tile geometry、ramp 専用 cell、崖 InstancedMesh）
+- 6 ブラシ（raise / lower / flatten / smooth / ramp / channel）
+- preview ghost、drag paint、undo/redo（drag 単位、最大 50 件）
+- sim/render 共通 elevAt（`terrain/query.ts elevAtTileSurface`）
+- waterLevel 0.35 閾値跨ぎで terrainVersion 自動更新
+
+### SPEC 通り未実装（Gap）
+
+- **ramp 工事ジョブ化**：現状は即時設置、SPEC は明示してないが体感重要
+- **path 失敗時の赤 X / marker**：dazed cooldown のみ、視覚 marker なし
+- **preview に変更後 elev / ramp / 通行可否のテキスト表示**：色分けのみ
+- **props 10 種**：未発注（grass_tuft / dry_grass / bush / flower / ...）
+- **工事ポーズ 6 種**：未発注、既存 work_a/b で代用
+- **path queue（1 frame 4 件処理）**：現状全 chibi 同期計算、性能ベンチで問題出るまで保留
+
+### M2 範囲外（Deferred）
+
+- 巨大ファイル分割（world.ts 4600行 / main.ts 2400行 / stage3d.ts 2270行）
+- seed RNG（Math.random → seeded、再現性目的）
+- chibis/npcs persist 検討（現状仕様は使い捨て）
+
+詳細は STATUS.md を参照。
+
