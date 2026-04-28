@@ -11,6 +11,23 @@
 プレイヤーは神様（= 殴り投げる役）として、200+ ちびわふを抱える村を
 育てつつ災害を凌ぐ。SimCity + RimWorld + 放置ゲー的ジャンル合成。
 
+## 現在のプロダクト方針（M2.1 以降）
+
+Σ-8 以降は、旧来の「くそざこポイントで施設を買い、ランダム死因を増やす観察ゲー」から、
+**地形・資源・建物・移動制約で村を作る低解像度タイル箱庭開発ゲーム**へ寄せる。
+
+実装時は次を優先する。
+
+1. 地形改造、建物配置、資源、労働、通行ルールが画面上で因果として読めること
+2. 旧 `BUILDINGS` + `points` 建設を段階廃止し、map 上の feature/building + 資源 + 労働へ統一すること
+3. スズ / ココン / ルーは廃止予定。M2.1 ではフラナだけを主要 NPC として残す
+4. くそざこ音頭は廃止予定。イベントは天気、食料、地形、建物から自然発生するものへ寄せる
+5. フラナはちびわふより少し段差に強い。ただし万能移動にはしない
+6. カメラは自由回転ではなく、角度プリセット（低め / 標準 / 真上寄り）で改善する
+7. キャラ画像のドット絵化は別途モック判断。Claude 側で勝手に差し替えない
+
+この方針の詳細は `docs/M2-DIRECTION-RESET.md` を正本として参照する。
+
 ## 技術スタック
 
 - Vite 5 / TypeScript 5.4 / Three.js 0.184（ESM）
@@ -56,7 +73,7 @@ src/
       generators.ts      plains/peninsula/island 3 地形生成器（Σ-3）
       query.ts           isSeaAt / findDryTile / setQueryTerrain（Σ-3、循環 import 回避）
   render/
-    stage3d.ts           Three.js 3D 描画（地形メッシュ、ビルボードキャラ、カメラ、気象ティント、日時計、崖線、土砂崩れ煙、建物 Lv、約 1,060 行）
+    stage3d.ts           Three.js 3D 描画（地形メッシュ、ビルボードキャラ、カメラ、気象ティント、日時計、崖線、土砂崩れ煙、建物 Lv、約 2,270 行）
     ui.ts                HUD 更新、ビルドパネル、統計表示（power/brick/wool/cloth/soil 含む）
   meta/
     save.ts              3 スロット save/load、version 14（Σ-8 elev 0-255 + ramp/wetness/mud/snow/isSea persist、persist スコープは冒頭コメント参照）
@@ -73,6 +90,9 @@ docs/                    （character-image-brainstorm 由来）
   40_accessory_library.md 小物 20 種と trait マッピング
   50_prompt_templates.md 発注コピペ用マスタープロンプト
   90_qa_checklist.md     納品検品チェックリスト
+  M2-DIRECTION-RESET.md  M2.1 以降の設計方針（旧要素整理 / 建設統合 / NPC整理）
+  DIALOGUE-CATALOG.md    セリフ/死因テンプレ/発言プールの棚卸し
+  SCRIPT-CATALOG.md      npm scripts / 検証コマンド / 素材処理コマンド一覧
 prototypes/
   three-terrain/         Σ-4-proto（Three.js 検証プロト、5 項目 GO 確定）
     main.ts              self-contained 3D シーン（src/ への import ゼロ）
@@ -100,13 +120,13 @@ public/
 
 - **ちびわふの語尾は〜わふ**（例：「ママー！」「ひえええわふ！」「どうしたわふ？」）
 - **フラナ（ママ）も〜わふ**（同族のため）
-- **スズはフラナを「ママ」と呼ぶ**（家族構成）
-- **ココンはいじめっ子**、ちびわふを棒で突く、たまに返り討ち死
-- **ルーは無口**（「……」「……ぐぅ」）
+- **スズ / ココン / ルーは廃止予定**。新規実装で依存を増やさない
+- **フラナは唯一の主要 NPC**。村の象徴、親、拠点、少しだけ有能な移動者として扱う
 - **くそざこ = 純粋無垢 + 弱い**がベース。たまに cheeky（「ぼくがいちばん！」等）
 - cheeky 発言 → 周囲が 25% でボコる。35% で死亡
-- 粗相フレーバー（屁/しゃっくり/よだれ等）→ 35% で理不尽にボコられる
+- 粗相フレーバー（屁/しゃっくり/よだれ等）→ 理不尽反応は残してよいが、ココン依存は外す
 - セリフは **機嫌と完全一致** させる（フラナ機嫌悪いのに「いい子わふ〜」は NG）
+- 発言は `docs/DIALOGUE-CATALOG.md` で棚卸しし、死因/状態/話者と意味が噛み合わないものを修正候補にする
 
 ## 難易度 3 段階
 
@@ -129,6 +149,8 @@ public/
 - `CONFIG.DRY_Y_LIMIT = 1150`：これより下は泥川
 - フラナ拠点 = `(w/2, h*0.35) = (1600, 630)`
 - **カメラ操作**：ドラッグパン / ホイールズーム / **WASD/矢印パン** / **F=フラナへ即移動** / **R=リセット** / **ミニマップ右下、クリックで即ジャンプ**
+- **M2.1 追加方針**：角度プリセット（低め / 標準 / 真上寄り）を追加する。自由回転は Y 軸ビルボード前提を壊すため導入しない
+- **既知の見た目課題**：最遠景でワールド外、全面 sea plane、海底 sand atlas が同時に見え、画面下が縞状に破綻する。海は `isSea` タイル単位の水面表示へ寄せる
 
 ## 主要データモデル
 
@@ -163,8 +185,11 @@ public/
 
 ### NpcState（src/sim/npcs.ts）
 
-フラナ / スズ / ココン / ルーの 4 体。全員 HP・機嫌 / lifeLog / flight フィールドあり。
-**フラナ機嫌 0-100**（damageNpc で -18、音頭 -5、火事 -10、朝 +10、音頭終 +8、近くで寝食 +0.15/s/子）
+現実装はフラナ / スズ / ココン / ルーの 4 体。M2.1 方針では **スズ / ココン / ルーを廃止予定**。
+新規実装はフラナだけに寄せる。関連セリフ、点呼、いじめ、ココン参戦、スズ反応は整理対象。
+
+**フラナ機嫌 0-100**（damageNpc で -18、火事 -10、朝 +10、近くで寝食 +0.15/s/子）。
+音頭由来の mood 変動は音頭廃止に合わせて削除予定。
 
 ## ゲーム機構サマリー
 
@@ -189,6 +214,7 @@ public/
 - 水中投げ：ちびわふ即溺死、NPC は -10 HP
 - 建設モード：HUD のボタン → 任意座標クリックで feature 設置（wood/stone 消費）
 - 地形編集モード（Σ-2-b）：⛰ 盛り土（soil×10 消費）/ ⛏ 切り土（soil+14 獲得、rock なら stone+5）、ちびわふが労働
+- **M2.1 方針**：建設は map 上の feature/building + 資源 + ちびわふ労働へ統一。`points` 消費の旧建物購入は廃止予定
 
 ### Σ-1 z 物理（2.5D）
 - `flight` に `vz/posZ/startElev` 追加、重力 CLIFF_GRAVITY=200 で自由落下
@@ -201,6 +227,7 @@ public/
 - 32px セルの `TerrainTile[][]`（100×57 = 5700 タイル）
 - フィールド：`{elev, material, ramp, stability, waterLevel, wetness, mud, snowCoverage, buryTimer, isSea}`
 - `elev` は **0-255 スケール**、編集は **ELEV_STEP=25** 単位（CONFIG.ELEV_STEP / MAX_ELEV）
+- **既知の見た目課題**：`ELEV_STEP=25` × `ELEV_SCALE=6` で 1 段が Three.js 上 150px になり、64px ちびわふに対して大きすぎる。M2.1 で `ELEV_SCALE=3-4` または `ELEV_STEP=8-12` を検討
 - `material`：`'grass' | 'soil' | 'rock' | 'sand' | 'snow'`（5 種、`'water'` は廃止）
 - `isSea`：永続水域フラグ（旧 `material === 'water'` 判定の置き換え）
 - `ramp`：`'N' | 'S' | 'E' | 'W' | null`（高い側を向く 1 タイル 1 方向）
@@ -235,6 +262,7 @@ public/
 ### Σ-4 Three.js 3D レンダラー（本流統合済み、Σ-8-c で per-tile + atlas に進化）
 - `src/render/stage3d.ts`（約 2270 行）が唯一のステージ実装。Pixi `stage.ts` は Σ-4-f で削除済み。
 - **座標系**：world(x,y) → Three.js(x, elev×ELEV_SCALE=6, y)。カメラは `(camX, h, camZ+h)` から `(camX, 0, camZ)` を向く fov=20° / 45° 俯瞰固定（回転封印）。
+- **M2.1 方針**：固定 45° だけでなく角度プリセットを持つ。実装は camera pitch/height/lookAt の preset 切替に留め、OrbitControls 的な自由回転は導入しない。
 - **地形**：Σ-8-c で per-tile 独立頂点（4 頂点/タイル × 5700 = 22,800 頂点）。各タイルが独自 corner elev（ramp 加味）+ atlas UV を持つ。MeshToonMaterial + vertexColors（wetness/mud/snow tint）+ atlas map + Toon gradientMap。
 - **elevAt() は per-tile barycentric**：`terrain/query.ts elevAtTileSurface` を sim/render 共通利用。flat タイル = `tile.elev` 固定、ramp タイル = 対角線 NE-SW 三角形 barycentric。これでメッシュ表面と物理（A*/水流/cliff_fall）が完全一致。
 - **スプライト**：既存 9 ポーズ PNG を Y 軸ビルボード（PlaneGeometry、+Z 向き固定、左右反転で faceLeft）。floodFillAlpha で白背景除去。MeshBasicMaterial + 手動 color tint で夜間 / 天候に反応。
@@ -290,6 +318,9 @@ public/
 - v13 → v14: elev ×2.55 量子化（0-100 → 0-255）/ material 'water' → isSea+sand 変換 / ramp/wetness/mud/snow/sea を default 0 で追加
 
 詳細は `src/meta/save.ts` の冒頭コメント参照。
+
+**M2.1 方針**：`points` はスコア、図鑑、村ランク解放用として残す。建設費用 / upgrade 費用としての `points` は廃止予定。
+旧 `buildings` save データは migration または legacy 表示で扱い、新規導線は map 上 feature/building へ寄せる。
 
 ## コミット規約
 
@@ -610,21 +641,19 @@ sigma-4-proto）は削除済み。
 
 ## 既知の注意点・quirks
 
-- **world.ts が 3,200+ 行**：Σ-2/3 で膨張、`disasters.ts` / `terraform.ts` への分割が候補
+- **巨大ファイル**：`world.ts` 約 4600 行 / `main.ts` 約 2400 行 / `stage3d.ts` 約 2270 行。M3 前に domain 分割が必要
 - **sim.ts balance assertion は pre-existing failing**（top share > 22%、mudriver 独占等）、ブロッカーではない。Σ-3 の 3 地形化で mudriver 独占は緩和済だが hell の均衡は継続調整
-- **save v12**：terrain を RLE 圧縮で persist、terrainSeed も含む。v11 以下は ensurePlots で procedural 再生成
+- **save v14**：terrain を RLE 圧縮で persist、terrainSeed / ramp / wetness / mud / snowCoverage / isSea も含む。詳細は `src/meta/save.ts`
 - **Vite MPA 設定必須**：`vite.config.ts` に `appType: 'mpa'` がないと dev server が SPA fallback で root `index.html` を返し、`prototypes/three-terrain/` 等のサブページが見えない（Σ-4-proto 実機確認時に判明）。現在は設定済
 - **chibi death cause "fatigue_death"** は P1-C1 時点で ほぼ発火せず（hunger 死が先）、P2 で食料ある状態で初めて顕在化
-- **Three.js の `elevAt` 実装**：メッシュ頂点と同じ「隣接 4 タイル平均」で bilinear 補間しないと、キャラ / feature の Y が地形表面と一致せず、周囲より低いタイルで埋もれ、高いタイルで浮く。新たに高度を使うコードを書くときは必ず `elevAt(wx, wy)` を使う
+- **高さモデルは共通 query 必須**：新たに高度を使うコードを書くときは `terrain/query.ts` の `elevAtTileSurface` または `world.ts#getElevation` を使う。bilinear / 隣接平均を復活させない
 - **Three.js `screenToWorld`**：`Plane(Y=0)` 交点ではなく `terrainMesh` への raycast を優先する。高台ではマウス位置と実メッシュ表面がズレるため、raycast しないとドラッグ位置が奥へワープする
-- **カメラ回転は封印**：Y 軸ビルボード前提が崩れるので `OrbitControls` など導入禁止。スプライトが横から見えてしまう
+- **自由カメラ回転は封印**：Y 軸ビルボード前提が崩れるので `OrbitControls` など導入禁止。M2.1 では角度プリセットだけ追加する
+- **遠景の海表示**：全面 sea plane + sand 海底 + ワールド外背景が重なり、最遠景で画面下が縞状に見える。`isSea` タイル単位の水面表示へ寄せる
+- **高さスケール**：`ELEV_STEP=25` × `ELEV_SCALE=6` は 1 段が大きすぎる。M2.1 で見た目検証する
 - **`DRY_Y_LIMIT = 1150` 南側一律泥川**：Σ-3 で 3 地形化すると前提崩壊、`hazards.ts` の mudriver/bridge/季節ゾーンも再設計対象（`isSeaAt` に移行済、DRY_Y_LIMIT は legacy）
-- **Σ-5 で解消予定の体感問題**（Σ-4 完了時点で判明、2026-04-23）：
-  - 労働 AI が偶発（chibiwafu.ts L176-186 の 35% 確率 wander）で `terraformJobs` / 障害物採取が自発的に進まない → 「terraform 置いても地形変わらない」体感
-  - `featTex()` (stage3d.ts L250-258) が全 feature を色違いの円盤 1 枚で描画 → water/channel/farm/house 等が「丸置いた」だけに見える
-  - HUD に terraform 進捗・saturated 状態・作業者数のフィードバックなし → 正しく機能しても気づけない
-  - 狼 flee 行動なし（updateChibi L1657-2100 に検知処理ゼロ）→ 狼速度が 2.3〜3.7 倍速なのに逃げず一方的に狩られる
-  - 上記 4 点は Σ-5 で一括対応（labor AI / feature 3D モデル化 / HUD 進捗バー / 狼 flee + sanctuary）
+- **旧 points 建設と新 feature 建設が混在**：M2.1 で統一対象。`points` はスコア/解放用途に残し、建設費には使わない
+- **旧 NPC / 音頭依存**：スズ/ココン/ルー/くそざこ音頭は廃止予定。新規実装で依存を増やさない
 
 ## よくある作業パターン
 
@@ -732,7 +761,8 @@ interface ChibiSprite {
 | オオカミ / クマ / 将来の敵 | ◎ | ちびわふ 2D と対比して「異物感・恐怖感」を演出、数も 5-10 体でコスト許容 |
 | 建物 | ◎ | Σ-4 で地形が 3D 化するので整合性必須、PlaneGeometry + Toon で作る |
 | 神罰エフェクト（隕石・雷撃） | ○ | パーティクルと一体で 3D 映え |
-| NPC 4 体（フラナ・スズ・ココン・ルー） | △ 保留 | 特別感は出るが浮くリスク、Σ-4 完走後に判断 |
+| フラナ | △ 保留 | 主要 NPC として強化対象。ただし当面は billboard 継続 |
+| スズ / ココン / ルー | × 廃止予定 | M2.1 方針で主要 NPC から外す |
 | **ちびわふ 200 体** | **× 棄却** | チープ＝くそざこ味、billboard のままが最適解 |
 
 ## 開発の「くそざこ味」を保つための自戒

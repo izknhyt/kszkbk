@@ -17,9 +17,12 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | ファイル | 役割 | 読むタイミング |
 |---|---|---|
 | `../CLAUDE.md` | プロジェクト全体ガイド、最優先正本 | 新セッション必読 |
+| `M2-DIRECTION-RESET.md` | **M2.1 以降の設計方針**（旧要素整理 / 建設統合 / NPC整理） | 実装方針確認時 |
 | `SIGMA-8-IMPLEMENTATION-STATUS.md` | **実装側の事実**（Done / Gap / Deferred） | 実装着手前 |
 | `SIGMA-8-DEVELOPMENT-SPEC.md` | **目標仕様**（型 / 通行ルール / 描画 / ブラシ）| 実装中の判断基準 |
 | `SIGMA-8-PLAN.md` | M2 ロードマップと判断記録 | 全体方針確認時 |
+| `DIALOGUE-CATALOG.md` | 発言/死因テンプレ/セリフ棚卸し | 台詞整理時 |
+| `SCRIPT-CATALOG.md` | npm scripts / 検証コマンド一覧 | 作業前後 |
 
 **ズレ検出ルール**: SPEC と STATUS が食い違っていれば STATUS が事実、SPEC は目標。
 両者ズレが見つかったら STATUS の Gap セクションに記載する。
@@ -59,6 +62,9 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `SIGMA-8-DEVELOPMENT-SPEC.md` | Sigma-8 の実装仕様・禁止事項・検証基準 | Sigma-8 実装時 |
 | `SIGMA-8-IMPLEMENTATION-STATUS.md` | Sigma-8 の Done / Gap / Deferred 一覧 | Sigma-8 実装着手前 |
 | `SIGMA-8-UI-ASSET-SPEC.md` | Sigma-8 の UI / terrain atlas / prop / icon 仕様 | UI・素材実装/発注時 |
+| `M2-DIRECTION-RESET.md` | M2.1 以降の設計方針。旧 points 建設 / 旧 NPC / 音頭の整理 | 次フェーズ設計時 |
+| `DIALOGUE-CATALOG.md` | セリフ、死因テンプレート、発言プールの棚卸し | 台詞・死因整理時 |
+| `SCRIPT-CATALOG.md` | npm scripts、sim、test、asset/docs 関連コマンド一覧 | 作業前後 |
 
 ---
 
@@ -158,3 +164,7 @@ Codex が `image_gen.py`、OpenAI Image API、`OPENAI_API_KEY`、その他 API �
   - 素材正本（キャラ系 + UI-ASSET-SPEC + mockup）
   - 古い/参考扱いは現状なし
   - ファイル構成表に SIGMA-8-IMPLEMENTATION-STATUS.md を追加
+- v1.2 M2.1 方針整理ドキュメントを追加：
+  - `M2-DIRECTION-RESET.md`（旧 points 建設、旧 NPC、音頭の整理方針）
+  - `DIALOGUE-CATALOG.md`（セリフ棚卸し）
+  - `SCRIPT-CATALOG.md`（コマンド一覧）

@@ -9,6 +9,9 @@ UI / アセット仕様は `SIGMA-8-UI-ASSET-SPEC.md` を参照。
 
 最終更新: Σ-8-fix-8（commit `6e4e7e9`）
 
+M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする。
+この STATUS は「現在実装済みの事実」と「次に整理すべき Gap」を管理する。
+
 ---
 
 ## ✅ Done（M2 で実装済み）
@@ -104,6 +107,23 @@ UI / アセット仕様は `SIGMA-8-UI-ASSET-SPEC.md` を参照。
 
 ## ⚠️ Gap（M2 範囲、未着手）
 
+### Gap-0: M2.1 方針リセットの反映
+
+詳細: `docs/M2-DIRECTION-RESET.md`
+
+| 項目 | 現状 | 方針 |
+|---|---|---|
+| 建設方式 | 旧 `BUILDINGS` + `points` と新 `Feature` 建設が混在 | `points` 建設を廃止し、map 上 feature/building + 資源 + 労働へ統一 |
+| 旧建物 | 農業区/鍛冶場/墓地/太鼓/産屋が残る | 新 feature へ吸収、または legacy 化 |
+| くそざこ音頭 | `ondo` イベント/死因/反応が残る | 新規発火停止。画面上の因果が読めるイベントへ置換 |
+| NPC | フラナ/スズ/ココン/ルー 4 体 | スズ/ココン/ルー廃止、フラナのみ主要 NPC |
+| カメラ | 45° 固定 + zoom/pan | 角度プリセット（低め/標準/真上寄り）を追加、自由回転は不可 |
+| 高さスケール | `ELEV_STEP=25`, `ELEV_SCALE=6` | 1 段が大きすぎるため `ELEV_SCALE` 低下または `ELEV_STEP` 細分化を検証 |
+| 海表示 | 全面 sea plane + sand 海底 | `isSea` タイル単位の水面表示へ寄せる |
+| セリフ | 複数ファイルに分散、旧 NPC/音頭依存あり | `DIALOGUE-CATALOG.md` を使って棚卸し |
+
+優先度: **最高**。次の大きな実装前に設計方針として固定済み。コード反映は段階的に行う。
+
 ### Gap-1: ramp 工事ジョブ化
 - 現状: `setRampOnTile` 即時設置
 - 想定: `enqueueRampJob` でジョブ積み、chibi 労働で進行、3D に半完成 ramp 表示
@@ -188,9 +208,11 @@ UI / アセット仕様は `SIGMA-8-UI-ASSET-SPEC.md` を参照。
 
 ## 次の優先順序
 
-1. **Gap-1 ramp 工事ジョブ化** — Codex 推奨、体感が大きく変わる
-2. **Gap-2 props 配置インフラ + ChatGPT 発注** — 見た目の密度
-3. **Gap-3 / Gap-4 / Gap-5** — polish
-4. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
+1. **Gap-0 M2.1 方針リセットの実装設計** — 旧 points 建設 / 旧 NPC / 音頭の整理
+2. **カメラ / 海表示 / 高さスケールの小検証** — 見た目の違和感を先に潰す
+3. **Gap-1 ramp 工事ジョブ化** — 地形開発の主役操作を労働ループへ接続
+4. **Gap-2 props 配置インフラ + ChatGPT 発注** — 見た目の密度
+5. **Gap-3 / Gap-4 / Gap-5** — polish
+6. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
 
 更新タイミング: 新フェーズ commit 時に該当行を Done に動かす、新規 Gap が見つかったら追加。
