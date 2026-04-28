@@ -751,6 +751,8 @@ async function start() {
     document.getElementById('ab-terrain')?.classList.toggle('active', m !== null);
     // Σ-8 toolbar の active を raise/lower と同期
     setSigma8ToolActive(m);
+    // Σ-8-fix-7: 編集モード中は stage3d 側の camera pan を抑止
+    syncStagePanEnabled();
     if (m) {
       setBuildMode(null);
       const hint = document.getElementById('plot-build-hint');
@@ -824,6 +826,12 @@ async function start() {
       setTerraformMode(null);
       setBuildMode(null);
     }
+    // Σ-8-fix-7: 編集モード中は stage3d 側の camera pan を抑止
+    syncStagePanEnabled();
+  }
+  // 編集中（terraform / s8Edit のいずれか）は pan 禁止、それ以外は許可
+  function syncStagePanEnabled() {
+    stage.setPanEnabled(terraformMode === null && s8EditMode === null);
   }
 
   document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((btn) => {

@@ -36,6 +36,8 @@ export interface StageHandle {
   setContourVisible: (visible: boolean) => void;
   // Σ-8-e: hover preview ghost。tx/ty=null で消す、color は CSS hex。
   setHoverTile: (tx: number | null, ty: number | null, color?: number) => void;
+  // Σ-8-fix-7: 編集モード中の camera pan 抑止（target を持たない pointerdown を無視）
+  setPanEnabled: (enabled: boolean) => void;
 }
 
 // ============================================================
@@ -1287,11 +1289,18 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   type PMode='pan'|'drag';
   let ptr:{id:number;mode:PMode;sx:number;sy:number;lx:number;ly:number;moved:boolean;target:HitTarget|null}|null=null;
+  // Σ-8-fix-7: 編集モード中（terraform / s8EditMode）は pan を抑止して、
+  // drag paint がカメラ移動と同時に走らないようにする。main.ts から切替。
+  let _panBlocked = false;
+  function setPanEnabled(enabled: boolean) { _panBlocked = !enabled; }
 
   canvas.addEventListener('pointerdown',(e)=>{
     if(e.button===2) return;
-    canvas.setPointerCapture(e.pointerId);
     const target=pickTarget(e.clientX,e.clientY);
+    // Σ-8-fix-7: 編集モード中は target なしクリックでの pan を抑止。
+    // ただしエンティティ drag (chibi/NPC を掴む) は許す。
+    if (_panBlocked && !target) return;
+    canvas.setPointerCapture(e.pointerId);
     ptr={id:e.pointerId,mode:target?'drag':'pan',sx:e.clientX,sy:e.clientY,lx:e.clientX,ly:e.clientY,moved:false,target};
   });
 
@@ -2243,6 +2252,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     screenToWorld: stwXZ,
     setHitTest: (fn)=>{ hitFn=fn; },
     setContourVisible: (visible: boolean)=>{ contourVisible = visible; if (contourLines) contourLines.visible = visible; },
+    setPanEnabled,
     setHoverTile: (tx, ty, color)=>{
       if (tx === null || ty === null) {
         _hoverActive = false;

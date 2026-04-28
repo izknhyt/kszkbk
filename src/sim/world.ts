@@ -1691,6 +1691,10 @@ function absorpRate(material: TerrainMaterial, elev: number): number {
 
 // downhill flow 用の delta バッファ（毎回 alloc しない）
 let _hydroDelta: Float32Array | null = null;
+// Σ-8-fix-6: 前 tick の「passable mask」（waterLevel < 0.35）を保持。
+// 当 tick 終了時にマスク変化があれば path cache を invalidate するため。
+let _hydroPassMask: Uint8Array | null = null;
+const HYDRO_PASS_THRESHOLD = 0.35;
 // 水源 feature 位置キャッシュ（tick 毎に張り直し、updateHydrology 内で使い回す）
 let _waterFeatTilesCache: { tick: number; tiles: Array<{ tx: number; ty: number }> } | null = null;
 // channel feature の cell index set（同上）
@@ -1851,6 +1855,29 @@ export function updateHydrology(w: WorldState, dt: number): void {
       // 例外：waterLevel が 0.85+ で 'sand' は 'soil' に降格（湿った砂は泥）。
       if (tile.waterLevel > 0.85 && tile.material === 'sand') tile.material = 'soil';
     }
+  }
+
+  // Σ-8-fix-6: 0.35 閾値を跨いだタイルがあれば path cache を invalidate。
+  // 雨で水没したり蒸発で乾いた瞬間に、進行中の chibi が再ルートする。
+  // 毎 tick 全タイルを比較するが O(N=5700) で軽い。
+  const expectedSize = ROWS * COLS;
+  if (!_hydroPassMask || _hydroPassMask.length !== expectedSize) {
+    _hydroPassMask = new Uint8Array(expectedSize);
+    // 初回は現状をベースラインに：terrainVersion 増やさない
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      _hydroPassMask[r * COLS + c] = terrain[r]![c]!.waterLevel >= HYDRO_PASS_THRESHOLD ? 1 : 0;
+    }
+  } else {
+    let changed = false;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      const idx = r * COLS + c;
+      const cur = terrain[r]![c]!.waterLevel >= HYDRO_PASS_THRESHOLD ? 1 : 0;
+      if (_hydroPassMask[idx] !== cur) {
+        _hydroPassMask[idx] = cur;
+        changed = true;
+      }
+    }
+    if (changed) w.terrainVersion++;
   }
 }
 
