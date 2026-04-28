@@ -1,7 +1,10 @@
-import { BUILDINGS } from '../city/buildings';
+// M2.1 Step 4.1: 旧 BUILDINGS の P-cost 建設リストは UI 描画停止。
+// import は残すが renderBuildList は legacy 化で実体使用なし。
+// import { BUILDINGS } from '../city/buildings';
+// import { buildingCost, getUpgradeInfo } ... も同様に未使用に
 import { DEATH_CAUSES } from '../sim/deaths';
 import type { WorldState } from '../sim/world';
-import { averageLifespan, buildingCost, getUpgradeInfo, populationCap, totalDexCount, uniqueDexFound, WEATHER_ICON, WEATHER_LABEL } from '../sim/world';
+import { averageLifespan, populationCap, totalDexCount, uniqueDexFound, WEATHER_ICON, WEATHER_LABEL } from '../sim/world';
 import { DAY_PHASE_LABEL, SEASON_LABEL } from '../sim/events';
 import { RANK_DEFS, nextRank } from '../sim/rank';
 import type { DeathCauseId } from '../types';
@@ -258,60 +261,27 @@ function renderStats(w: WorldState, cb: UICallbacks) {
   }
 }
 
-function renderBuildList(w: WorldState, cb: UICallbacks) {
+// M2.1 Step 4.1: 旧 `BUILDINGS` の P-cost 建設リストは廃止予定。
+// 新建設は main.ts の Feature 建設パネル（build-cat-tabs / build-cards）が担う。
+// 既存セーブ由来の `w.buildings` 数値効果は legacy として残るが、ここから新規建設できない。
+// 旧 row 描画ロジックは履歴のため関数内に保持するが unreachable。
+function renderBuildList(_w: WorldState, _cb: UICallbacks) {
   const host = byId('build-list');
-  if (host.children.length === 0) {
-    // セクションタイトルを一度だけ追加
+  host.innerHTML = '';
+  return;
+  // --- LEGACY M2.1 旧描画ロジック（呼ばれない、復元するならこのコメント解除）---
+  /*
+  const host2 = byId('build-list');
+  if (host2.children.length === 0) {
     const title = document.createElement('div');
     title.className = 'build-section-title';
     title.style.marginTop = '8px';
     title.textContent = '🏛 建物（P コスト）';
-    host.appendChild(title);
+    host2.appendChild(title);
   }
-  // 既存 build-row だけクリアして再描画
-  Array.from(host.querySelectorAll('.build-row')).forEach((el) => el.remove());
-
-  for (const def of Object.values(BUILDINGS)) {
-    const cost = buildingCost(w, def.id);
-    const owned = w.buildings.filter((b) => b.defId === def.id);
-    const upgrade = getUpgradeInfo(w, def.id);
-    const row = document.createElement('div');
-    row.className = 'build-row';
-    // ツールチップ用にコストと効果を data 属性に持たせる
-    row.dataset.buildId = def.id;
-
-    // Lv 表示（平均Lv or "Lv1,1,2" 列）
-    let lvText = '';
-    if (owned.length > 0) {
-      const lvs = owned.map((b) => b.level).sort((a, b) => a - b);
-      lvText = ` <small>Lv ${lvs.join(',')}</small>`;
-    }
-
-    const canBuild = w.points >= cost;
-    const buildBtn = `<button class="build-btn" ${canBuild ? '' : 'disabled'} title="${canBuild ? '' : 'P が足りないわふ'}">建${cost}P</button>`;
-    let upgradeBtn = '';
-    if (upgrade) {
-      if (upgrade.capped) {
-        upgradeBtn = `<button class="upgrade-btn" disabled title="村ランクで頭打ち">Max</button>`;
-      } else {
-        upgradeBtn = `<button class="upgrade-btn" ${upgrade.possible ? '' : 'disabled'} title="Lv${upgrade.targetLevel} へ強化">▲${upgrade.cost}P</button>`;
-      }
-    }
-
-    row.innerHTML = `
-      <div>
-        <div class="name">${escape(def.name)} <small>x${owned.length}</small>${lvText}</div>
-        <div class="desc">${escape(def.desc)}</div>
-      </div>
-      <div class="build-actions">${buildBtn}${upgradeBtn}</div>
-    `;
-    row.querySelector<HTMLButtonElement>('.build-btn')!.addEventListener('click', () => cb.onBuild(def.id));
-    const ub = row.querySelector<HTMLButtonElement>('.upgrade-btn');
-    if (ub && upgrade && !upgrade.capped) {
-      ub.addEventListener('click', () => cb.onUpgrade(def.id));
-    }
-    host.appendChild(row);
-  }
+  Array.from(host2.querySelectorAll('.build-row')).forEach((el) => el.remove());
+  for (const def of Object.values(BUILDINGS)) { ... }
+  */
 }
 
 function renderRecent(w: WorldState) {
