@@ -1022,25 +1022,24 @@ async function start() {
     t.mud = s.mud;
     t.snowCoverage = s.snowCoverage;
   }
-  function rememberPreEdit(tx: number, ty: number) {
-    if (!_currentEditGroup || _currentEditGroup.kind !== 'tiles') return;
+  function rememberPreEdit(tx: number, ty: number): boolean {
+    if (!_currentEditGroup || _currentEditGroup.kind !== 'tiles') return false;
     const key = `${tx},${ty}`;
-    if (_editedInGroup.has(key)) return;
+    if (_editedInGroup.has(key)) return false;  // Σ-8-fix-5: 既存 key は何もしない
     _editedInGroup.add(key);
     const snap = captureSnapshot(tx, ty);
     if (snap) _currentEditGroup.snapshots.push(snap);
+    return true;  // 今回新たに snapshot を追加した
   }
-  // Σ-8-fix-4: 操作が no-change / failure だった場合は直前の snapshot を捨てる。
-  // tx,ty も _editedInGroup から外して同タイル再編集を許容。
+  // Σ-8-fix-4 / fix-5: 直前の rememberPreEdit で「今回追加した snapshot」だけを巻き戻す。
+  // 同じ drag 内で同タイルを再訪して 2 度目が no-change になっても、初回の成功 snapshot は残す。
   function rollbackPreEdit(tx: number, ty: number) {
     if (!_currentEditGroup || _currentEditGroup.kind !== 'tiles') return;
-    const key = `${tx},${ty}`;
-    if (!_editedInGroup.has(key)) return;
     const last = _currentEditGroup.snapshots[_currentEditGroup.snapshots.length - 1];
     if (last && last.tx === tx && last.ty === ty) {
       _currentEditGroup.snapshots.pop();
     }
-    _editedInGroup.delete(key);
+    _editedInGroup.delete(`${tx},${ty}`);
   }
   function rememberJobId(jobId: string) {
     if (!_currentEditGroup || _currentEditGroup.kind !== 'jobs') return;
@@ -1176,7 +1175,7 @@ async function start() {
       return;
     }
     if (s8EditMode === 'flatten') {
-      rememberPreEdit(tx, ty);
+      const added = rememberPreEdit(tx, ty);
       const r = flattenTile(world, tx, ty);
       if (r === 'ok') {
         if (isFirstTile) {
@@ -1184,14 +1183,14 @@ async function start() {
           announceTileEdited(world, tx, ty, 'flatten');
         }
       } else {
-        rollbackPreEdit(tx, ty);  // 空 snapshot を捨てる
+        if (added) rollbackPreEdit(tx, ty);  // Σ-8-fix-5: 今回追加した snapshot だけ巻き戻し
         if (isFirstTile && r === 'is-sea')   flashToast('海は平坦化できないわふ', 'info');
         else if (isFirstTile && r === 'no-change') flashToast('もう揃ってるわふ', 'info');
       }
       return;
     }
     if (s8EditMode === 'smooth') {
-      rememberPreEdit(tx, ty);
+      const added = rememberPreEdit(tx, ty);
       const r = smoothTile(world, tx, ty);
       if (r === 'ok') {
         if (isFirstTile) {
@@ -1199,14 +1198,14 @@ async function start() {
           announceTileEdited(world, tx, ty, 'smooth');
         }
       } else {
-        rollbackPreEdit(tx, ty);
+        if (added) rollbackPreEdit(tx, ty);
         if (isFirstTile && r === 'is-sea')   flashToast('海は整地できないわふ', 'info');
         else if (isFirstTile && r === 'no-change') flashToast('崖じゃないから整地不要わふ', 'info');
       }
       return;
     }
     if (s8EditMode === 'channel') {
-      rememberPreEdit(tx, ty);
+      const added = rememberPreEdit(tx, ty);
       const r = channelTile(world, tx, ty);
       if (r === 'ok') {
         if (isFirstTile) {
@@ -1214,7 +1213,7 @@ async function start() {
           announceTileEdited(world, tx, ty, 'channel');
         }
       } else {
-        rollbackPreEdit(tx, ty);
+        if (added) rollbackPreEdit(tx, ty);
         if (isFirstTile && r === 'is-sea')   flashToast('海はもう水路わふ', 'info');
         else if (isFirstTile && r === 'no-change') flashToast('もう深い溝になってるわふ', 'info');
       }
@@ -1223,13 +1222,13 @@ async function start() {
     if (s8EditMode === 'ramp' && isFirstTile) {
       const dirSel = document.getElementById('s8-ramp-dir') as HTMLSelectElement | null;
       const dir = (dirSel?.value ?? 'N') as 'N' | 'S' | 'E' | 'W';
-      rememberPreEdit(tx, ty);
+      const added = rememberPreEdit(tx, ty);
       const r = setRampOnTile(world, tx, ty, dir);
       if (r === 'ok') {
         flashToast(`坂道化 [${tx},${ty}] → ${dir}`, 'info');
         announceRampPlaced(world, tx, ty);
       } else {
-        rollbackPreEdit(tx, ty);
+        if (added) rollbackPreEdit(tx, ty);
         if (r === 'no-step')              flashToast('高さ差がないわふ（隣との段差が必要）', 'info');
         else if (r === 'wrong-direction') flashToast('方向を逆にしてわふ（低い側にだけ坂道化できる）', 'info');
         else if (r === 'too-steep')       flashToast('段差が大きすぎるわふ（高さ差 1 段だけ）', 'info');
