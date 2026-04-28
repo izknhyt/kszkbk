@@ -59,7 +59,9 @@ src/
     stage3d.ts           Three.js 3D 描画（地形メッシュ、ビルボードキャラ、カメラ、気象ティント、日時計、崖線、土砂崩れ煙、建物 Lv、約 1,060 行）
     ui.ts                HUD 更新、ビルドパネル、統計表示（power/brick/wool/cloth/soil 含む）
   meta/
-    save.ts              3 スロット save/load、version 12（Σ-2 RLE 地形圧縮、Σ-3 terrainSeed）
+    save.ts              3 スロット save/load、version 14（Σ-8 elev 0-255 + ramp/wetness/mud/snow/isSea persist、persist スコープは冒頭コメント参照）
+    sim/pathfinding.ts   Σ-8-b A* + passCost + canRampConnect、weighted (h*1.001)、maxNodes=ROWS*COLS
+    sim/terrain/query.ts Σ-8-fix-3 共通 elevAtTileSurface（per-tile flat / ramp barycentric）
 index.html               start-screen + HUD + minimap canvas + terraform/infra ボタン
 vite.config.ts           appType='mpa' で multi-page（prototypes/ も serve）
 scripts/sim.ts           headless バランス計測、難度比較に使う
@@ -195,14 +197,34 @@ public/
 - water/channel 上 flow >1.5 で下流押し流し → resist 失敗で HP ドレ → `river_swept`
 - 激流が崖端で `cliff_fall` に遷移（滝落下）
 
-### Σ-2 タイル式ハイトマップ
-- 32px セルの `TerrainTile[][]`（100×57 = 5700 タイル）、`{elev, material, stability, waterLevel, buryTimer}`
-- `getElevation(x,y)` は bi-linear 補間、シグネチャは Ω-3-b 以来互換
-- 盛り土 `raiseTile` / 切り土 `lowerTile` で elev ±5、stability を 0.6/0.75 まで減衰
+### Σ-2 タイル式ハイトマップ（Σ-8 で 0-255 / step 25 / ramp に拡張）
+- 32px セルの `TerrainTile[][]`（100×57 = 5700 タイル）
+- フィールド：`{elev, material, ramp, stability, waterLevel, wetness, mud, snowCoverage, buryTimer, isSea}`
+- `elev` は **0-255 スケール**、編集は **ELEV_STEP=25** 単位（CONFIG.ELEV_STEP / MAX_ELEV）
+- `material`：`'grass' | 'soil' | 'rock' | 'sand' | 'snow'`（5 種、`'water'` は廃止）
+- `isSea`：永続水域フラグ（旧 `material === 'water'` 判定の置き換え）
+- `ramp`：`'N' | 'S' | 'E' | 'W' | null`（高い側を向く 1 タイル 1 方向）
+- `getElevation(x,y)` は **per-tile triangle barycentric**（`terrain/query.ts elevAtTileSurface` 経由）
+  - flat タイルは `tile.elev` 固定、ramp タイルは対角線 NE-SW で 2 三角形分割
+  - sim/render 共通の単一実装（Σ-8-fix-3 で統一）
+- 盛り土 `raiseTile` / 切り土 `lowerTile` で elev ±25（ELEV_STEP）、stability を 0.6/0.75 まで減衰
+- `setRampOnTile(w, tx, ty, dir)`：1 段差ちょうどの隣接にだけ ramp 設置成功、`terrainVersion++`
+- `flattenTile / smoothTile / channelTile`：Σ-8-d で実装、ELEV_STEP 単位の編集
 - `updateTerrainStability`：stability 回復 +0.02/sec（storm ×0、heatwave ×1.5）
-- 崩落トリガー：stability <0.4 かつ隣接 elev 差 ≥20 で 0.005/sec 発動
-- 崩落で elev 差 ≥30 → `landslide_crush`（即死）、<30 → HP-40
+- 崩落トリガー：stability <0.4 かつ隣接 elev 差 **≥50（2 段差）** で 0.005/sec 発動
+- 崩落で elev 差 **≥75（3 段差）** → `landslide_crush`（即死）、<75 → HP-40
 - 崩落先タイルに buryTimer=5sec、上にいるちびわふが dt×0.15 確率で `buried_alive`
+- 崩落・raise/lower・ramp 設置は `terrainVersion++` で chibi の A* path cache を破棄
+
+### Σ-2.5 地形可視化（Σ-8-c で atlas lookup へ移行）
+- 旧 vertex color 段差ランプは Σ-8-c-1 で撤去、atlas lookup に置換
+- 地形メッシュ：100×57 タイルの per-tile 4 頂点独立（合計 22,800 頂点）
+- 各タイルに material 別 atlas cell の UV を割り当て（MAT_CELL マップ）
+- ramp タイルは方向別 atlas cell（rampN/E + UV 反転で 4 方向）
+- 崖（≥1 段差で ramp 接続なし）は別 InstancedMesh の壁面タイル（cliffWallIM、最大 2400 で動的拡張）
+- terraform ジョブには半透明色オーバーレイ + 橙の進捗リング（既存）
+- stability <0.5 = 橙パルス、<0.3 = 赤パルス（既存）
+- 旧 cliffLines 黒線は contour トグル ON 時のみ debug 用に表示
 
 ### Σ-3 3 地形 procedural 生成
 - `terrainSeed` を runId から派生、save に persist（v11→v12）
@@ -210,17 +232,11 @@ public/
 - `isSeaAt(x,y)` が `DRY_Y_LIMIT` を置換、既存コード（溺死判定/オオカミ/フラナ投げ）も移行済
 - `findDryTile` で spawn/feature/obstacle が海を回避
 
-### Σ-2.5 地形可視化
-- stage.ts に `terrainStaticLayer` + `terrainTransientLayer` 追加、material×elev ブライトネスで 5700 タイル描画（90f 再ベイク）
-- 隣接 elev 差 ≥15 の境界に黒線（崖ライン、cliff_fall 発火ラインの可視化）
-- stability <0.5 = 橙パルス 3Hz、<0.3 = 赤パルス 5Hz
-- terraform ジョブに半透明色オーバーレイ + 橙の進捗リング
-
-### Σ-4 Three.js 3D レンダラー（本流統合済み）
-- `src/render/stage3d.ts`（約 1060 行）が唯一のステージ実装。Pixi `stage.ts` は Σ-4-f で削除済み。
-- **座標系**：world(x,y) → Three.js(x, elev×5, y)。カメラは `(camX, h, camZ+h)` から `(camX, 0, camZ)` を向く fov=20° / 45° 俯瞰固定（回転封印）。
-- **地形**：100×57 タイル → 101×58 頂点 PlaneGeometry。頂点 elev は隣接 4 タイル平均で平滑化（`buildTerrainGeo`）。MeshToonMaterial + vertexColors + Toon gradientMap。
-- **elevAt() は bilinear**：メッシュ頂点と同じ平滑化式で標高を返す。タイル中心 elev をそのまま返すと埋もれ / 浮きが起きるため必須。
+### Σ-4 Three.js 3D レンダラー（本流統合済み、Σ-8-c で per-tile + atlas に進化）
+- `src/render/stage3d.ts`（約 2270 行）が唯一のステージ実装。Pixi `stage.ts` は Σ-4-f で削除済み。
+- **座標系**：world(x,y) → Three.js(x, elev×ELEV_SCALE=6, y)。カメラは `(camX, h, camZ+h)` から `(camX, 0, camZ)` を向く fov=20° / 45° 俯瞰固定（回転封印）。
+- **地形**：Σ-8-c で per-tile 独立頂点（4 頂点/タイル × 5700 = 22,800 頂点）。各タイルが独自 corner elev（ramp 加味）+ atlas UV を持つ。MeshToonMaterial + vertexColors（wetness/mud/snow tint）+ atlas map + Toon gradientMap。
+- **elevAt() は per-tile barycentric**：`terrain/query.ts elevAtTileSurface` を sim/render 共通利用。flat タイル = `tile.elev` 固定、ramp タイル = 対角線 NE-SW 三角形 barycentric。これでメッシュ表面と物理（A*/水流/cliff_fall）が完全一致。
 - **スプライト**：既存 9 ポーズ PNG を Y 軸ビルボード（PlaneGeometry、+Z 向き固定、左右反転で faceLeft）。floodFillAlpha で白背景除去。MeshBasicMaterial + 手動 color tint で夜間 / 天候に反応。
 - **オオカミ / 死体 / feature / obstacle** も全て sprite billboard。建物のみ BoxGeometry + ConeGeometry + Lv 表示 CanvasTexture。
 - **Raycaster picking**：pointerdown/contextmenu でスプライトメッシュに直接当てて HitTarget を返す。外れたら CPU hitFn フォールバック。ドラッグ位置（`screenToWorld`）も terrainMesh への raycast で高台でもずれない。
@@ -253,11 +269,27 @@ public/
 - 描画：`stage3d.ts` の waterShallow/Mid/Deep の 3 InstancedMesh、雨粒 LineSegments
 - 粗相ボコ機構（Σ-7-f）：'おしっこもらし'/'うんこもらし' flavor → 35% で bo_suki/ikusa/ココンが棒で殴る、10% で `rifujin_boko` 死
 
-### セーブ
-3 スロット、起動時にスタート画面で選択 or 新規 + 難度選択。**version 13**。
-保存対象：meta（runId/difficulty）、points、統計、buildings、features、obstacles、resources、weather、**terrain（RLE 圧縮、Σ-7 で waterLevel 細粒度化）**、**terrainSeed**、**terraformJobs**。
-**chibis / npcs は persist しない**（毎ロード再生成）。
-v12 セーブは waterLevel 0/10 binary を 0/1.0 として読み込む後方互換あり。
+### セーブ（**version 14** at Σ-8）
+3 スロット、起動時にスタート画面で選択 or 新規 + 難度選択。
+
+**persist する**：
+- meta（runId / runStartedAtMs / difficulty / nextId）
+- 進行（points / totalPointsEarned / totalDeaths / totalBirths / stompCount / timeSec / dex / villageRank）
+- 統計（recentDeaths / sumDeathAgeSec / longestLife / shortestLife / wolvesKilled）
+- 配置（buildings / features（transient flow/saturated 除外）/ obstacles）
+- 資源（food/wood/stone/plank/power/brick/wool/cloth/soil 等）
+- 気象（weather / weatherForecast / lastWeatherDayCount）
+- 地形（**terrain RLE**：elev 0-255 / material 5 種 / stability / waterLevel / **ramp/wetness/mud/snowCoverage/isSea** / terrainSeed / terraformJobs）
+
+**persist しない（ロード時に再生成）**：
+- **chibis / npcs / corpses / wolves / bubbles / floodZones**（仕様：使い捨て、ランの記憶は数値統計と地形に残す）
+- transient: terrainVersion / hydroTimer / 優先指示 Map（モジュール状態）
+
+**migration**：
+- v12 → v13: waterLevel 0/10 binary → 0-100 細粒度
+- v13 → v14: elev ×2.55 量子化（0-100 → 0-255）/ material 'water' → isSea+sand 変換 / ramp/wetness/mud/snow/sea を default 0 で追加
+
+詳細は `src/meta/save.ts` の冒頭コメント参照。
 
 ## コミット規約
 
@@ -432,6 +464,40 @@ https://claude.ai/code/session_XXXXXX
 **追加された FeatureKind 拡張**：`Feature.wateredByTile`（transient、HUD 用）
 **追加された死因**：`drown_pond`
 **追加された flavor**：`おしっこもらし` / `うんこもらし`（FLAVOR_TRAITS、MORASHI_FLAVORS Set）
+
+#### ✅ Σ-8 商業クオリティ地形システム（2026-04-27〜進行中、`claude/sigma-7-v2-main`）
+
+実装ステータスは **`docs/SIGMA-8-IMPLEMENTATION-STATUS.md`** を正本として参照。
+ここではフェーズ一覧のみ。
+
+| Phase | 内容 | 主な commit |
+|---|---|---|
+| Σ-8-a | データ構造拡張（TerrainMaterial 5種、RampDir、ELEV_STEP=25 / MAX_ELEV=255、wetness/mud/snowCoverage、isSea）+ save v14 + 時間 HUD + Toolbar 骨格 | d9e8819 |
+| Σ-8-b-1 | A* pathfinding（pathfinding.ts 新設、passCost / canRampConnect / weighted A*）+ chibi.pathPoints/Version/FailedSec | 966a142 |
+| Σ-8-b-1.5 | maybeRashLeap（崖飛び込み演出、cliff_fall に流す、9 trait 加算） | 59cef70 |
+| Σ-8-b-1.6 | NPC 通行ルール（フラナの巨人扱い撤回） + elevAt triangle barycentric | 69fdaf2 |
+| Σ-8-b-2 | ramp ブラシ + 描画（vertex elev に ramp 加味）+ 9 trait 反応セリフ | e86f974 |
+| Σ-8-b-3 | 崖 InstancedMesh 壁面（旧 cliffLines は debug 専用） | f693ce6 |
+| Σ-8-c-1 | atlas lookup terrain shader（per-tile geometry + material UV per cell） | 38b0e2d |
+| Σ-8-c-1.5 | per-tile elevAt（flat=tile.elev / ramp=barycentric）+ polygonOffset で chibi 埋もれ解消 | 210402d |
+| Σ-8-c-2 | ramp 専用 cell（rampN/E + UV 反転 4 方向）+ wetness/mud/snow vertex color tint | 9adce35 |
+| Σ-8-d-1 | flatten / smooth ブラシ + 4 種×9 trait セリフ拡充 | 41103fb |
+| Σ-8-d-2 | channel ブラシ + water tile atlas overlay | 5c02738 |
+| Σ-8-e | preview ghost（hover でタイル強調 + valid/invalid 色分け） | 5a6e039 |
+| Σ-8-f | drag paint（pointerdown→up で連続編集、applyEditAtTile 統合） | 7b58132 |
+| Σ-8-g / g.2 | undo/redo（タイル編集系 / raise/lower ジョブ取消、tagged union） | 5f2f321 / e0af8d9 |
+| Σ-8-fix | Codex P1×3 一括修正（A* maxNodes=ROWS*COLS+weighted、terrainVersion 即時再ルート、sim/render 共通 elevAt、pointer capture / MAX_UNDO 50 / 空 undo skip / cliff 動的増枠） | 6aca59d |
+| Σ-8-fix-5 | rollbackPreEdit edge case（rememberPreEdit boolean 戻し値、added のみ rollback） | 1cfd314 |
+| Σ-8-fix-6/7 | waterLevel 0.35 閾値跨ぎで terrainVersion++ + 編集モード中 camera pan 抑止 | 7b7c9cf |
+| Σ-8-fix-8 | timeSec ベース優先指示 + scripts/test.ts 25/25 PASS + セーブ仕様明確化 | 6e4e7e9 |
+
+**追加された型 / API**：
+- `RampDir = 'N'|'S'|'E'|'W'`、`TerrainTile.{ramp, wetness, mud, snowCoverage, isSea}`
+- `pathfinding.ts`：`findPath / passCost / canRampConnect / TilePoint`
+- `world.ts`：`setRampOnTile / clearRampOnTile / flattenTile / smoothTile / channelTile / cancelTerraformJob / enqueueTerraformRaiseAndGetId / enqueueTerraformLowerAndGetId / snapElev / terrainVersion`
+- `terrain/query.ts`：`elevAtTileSurface`（sim/render 共通）
+
+**残タスク（M3 推奨）**：world.ts/main.ts/stage3d.ts の domain 分割、seed RNG、ramp 工事ジョブ化、props（10 種）+ 工事ポーズ（6 種）の発注 → 統合、preview elev 差テキスト、path 失敗赤 X marker。詳細は `docs/SIGMA-8-IMPLEMENTATION-STATUS.md`。
 
 ### ロードマップ v2（地形・3D 化）【Σ-5 〜 Σ-7 まで完了】
 
