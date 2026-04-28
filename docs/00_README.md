@@ -18,6 +18,7 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 |---|---|---|
 | `../CLAUDE.md` | プロジェクト全体ガイド、最優先正本 | 新セッション必読 |
 | `M2-DIRECTION-RESET.md` | **M2.1 以降の設計方針**（旧要素整理 / 建設統合 / NPC整理） | 実装方針確認時 |
+| `M2-MIGRATION-PLAN.md` | **M2.1 実装ステップ計画**（7 段階 + grep 調査済 + 検証チェック） | M2.1 コード変更前 |
 | `SIGMA-8-IMPLEMENTATION-STATUS.md` | **実装側の事実**（Done / Gap / Deferred） | 実装着手前 |
 | `SIGMA-8-DEVELOPMENT-SPEC.md` | **目標仕様**（型 / 通行ルール / 描画 / ブラシ）| 実装中の判断基準 |
 | `SIGMA-8-PLAN.md` | M2 ロードマップと判断記録 | 全体方針確認時 |
@@ -63,6 +64,7 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `SIGMA-8-IMPLEMENTATION-STATUS.md` | Sigma-8 の Done / Gap / Deferred 一覧 | Sigma-8 実装着手前 |
 | `SIGMA-8-UI-ASSET-SPEC.md` | Sigma-8 の UI / terrain atlas / prop / icon 仕様 | UI・素材実装/発注時 |
 | `M2-DIRECTION-RESET.md` | M2.1 以降の設計方針。旧 points 建設 / 旧 NPC / 音頭の整理 | 次フェーズ設計時 |
+| `M2-MIGRATION-PLAN.md` | M2.1 実装ステップ計画。7 段階に分解、grep 調査済 | M2.1 コード変更前 |
 | `DIALOGUE-CATALOG.md` | セリフ、死因テンプレート、発言プールの棚卸し | 台詞・死因整理時 |
 | `SCRIPT-CATALOG.md` | npm scripts、sim、test、asset/docs 関連コマンド一覧 | 作業前後 |
 

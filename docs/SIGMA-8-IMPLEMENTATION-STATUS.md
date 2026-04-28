@@ -109,7 +109,7 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 
 ### Gap-0: M2.1 方針リセットの反映
 
-詳細: `docs/M2-DIRECTION-RESET.md`
+詳細: `docs/M2-DIRECTION-RESET.md`（方針）+ `docs/M2-MIGRATION-PLAN.md`（実装ステップ計画）
 
 | 項目 | 現状 | 方針 |
 |---|---|---|
@@ -122,7 +122,23 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 | 海表示 | 全面 sea plane + sand 海底 | `isSea` タイル単位の水面表示へ寄せる |
 | セリフ | 複数ファイルに分散、旧 NPC/音頭依存あり | `DIALOGUE-CATALOG.md` を使って棚卸し |
 
-優先度: **最高**。次の大きな実装前に設計方針として固定済み。コード反映は段階的に行う。
+優先度: **最高**。次の大きな実装前に設計方針として固定済み。
+
+実装ステップは `M2-MIGRATION-PLAN.md` の 7 ステップに分解（grep 調査済み）：
+
+1. セリフ legacy フラグ化（破壊リスク低）
+2. 旧 NPC 移動・更新の停止
+3. 音頭イベントの停止
+4. 旧 BUILDINGS の縮小（4.1 UI / 4.2 効果計算 / 4.3 ハザード / 4.4 セーブ migration）
+5. フラナ通行ルール強化
+6. カメラ角度プリセット
+7. 海表示 / 高さスケール検証（別 branch）
+
+**現状のコード依存スコープ**（grep 調査済、`M2-MIGRATION-PLAN.md §0` 参照）：
+- 旧 BUILDINGS: 34 箇所
+- 旧 NPC（suzu/cocoon/lou）: 79 箇所
+- ondo / 音頭 / taiko: 94 箇所
+- 旧建物個別 ID: 17 箇所
 
 ### Gap-1: ramp 工事ジョブ化
 - 現状: `setRampOnTile` 即時設置
