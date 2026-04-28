@@ -7,12 +7,12 @@ import {
   damageNpc,
   damageWolf,
   ensurePlots,
-  setRampOnTile,
   flattenTile,
   smoothTile,
   channelTile,
   enqueueTerraformRaiseAndGetId,
   enqueueTerraformLowerAndGetId,
+  enqueueRampJobAndGetId,
   cancelTerraformJob,
   forceSpawn,
   launchFlight,
@@ -998,7 +998,8 @@ async function start() {
     snowCoverage: number;
   };
   type UndoGroupTiles = { kind: 'tiles'; snapshots: TileSnapshot[]; description: string };
-  type JobRedoEntry = { target: 'raise' | 'lower'; tx: number; ty: number };
+  // Σ-8-h: ramp ジョブも target に含めるため target 拡張、dir? も保持。
+  type JobRedoEntry = { target: 'raise' | 'lower' | 'ramp'; tx: number; ty: number; dir?: 'N'|'S'|'E'|'W' };
   type UndoGroupJobs = { kind: 'jobs'; jobIds: string[]; description: string };
   type UndoGroupJobsCancelled = { kind: 'jobs-cancelled'; entries: JobRedoEntry[]; description: string };
   type UndoGroup = UndoGroupTiles | UndoGroupJobs | UndoGroupJobsCancelled;
@@ -1103,9 +1104,13 @@ async function start() {
       // jobs-cancelled: 元のジョブを再 enqueue
       const newIds: string[] = [];
       for (const e of g.entries) {
-        const id = e.target === 'raise'
-          ? enqueueTerraformRaiseAndGetId(world, e.tx, e.ty)
-          : enqueueTerraformLowerAndGetId(world, e.tx, e.ty);
+        let id: string | null = null;
+        if (e.target === 'raise') id = enqueueTerraformRaiseAndGetId(world, e.tx, e.ty);
+        else if (e.target === 'lower') id = enqueueTerraformLowerAndGetId(world, e.tx, e.ty);
+        else if (e.target === 'ramp' && e.dir) {
+          const { jobId } = enqueueRampJobAndGetId(world, e.tx, e.ty, e.dir);
+          id = jobId;
+        }
         if (id) newIds.push(id);
       }
       redoStack.push({ kind: 'jobs', jobIds: newIds, description: g.description });
@@ -1137,9 +1142,13 @@ async function start() {
     } else {
       const newIds: string[] = [];
       for (const e of g.entries) {
-        const id = e.target === 'raise'
-          ? enqueueTerraformRaiseAndGetId(world, e.tx, e.ty)
-          : enqueueTerraformLowerAndGetId(world, e.tx, e.ty);
+        let id: string | null = null;
+        if (e.target === 'raise') id = enqueueTerraformRaiseAndGetId(world, e.tx, e.ty);
+        else if (e.target === 'lower') id = enqueueTerraformLowerAndGetId(world, e.tx, e.ty);
+        else if (e.target === 'ramp' && e.dir) {
+          const { jobId } = enqueueRampJobAndGetId(world, e.tx, e.ty, e.dir);
+          id = jobId;
+        }
         if (id) newIds.push(id);
       }
       undoStack.push({ kind: 'jobs', jobIds: newIds, description: g.description });
@@ -1230,13 +1239,13 @@ async function start() {
     if (s8EditMode === 'ramp' && isFirstTile) {
       const dirSel = document.getElementById('s8-ramp-dir') as HTMLSelectElement | null;
       const dir = (dirSel?.value ?? 'N') as 'N' | 'S' | 'E' | 'W';
-      const added = rememberPreEdit(tx, ty);
-      const r = setRampOnTile(world, tx, ty, dir);
+      // Σ-8-h: 即時設置から労働ジョブ化へ。妥当性チェックは API 側で行う。
+      const { result: r, jobId } = enqueueRampJobAndGetId(world, tx, ty, dir);
       if (r === 'ok') {
-        flashToast(`坂道化 [${tx},${ty}] → ${dir}`, 'info');
+        if (jobId) rememberJobId(jobId);
+        flashToast(`坂道化 ジョブ [${tx},${ty}] → ${dir}（ちびわふが工事するわふ）`, 'info');
         announceRampPlaced(world, tx, ty);
       } else {
-        if (added) rollbackPreEdit(tx, ty);
         if (r === 'no-step')              flashToast('高さ差がないわふ（隣との段差が必要）', 'info');
         else if (r === 'wrong-direction') flashToast('方向を逆にしてわふ（低い側にだけ坂道化できる）', 'info');
         else if (r === 'too-steep')       flashToast('段差が大きすぎるわふ（高さ差 1 段だけ）', 'info');
@@ -1269,13 +1278,13 @@ async function start() {
     // Σ-8-fix-4: pointer capture でカーソルが canvas 外へ抜けても pointermove/up を受け取る。
     // これで edit group の閉じ忘れ（次の pointermove まで undo group が開きっぱなし）を防ぐ。
     try { stage.canvas.setPointerCapture(e.pointerId); } catch (_e) { /* unsupported */ }
-    // Σ-8-g: undo group を開始。タイル編集系は 'tiles'、raise/lower は 'jobs'。
-    if (s8EditMode === 'flatten' || s8EditMode === 'smooth' ||
-        s8EditMode === 'channel' || s8EditMode === 'ramp') {
-      const desc = ({
-        flatten: '平坦', smooth: '整地', channel: '水路', ramp: '坂道',
-      } as const)[s8EditMode] ?? s8EditMode;
+    // Σ-8-g / Σ-8-h: undo group を開始。タイル即時編集系（flatten/smooth/channel）は
+    // 'tiles'、ジョブ系（raise/lower/ramp）は 'jobs'。ramp は Σ-8-h で job 化された。
+    if (s8EditMode === 'flatten' || s8EditMode === 'smooth' || s8EditMode === 'channel') {
+      const desc = ({ flatten: '平坦', smooth: '整地', channel: '水路' } as const)[s8EditMode];
       beginEditGroupTiles(desc);
+    } else if (s8EditMode === 'ramp') {
+      beginEditGroupJobs('坂道');
     } else if (terraformMode === 'raise' || terraformMode === 'lower') {
       const desc = terraformMode === 'raise' ? '盛り土' : '切り土';
       beginEditGroupJobs(desc);

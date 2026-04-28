@@ -1077,7 +1077,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // 前フレームのジョブ {id → {target, progress}} を保持。
   // 削除されたジョブは「完了」と「再クリックでの置き換え」が区別つかないので、
   // 最後の progress >= 0.95 だったものだけを完了通知する。
-  const tfPrevJobIds = new Map<string, { target: 'raise' | 'lower'; progress: number }>();
+  const tfPrevJobIds = new Map<string, { target: 'raise' | 'lower' | 'ramp'; progress: number }>();
 
   // --- Σ-5-e-c: 建設進捗オーバーレイ ---
   const cnOverlay = document.createElement('div');

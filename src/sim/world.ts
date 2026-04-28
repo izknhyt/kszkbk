@@ -1215,23 +1215,27 @@ export function enqueueTerraformLowerAndGetId(w: WorldState, tx: number, ty: num
 
 // Σ-8-g: 任意のジョブを取り消す。raise なら soil を refund、進捗は破棄。
 // 戻り値: 取り消したジョブの位置情報（redo 用）か null。
-export function cancelTerraformJob(w: WorldState, jobId: string): { target: 'raise' | 'lower'; tx: number; ty: number } | null {
+export function cancelTerraformJob(w: WorldState, jobId: string): { target: 'raise' | 'lower' | 'ramp'; tx: number; ty: number; dir?: RampDir } | null {
   const idx = w.terraformJobs.findIndex((j) => j.id === jobId);
   if (idx < 0) return null;
   const j = w.terraformJobs[idx]!;
   if (j.target === 'raise') {
     w.resources.soil += RAISE_COST_SOIL;
   }
+  // ramp は cost なし、refund 不要
   terraformPriorityExpire.delete(j.id);
   w.terraformJobs.splice(idx, 1);
-  return { target: j.target, tx: j.tx, ty: j.ty };
+  return { target: j.target, tx: j.tx, ty: j.ty, dir: j.dir };
 }
 
 // =========================================================================
-// Σ-8-b-2 ramp 設置 API
+// Σ-8-b-2 / Σ-8-h ramp 工事ジョブ
 // 仕様: 対象タイル（低い側）と方向の隣接タイル（高い側）の elev 差が
 // ELEV_STEP (25) ちょうど のときだけ成立。それ以外は失敗理由を返す。
-// 成功で terrainVersion++ して chibi の path を再計算させる。
+// Σ-8-h: 即時設置（setRampOnTile）から労働ジョブ化へ。
+//        妥当性チェックを通った ramp は terraformJobs に target='ramp' で
+//        積まれ、ちびわふが近傍で労働して progress を進める。完了時に
+//        tile.ramp = dir + terrainVersion++。
 // =========================================================================
 export type RampSetResult =
   | 'ok'
@@ -1241,7 +1245,8 @@ export type RampSetResult =
   | 'wrong-direction'   // 隣接が低い（自分が高い側）
   | 'too-steep';        // 隣接との高低差が 2 段以上
 
-export function setRampOnTile(w: WorldState, tx: number, ty: number, dir: RampDir): RampSetResult {
+// 妥当性のみチェック（既存挙動の互換用、テスト用）。設置はジョブ経由が推奨。
+function validateRampPlacement(w: WorldState, tx: number, ty: number, dir: RampDir): RampSetResult {
   const t = getTile(w.terrain, tx, ty);
   if (!t) return 'out-of-bounds';
   if (t.isSea) return 'is-sea';
@@ -1254,12 +1259,45 @@ export function setRampOnTile(w: WorldState, tx: number, ty: number, dir: RampDi
   if (!neighbor) return 'out-of-bounds';
   const diff = neighbor.elev - t.elev;
   if (diff === 0) return 'no-step';
-  if (diff < 0) return 'wrong-direction';   // 設置タイルが高い側になっている
-  if (diff > ELEV_STEP) return 'too-steep'; // 2 段差以上は不可
-  // ok
+  if (diff < 0) return 'wrong-direction';
+  if (diff > ELEV_STEP) return 'too-steep';
+  return 'ok';
+}
+
+// 即時設置（旧仕様、後方互換のため残す。新規 UI からは使わない）
+export function setRampOnTile(w: WorldState, tx: number, ty: number, dir: RampDir): RampSetResult {
+  const r = validateRampPlacement(w, tx, ty, dir);
+  if (r !== 'ok') return r;
+  const t = getTile(w.terrain, tx, ty)!;
   t.ramp = dir;
   w.terrainVersion++;
   return 'ok';
+}
+
+// Σ-8-h: ramp 工事ジョブをキューに追加。妥当性 NG なら設置失敗理由を返す。
+// 同タイルへ重複ジョブが既にあれば古いほうは捨てる。
+export function enqueueRampJob(w: WorldState, tx: number, ty: number, dir: RampDir): RampSetResult {
+  const r = validateRampPlacement(w, tx, ty, dir);
+  if (r !== 'ok') return r;
+  const existing = w.terraformJobs.findIndex((j) => j.tx === tx && j.ty === ty);
+  if (existing >= 0) {
+    if (w.terraformJobs[existing]!.target === 'raise') {
+      w.resources.soil += RAISE_COST_SOIL;
+    }
+    terraformPriorityExpire.delete(w.terraformJobs[existing]!.id);
+    w.terraformJobs.splice(existing, 1);
+  }
+  const jobId = `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  w.terraformJobs.push({ id: jobId, tx, ty, target: 'ramp', progress: 0, dir });
+  markTerraformPriority(w, jobId, 300);
+  return 'ok';
+}
+
+export function enqueueRampJobAndGetId(w: WorldState, tx: number, ty: number, dir: RampDir): { result: RampSetResult; jobId: string | null } {
+  const r = enqueueRampJob(w, tx, ty, dir);
+  if (r !== 'ok') return { result: r, jobId: null };
+  const last = w.terraformJobs[w.terraformJobs.length - 1];
+  return { result: 'ok', jobId: last ? last.id : null };
 }
 
 export function clearRampOnTile(w: WorldState, tx: number, ty: number): boolean {
@@ -1515,16 +1553,25 @@ export function updateTerraformJobs(w: WorldState, dt: number): void {
     if (job.progress >= 1.0) {
       if (job.target === 'raise') {
         raiseTile(w.terrain, job.tx, job.ty, RAISE_ELEV_AMOUNT);
-      } else {
+      } else if (job.target === 'lower') {
         const tile = getTile(w.terrain, job.tx, job.ty);
         if (tile) {
           w.resources.soil += LOWER_SOIL_GAIN;
           if (tile.material === 'rock') w.resources.stone += LOWER_STONE_GAIN;
         }
         lowerTile(w.terrain, job.tx, job.ty, RAISE_ELEV_AMOUNT);
+      } else if (job.target === 'ramp' && job.dir) {
+        // Σ-8-h: ramp 工事完了 → 妥当性が今でも成立してるか確認（地形変動で崩れていないか）
+        const r = validateRampPlacement(w, job.tx, job.ty, job.dir);
+        if (r === 'ok') {
+          const tile = getTile(w.terrain, job.tx, job.ty)!;
+          tile.ramp = job.dir;
+        }
+        // 妥当性 NG ならジョブだけ削除（無音）
       }
       // Σ-8-b: 地形が変わったので path cache を破棄（chibi 全員が再計算）
       w.terrainVersion++;
+      terraformPriorityExpire.delete(job.id);
       w.terraformJobs.splice(i, 1);
     }
   }

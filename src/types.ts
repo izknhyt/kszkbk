@@ -115,12 +115,15 @@ export interface TerrainTile {
 }
 
 // プレイヤーが発行し、ちびわふが近傍で労働して進める地形編集ジョブ
+// Σ-8-h: target に 'ramp' を追加（dir 必須）。ramp 工事はちびわふの労働で完了させる
+//        即時設置から労働ジョブ化への移行。
 export interface TerraformJob {
   id: string;
   tx: number;    // タイルX インデックス
   ty: number;    // タイルY インデックス
-  target: 'raise' | 'lower';
+  target: 'raise' | 'lower' | 'ramp';
   progress: number;  // 0-1.0
+  dir?: RampDir;  // target='ramp' のみ使用
 }
 
 export type DeathCauseId =
