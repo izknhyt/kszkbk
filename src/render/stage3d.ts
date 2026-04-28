@@ -252,8 +252,32 @@ const MAT_CELL: Record<string, [number, number]> = {
   snow:  [0, 1],
 };
 const CLIFF_CELL: [number, number] = [1, 1];
-// reserved for Σ-8-c-2:
-//   rampN: [2, 1], rampE: [3, 1]
+const RAMP_NS_CELL: [number, number] = [2, 1];  // 'N' そのまま / 'S' は上下反転
+const RAMP_EW_CELL: [number, number] = [3, 1];  // 'E' そのまま / 'W' は左右反転
+
+// ramp 方向 + コーナーごとに、atlas 上の UV 座標 (u, v) を返す。
+function rampCornerUV(rampDir: 'N'|'S'|'E'|'W', corner: 'NW'|'NE'|'SW'|'SE'): { u: number; v: number } {
+  const cell = (rampDir === 'N' || rampDir === 'S') ? RAMP_NS_CELL : RAMP_EW_CELL;
+  const b = atlasUVBounds(cell[0], cell[1]);
+  // corner ごとの素の UV（cell 上の論理位置）
+  // NW=(uMin,vMax), NE=(uMax,vMax), SW=(uMin,vMin), SE=(uMax,vMin)
+  let u: number, v: number;
+  switch (corner) {
+    case 'NW': u = b.uMin; v = b.vMax; break;
+    case 'NE': u = b.uMax; v = b.vMax; break;
+    case 'SW': u = b.uMin; v = b.vMin; break;
+    case 'SE': u = b.uMax; v = b.vMin; break;
+  }
+  // 方向別の反転：S は上下反転、W は左右反転
+  if (rampDir === 'S') {
+    // 上下入替：vMax ↔ vMin
+    v = (v === b.vMax) ? b.vMin : b.vMax;
+  } else if (rampDir === 'W') {
+    u = (u === b.uMax) ? b.uMin : b.uMax;
+  }
+  return { u, v };
+}
+// 予約 (Σ-8-c-2 の overlay InstancedMesh で使用):
 //   waterOv: [0, 2], mudOv: [1, 2], snowOv: [2, 2], wetOv: [3, 2]
 
 // Σ-8-b-2 ramp 対応: タイル (c, r) の指定コーナー (NW/NE/SW/SE) における
@@ -351,23 +375,54 @@ function fillTerrainAttrs(
       pos[(baseV+1)*3] = xR; pos[(baseV+1)*3+1] = eNE; pos[(baseV+1)*3+2] = zN;
       pos[(baseV+2)*3] = xL; pos[(baseV+2)*3+1] = eSW; pos[(baseV+2)*3+2] = zS;
       pos[(baseV+3)*3] = xR; pos[(baseV+3)*3+1] = eSE; pos[(baseV+3)*3+2] = zS;
-      // UV: material 別 atlas cell。ramp タイルは現状 material のまま（Σ-8-c-2 で rampN/E に切替）。
-      const cell = MAT_CELL[tile.material] ?? MAT_CELL['grass']!;
-      const uvB = atlasUVBounds(cell[0], cell[1]);
-      uv[(baseV+0)*2] = uvB.uMin; uv[(baseV+0)*2+1] = uvB.vMax;
-      uv[(baseV+1)*2] = uvB.uMax; uv[(baseV+1)*2+1] = uvB.vMax;
-      uv[(baseV+2)*2] = uvB.uMin; uv[(baseV+2)*2+1] = uvB.vMin;
-      uv[(baseV+3)*2] = uvB.uMax; uv[(baseV+3)*2+1] = uvB.vMin;
-      // tint: vertex color。atlas が貼られたら multiply されるので白が基準。
-      // ramp タイルは「土の道」気味に少し暖色化、cliff 隣接で陰る箇所は既存 vertex_color に依らず
-      // atlas のまま見せる（光源で陰影が出る）。
-      const tintR = tile.ramp ? 1.05 : 1.0;
-      const tintG = tile.ramp ? 0.95 : 1.0;
-      const tintB = tile.ramp ? 0.85 : 1.0;
+      // UV: ramp タイルは方向別の ramp cell、それ以外は material 別 atlas cell
+      if (tile.ramp) {
+        const uvNW = rampCornerUV(tile.ramp, 'NW');
+        const uvNE = rampCornerUV(tile.ramp, 'NE');
+        const uvSW = rampCornerUV(tile.ramp, 'SW');
+        const uvSE = rampCornerUV(tile.ramp, 'SE');
+        uv[(baseV+0)*2] = uvNW.u; uv[(baseV+0)*2+1] = uvNW.v;
+        uv[(baseV+1)*2] = uvNE.u; uv[(baseV+1)*2+1] = uvNE.v;
+        uv[(baseV+2)*2] = uvSW.u; uv[(baseV+2)*2+1] = uvSW.v;
+        uv[(baseV+3)*2] = uvSE.u; uv[(baseV+3)*2+1] = uvSE.v;
+      } else {
+        const cell = MAT_CELL[tile.material] ?? MAT_CELL['grass']!;
+        const uvB = atlasUVBounds(cell[0], cell[1]);
+        uv[(baseV+0)*2] = uvB.uMin; uv[(baseV+0)*2+1] = uvB.vMax;
+        uv[(baseV+1)*2] = uvB.uMax; uv[(baseV+1)*2+1] = uvB.vMax;
+        uv[(baseV+2)*2] = uvB.uMin; uv[(baseV+2)*2+1] = uvB.vMin;
+        uv[(baseV+3)*2] = uvB.uMax; uv[(baseV+3)*2+1] = uvB.vMin;
+      }
+      // Σ-8-c-2: vertex color tint で wetness / mud / snowCoverage を表現。
+      // atlas は multiply で重なるので白(1,1,1)が基準、tint で暗化/茶/白を blend する。
+      let tR = 1.0, tG = 1.0, tB = 1.0;
+      // 1) wetness：暗化 + 軽い青寄せ
+      const wet = Math.min(1, Math.max(0, tile.wetness ?? 0));
+      if (wet > 0.05) {
+        tR -= wet * 0.20;
+        tG -= wet * 0.15;
+        tB -= wet * 0.05;
+      }
+      // 2) mud：茶色側へ blend（強度 0.6 maxの multiply 風）
+      const mud = Math.min(1, Math.max(0, tile.mud ?? 0));
+      if (mud > 0.05) {
+        const w = mud * 0.6;
+        tR = tR * (1 - w) + 0.50 * w;
+        tG = tG * (1 - w) + 0.34 * w;
+        tB = tB * (1 - w) + 0.18 * w;
+      }
+      // 3) snowCoverage：白側へ blend（下地が少し残るよう 0.7 max）
+      const snow = Math.min(1, Math.max(0, tile.snowCoverage ?? 0));
+      if (snow > 0.05) {
+        const w = snow * 0.7;
+        tR = tR * (1 - w) + 1.00 * w;
+        tG = tG * (1 - w) + 1.00 * w;
+        tB = tB * (1 - w) + 0.98 * w;
+      }
       for (let k = 0; k < 4; k++) {
-        col[(baseV+k)*3]   = tintR;
-        col[(baseV+k)*3+1] = tintG;
-        col[(baseV+k)*3+2] = tintB;
+        col[(baseV+k)*3]   = tR;
+        col[(baseV+k)*3+1] = tG;
+        col[(baseV+k)*3+2] = tB;
       }
       // indices: 2 triangles. 対角線 NE-SW で分割
       idx[baseI+0] = baseV + 0;  // NW
