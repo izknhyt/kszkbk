@@ -38,6 +38,9 @@ export interface StageHandle {
   setHoverTile: (tx: number | null, ty: number | null, color?: number) => void;
   // Σ-8-fix-7: 編集モード中の camera pan 抑止（target を持たない pointerdown を無視）
   setPanEnabled: (enabled: boolean) => void;
+  // M2.1 Step 6: カメラ角度プリセット切替（low / standard / top）
+  setCameraPreset: (preset: 'low' | 'standard' | 'top') => void;
+  getCameraPreset: () => 'low' | 'standard' | 'top';
 }
 
 // ============================================================
@@ -1160,14 +1163,27 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   let camZ = CONFIG.WORLD_H*0.35;
   let zoom = 0.6;
 
+  // M2.1 Step 6: カメラ角度プリセット（低め / 標準 / 真上寄り）。
+  // 自由回転は禁止（Y 軸ビルボード前提が崩れる）が、用途別の俯瞰角度を切替えられる。
+  // pitchYZ: lookAt 地点から Z 方向への後退距離 / 高さ の比率
+  // heightMul: camH() に対する高さスケール
+  type CamPreset = 'low' | 'standard' | 'top';
+  const CAM_PRESETS: Record<CamPreset, { pitchYZ: number; heightMul: number; label: string }> = {
+    low:      { pitchYZ: 1.5,  heightMul: 0.85, label: '低め（建物/崖確認）' },
+    standard: { pitchYZ: 1.0,  heightMul: 1.0,  label: '標準（45°俯瞰）' },
+    top:      { pitchYZ: 0.35, heightMul: 1.2,  label: '真上寄り（地形編集）' },
+  };
+  let camPreset: CamPreset = 'standard';
+
   const groundPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
   const rc = new THREE.Raycaster();
 
   function camH(){ return BASE_H/zoom; }
 
   function applyCamera(){
-    const h = camH();
-    camera.position.set(camX, h, camZ+h);
+    const preset = CAM_PRESETS[camPreset];
+    const h = camH() * preset.heightMul;
+    camera.position.set(camX, h, camZ + h * preset.pitchYZ);
     camera.lookAt(camX, 0, camZ);
   }
   applyCamera();
@@ -2253,6 +2269,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     setHitTest: (fn)=>{ hitFn=fn; },
     setContourVisible: (visible: boolean)=>{ contourVisible = visible; if (contourLines) contourLines.visible = visible; },
     setPanEnabled,
+    setCameraPreset: (preset) => { camPreset = preset; applyCamera(); },
+    getCameraPreset: () => camPreset,
     setHoverTile: (tx, ty, color)=>{
       if (tx === null || ty === null) {
         _hoverActive = false;

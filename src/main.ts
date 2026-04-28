@@ -892,9 +892,22 @@ async function start() {
       '5': 'ramp',  '6': 'channel', '7': 'build',
     };
     const tool = map[ev.key];
-    if (!tool) return;
-    const btn = document.querySelector<HTMLButtonElement>(`.s8-tool[data-s8tool="${tool}"]`);
-    btn?.click();
+    if (tool) {
+      const btn = document.querySelector<HTMLButtonElement>(`.s8-tool[data-s8tool="${tool}"]`);
+      btn?.click();
+      return;
+    }
+    // M2.1 Step 6: V キーでカメラ角度プリセットを循環（low → standard → top → low）
+    if (ev.key === 'v' || ev.key === 'V') {
+      const order: Array<'low' | 'standard' | 'top'> = ['low', 'standard', 'top'];
+      const cur = stage.getCameraPreset();
+      const idx = order.indexOf(cur);
+      const next = order[(idx + 1) % order.length]!;
+      stage.setCameraPreset(next);
+      const labels = { low: '低め', standard: '標準', top: '真上寄り' };
+      flashToast(`📷 カメラ：${labels[next]}`, 'info');
+      return;
+    }
   });
 
   // ========= Σ-8-e: Preview ghost（hover でタイル強調）====================
