@@ -3972,7 +3972,7 @@ function updateNpcs(w: WorldState, dt: number) {
 // 機嫌悪い時は近くのちびわふに向かって積極的に突進する。
 function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
   // 機嫌悪い時は速度 1.6 倍（怒りの突進）
-  const currentSpeed = n.mood < 35 ? n.speed * 1.6 : n.speed;
+  let currentSpeed = n.mood < 35 ? n.speed * 1.6 : n.speed;
   // 目的地に近づいてきたら到着扱い
   if (n.target && distance(n.pos, n.target) < 6) {
     n.target = null;
@@ -3989,6 +3989,36 @@ function updateFuranaMovement(w: WorldState, n: NpcState, dt: number) {
     const dx = n.target.x - n.pos.x;
     const dy = n.target.y - n.pos.y;
     const d = Math.max(0.001, Math.hypot(dx, dy));
+    // M2.1 Step 5: フラナは「ちびわふより少し段差に強い」。
+    //   1 段差 (= ELEV_STEP) を ramp なしでも越えられる、ただし cost 高め。
+    //   実装: 移動先タイル elev が 1 段差で ramp 不接続なら速度 0.6x（重く歩く）。
+    //   2 段差以上は npcCanStepTo で reject されるため自動で諦める。
+    const fromTx = Math.max(0, Math.min(TERRAIN_COLS - 1, Math.floor(n.pos.x / TERRAIN_TILE_SIZE)));
+    const fromTy = Math.max(0, Math.min(TERRAIN_ROWS - 1, Math.floor(n.pos.y / TERRAIN_TILE_SIZE)));
+    const peekX = n.pos.x + (dx / d) * 6;
+    const peekY = n.pos.y + (dy / d) * 6;
+    const toTx = Math.max(0, Math.min(TERRAIN_COLS - 1, Math.floor(peekX / TERRAIN_TILE_SIZE)));
+    const toTy = Math.max(0, Math.min(TERRAIN_ROWS - 1, Math.floor(peekY / TERRAIN_TILE_SIZE)));
+    if (fromTx !== toTx || fromTy !== toTy) {
+      const fromTile = w.terrain[fromTy]?.[fromTx];
+      const toTile = w.terrain[toTy]?.[toTx];
+      if (fromTile && toTile) {
+        const elevDiff = Math.abs(toTile.elev - fromTile.elev);
+        if (elevDiff === ELEV_STEP) {
+          // ramp 接続判定（低い側が境界方向を指していれば接続）
+          const fromLower = fromTile.elev < toTile.elev;
+          const lower = fromLower ? fromTile : toTile;
+          const ddx = (fromLower ? toTx : fromTx) - (fromLower ? fromTx : toTx);
+          const ddy = (fromLower ? toTy : fromTy) - (fromLower ? fromTy : toTy);
+          let rampOk = false;
+          if (lower.ramp === 'N' && ddx === 0 && ddy === -1) rampOk = true;
+          else if (lower.ramp === 'S' && ddx === 0 && ddy === 1) rampOk = true;
+          else if (lower.ramp === 'E' && ddx === 1 && ddy === 0) rampOk = true;
+          else if (lower.ramp === 'W' && ddx === -1 && ddy === 0) rampOk = true;
+          if (!rampOk) currentSpeed *= 0.6;  // 1 段差を踏破中は重く歩く
+        }
+      }
+    }
     const stepX = (dx / d) * currentSpeed * dt;
     const stepY = (dy / d) * currentSpeed * dt;
     const newX = n.pos.x + stepX;
