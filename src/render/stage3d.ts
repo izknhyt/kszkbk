@@ -34,6 +34,8 @@ export interface StageHandle {
   screenToWorld: (cx: number, cy: number) => { x: number; y: number };
   setHitTest: (fn: (wx: number, wy: number) => HitTarget | null) => void;
   setContourVisible: (visible: boolean) => void;
+  // Σ-8-e: hover preview ghost。tx/ty=null で消す、color は CSS hex。
+  setHoverTile: (tx: number | null, ty: number | null, color?: number) => void;
 }
 
 // ============================================================
@@ -935,6 +937,24 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   cliffWallIM.receiveShadow = false;
   cliffWallIM.renderOrder = 0;  // ビルボード (default 0) より先に描く
   scene.add(cliffWallIM);
+
+  // ==========================================================
+  // Σ-8-e Preview ghost（hover でタイル強調）
+  // タイルクリックする前に「ここを編集する」を見せる半透明オーバーレイ。
+  // ブラシによって色を変える（緑=valid / 赤=invalid 等）。
+  // ==========================================================
+  const _hoverGeo = new THREE.PlaneGeometry(TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE);
+  _hoverGeo.rotateX(-Math.PI / 2);
+  const hoverMesh = new THREE.Mesh(_hoverGeo, new THREE.MeshBasicMaterial({
+    color: 0x7fcf6b, transparent: true, opacity: 0.42, depthWrite: false,
+    side: THREE.DoubleSide,
+  }));
+  hoverMesh.visible = false;
+  hoverMesh.renderOrder = 3;  // ビルボード(2) より更に手前で見せる
+  scene.add(hoverMesh);
+  // _hoverState: 現在ホバーしているタイル + 色（draw で elev に追従させる）
+  const _hoverState: { tx: number; ty: number; color: number } | null = { tx: 0, ty: 0, color: 0x7fcf6b };
+  let _hoverActive = false;
 
   // --- Σ-8-c atlas テクスチャ ---
   // 1024×1024 RGBA / 4×4 / 256px cell の処理済アセットを地形 mesh と
@@ -2155,6 +2175,17 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
     }
 
+    // Σ-8-e: hover preview ghost — tile elev に追従させる
+    if (_hoverActive && _hoverState) {
+      const cx = (_hoverState.tx + 0.5) * TERRAIN_TILE_SIZE;
+      const cy = (_hoverState.ty + 0.5) * TERRAIN_TILE_SIZE;
+      hoverMesh.position.set(cx, elevAt(world.terrain, cx, cy) + 1.5, cy);
+      (hoverMesh.material as THREE.MeshBasicMaterial).color.setHex(_hoverState.color);
+      hoverMesh.visible = true;
+    } else {
+      hoverMesh.visible = false;
+    }
+
     renderer.render(scene, camera);
   }
 
@@ -2194,5 +2225,19 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     screenToWorld: stwXZ,
     setHitTest: (fn)=>{ hitFn=fn; },
     setContourVisible: (visible: boolean)=>{ contourVisible = visible; if (contourLines) contourLines.visible = visible; },
+    setHoverTile: (tx, ty, color)=>{
+      if (tx === null || ty === null) {
+        _hoverActive = false;
+        if (_hoverState) { /* keep last; visibility off */ }
+        hoverMesh.visible = false;
+        return;
+      }
+      _hoverActive = true;
+      if (_hoverState) {
+        _hoverState.tx = tx;
+        _hoverState.ty = ty;
+        _hoverState.color = color ?? 0x7fcf6b;
+      }
+    },
   };
 }

@@ -889,6 +889,91 @@ async function start() {
     btn?.click();
   });
 
+  // ========= Σ-8-e: Preview ghost（hover でタイル強調）====================
+  // ツールが選ばれているときだけ canvas に乗ったポインタ位置から「対象タイル」を
+  // 計算し、編集の valid / invalid を緑/赤で表示する。
+  function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)); }
+  function checkValidity(tx: number, ty: number): { valid: boolean; reason?: string } {
+    const ROWS = world.terrain.length, COLS = world.terrain[0]?.length ?? 0;
+    if (tx < 0 || tx >= COLS || ty < 0 || ty >= ROWS) return { valid: false, reason: 'oob' };
+    const t = world.terrain[ty]?.[tx];
+    if (!t) return { valid: false, reason: 'oob' };
+    if (terraformMode === 'raise') {
+      if (t.isSea) return { valid: false, reason: 'sea' };
+      if (world.resources.soil < 10) return { valid: false, reason: 'no-soil' };
+      return { valid: true };
+    }
+    if (terraformMode === 'lower') {
+      if (t.isSea) return { valid: false, reason: 'sea' };
+      if (t.elev <= 0) return { valid: false, reason: 'min-elev' };
+      return { valid: true };
+    }
+    if (s8EditMode === 'flatten') {
+      if (t.isSea) return { valid: false, reason: 'sea' };
+      return { valid: true };
+    }
+    if (s8EditMode === 'smooth') {
+      if (t.isSea) return { valid: false, reason: 'sea' };
+      // 隣接との elev 差 ≥2段なら有効
+      let maxDiff = 0;
+      for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]] as const) {
+        const n = world.terrain[ty + dy]?.[tx + dx];
+        if (n && !n.isSea) maxDiff = Math.max(maxDiff, Math.abs(t.elev - n.elev));
+      }
+      return { valid: maxDiff >= 50 };
+    }
+    if (s8EditMode === 'ramp') {
+      if (t.isSea) return { valid: false, reason: 'sea' };
+      const dirSel = document.getElementById('s8-ramp-dir') as HTMLSelectElement | null;
+      const dir = (dirSel?.value ?? 'N') as 'N' | 'S' | 'E' | 'W';
+      let nx = tx, ny = ty;
+      if (dir === 'N') ny--; else if (dir === 'S') ny++;
+      else if (dir === 'E') nx++; else if (dir === 'W') nx--;
+      const n = world.terrain[ny]?.[nx];
+      if (!n) return { valid: false, reason: 'oob' };
+      const diff = n.elev - t.elev;
+      return { valid: diff === 25 };
+    }
+    if (s8EditMode === 'channel') {
+      if (t.isSea) return { valid: false, reason: 'sea' };
+      if (t.waterLevel >= 0.4 && t.elev <= 0) return { valid: false, reason: 'already' };
+      return { valid: true };
+    }
+    return { valid: false };
+  }
+  let _lastHoverTx = -1, _lastHoverTy = -1;
+  stage.canvas.addEventListener('pointermove', (e) => {
+    // 編集ツール非選択時は preview を消す
+    if (!terraformMode && !s8EditMode) {
+      if (_lastHoverTx !== -1) {
+        stage.setHoverTile(null, null);
+        _lastHoverTx = -1; _lastHoverTy = -1;
+      }
+      return;
+    }
+    const rect = stage.canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const w = stage.screenToWorld(cx, cy);
+    const ROWS = world.terrain.length, COLS = world.terrain[0]?.length ?? 0;
+    const tx = clamp(Math.floor(w.x / 32), 0, COLS - 1);
+    const ty = clamp(Math.floor(w.y / 32), 0, ROWS - 1);
+    if (tx === _lastHoverTx && ty === _lastHoverTy) return;
+    _lastHoverTx = tx; _lastHoverTy = ty;
+    const v = checkValidity(tx, ty);
+    // 緑 (valid) / 赤 (invalid) / 水路は青寄り
+    let color = v.valid ? 0x7fcf6b : 0xe45f4f;
+    if (v.valid && s8EditMode === 'channel') color = 0x4fa8d8;
+    if (v.valid && s8EditMode === 'ramp')    color = 0xf3b447;  // 坂道は accent 色
+    stage.setHoverTile(tx, ty, color);
+  });
+  stage.canvas.addEventListener('pointerleave', () => {
+    if (_lastHoverTx !== -1) {
+      stage.setHoverTile(null, null);
+      _lastHoverTx = -1; _lastHoverTy = -1;
+    }
+  });
+
   // 空クリック → 建設 or 地形編集モード処理
   stage.canvas.addEventListener('kszk-empty-click', (e) => {
     const detail = (e as CustomEvent).detail as { worldX: number; worldY: number };
