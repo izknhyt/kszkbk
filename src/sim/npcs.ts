@@ -102,6 +102,14 @@ export interface NpcState {
   flight: FlightState | null;
 }
 
+// =========================================================================
+// LEGACY M2.1: スズ / ココン / ルー は M2.1 廃止予定。
+// 以下の SUZU_* / COCOON_* / LOU_* セリフプール群は実装に残すが、
+// M2.1 Step 2/3 で実体（NPC update + イベント発火）を停止する。
+// 死因や trait 由来のセリフは別ファイルへ移管予定。
+// 詳細: docs/M2-DIRECTION-RESET.md / docs/M2-MIGRATION-PLAN.md / docs/DIALOGUE-CATALOG.md
+// =========================================================================
+
 export const SUZU_LINES_DEATH = [
   'それ今やる!?',
   '点呼まだ途中!!',

@@ -1,5 +1,11 @@
 import type { DeathCause } from '../types';
 
+// LEGACY M2.1: 以下の死因は M2.1 Step 3 で発火停止予定。
+//   - ondo / taiko_crush / taiko_tobikomi（くそざこ音頭・太鼓やぐら廃止）
+//   - cocoon_abuse（ココン廃止）
+//   - suzu_kazoe_shikujiri（スズ廃止）
+// テンプレートは図鑑 (dex) のため残す。新規発火は止める。
+// 詳細: docs/M2-DIRECTION-RESET.md / docs/M2-MIGRATION-PLAN.md / docs/DIALOGUE-CATALOG.md
 export const DEATH_CAUSES: Record<string, DeathCause> = {
   bokaigi: {
     id: 'bokaigi',
