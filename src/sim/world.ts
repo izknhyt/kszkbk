@@ -2670,7 +2670,8 @@ function flightStep(
     setState(c, 'hurt', 1);
     spawnBubble(w.bubbles, c.pos, pickCollisionVictimLine(), 'speech', 1.3);
     pushLife(c, Math.floor(c.ageSec), '飛んできた誰かに激突された');
-    damageChibi(w, c, 4 + Math.floor(Math.random() * 5), 'cocoon_abuse');
+    // M2.1: ココン廃止に伴い、飛行衝突 cause を専用 'bystander_collision' へ rename
+    damageChibi(w, c, 4 + Math.floor(Math.random() * 5), 'bystander_collision');
   }
   for (const n of w.npcs) {
     if (n.dead || n === entity) continue;
@@ -4190,7 +4191,8 @@ function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punc
     const vy = (landY - startPos.y) / flightSec - 90 * flightSec;  // 軽い弧
     const throwDmg = n.mood < 25 ? 10 + Math.floor(Math.random() * 10) : 4 + Math.floor(Math.random() * 6);
     setState(target, 'surprised', flightSec + 0.3);
-    launchFlight(target, vx, vy, flightSec, throwDmg, 'cocoon_abuse');
+    // M2.1: ココン廃止に伴い、フラナの投げ動作の死因を 'furana_punch' へ rename
+    launchFlight(target, vx, vy, flightSec, throwDmg, 'furana_punch');
     return;
   }
 
@@ -4206,7 +4208,8 @@ function applyFuranaActionTo(w: WorldState, n: NpcState, target: Chibiwafu, punc
     spawnBubble(w.bubbles, target.pos, 'ぎゃーわふ！', 'speech', 1.2);
     pushLife(target, Math.floor(target.ageSec), `フラナ(機嫌${Math.round(n.mood)})に殴られた`);
     pushNpcLife(n, Math.floor(w.timeSec), `${target.name} を殴った（機嫌${Math.round(n.mood)}）`);
-    damageChibi(w, target, dmg, 'cocoon_abuse');
+    // M2.1: ココン廃止に伴い、フラナの殴り動作の死因を 'furana_punch' へ rename
+    damageChibi(w, target, dmg, 'furana_punch');
     return;
   }
 
@@ -4356,6 +4359,7 @@ function updateCocoonAbuse(w: WorldState, n: NpcState, dt: number) {
     return;
   }
   if (Math.random() < 0.35) {
+    // updateCocoonAbuse 内（ココン NPC が居れば呼ばれる、M2.1 で居ない設計）
     kill(w, target, 'cocoon_abuse');
   }
 }

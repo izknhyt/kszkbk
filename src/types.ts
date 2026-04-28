@@ -182,7 +182,10 @@ export type DeathCauseId =
   // --- Σ-5-d 狼 flee 追加 --------------------------------------------------
   | 'fled_to_exhaustion'    // 逃げ疲れて崩れ落ちたところをオオカミに食われた
   // --- Σ-7-d 水動力 追加 ---------------------------------------------------
-  | 'drown_pond';           // 雨水溜まりに沈んで溺死
+  | 'drown_pond'           // 雨水溜まりに沈んで溺死
+  // --- M2.1 NPC 廃止に伴う死因 rename --------------------------------------
+  | 'bystander_collision'  // 飛行中の誰かに巻き込まれて受傷死（旧 cocoon_abuse 流用部）
+  | 'furana_punch';        // フラナの怒りパンチ／投げで死亡（旧 cocoon_abuse のフラナ暴力部）
 
 export interface DeathCause {
   id: DeathCauseId;

@@ -182,11 +182,13 @@ export function pushNpcLife(n: NpcState, sec: number, text: string) {
 }
 
 export function createNpcs(bounds: { w: number; h: number }): NpcState[] {
+  // M2.1 Step 2: スズ / ココン / ルーは廃止。フラナだけを生成する。
+  // 旧コードは履歴に残す:
+  //   mkNpc('suzu',   findDryTile(bounds.w * 0.4,  bounds.h * 0.38, 160)),
+  //   mkNpc('lou',    findDryTile(bounds.w * 0.72, bounds.h * 0.28, 160)),
+  //   mkNpc('cocoon', findDryTile(bounds.w * 0.58, bounds.h * 0.45, 160), 2),
   return [
-    mkNpc('furana', findDryTile(bounds.w / 2,       bounds.h * 0.35, 160), 10),
-    mkNpc('suzu',   findDryTile(bounds.w * 0.4,     bounds.h * 0.38, 160)),
-    mkNpc('lou',    findDryTile(bounds.w * 0.72,    bounds.h * 0.28, 160)),
-    mkNpc('cocoon', findDryTile(bounds.w * 0.58,    bounds.h * 0.45, 160), 2),
+    mkNpc('furana', findDryTile(bounds.w / 2, bounds.h * 0.35, 160), 10),
   ];
 }
 

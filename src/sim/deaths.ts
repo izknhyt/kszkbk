@@ -393,6 +393,24 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     points: 18,
     template: (n) => `${n}は雨水の溜まった水たまりに足を滑らせ、ぴちゃっとはまってそのまま沈んだ。`,
   },
+  // M2.1: 飛んできた誰かに巻き込まれた巻き添え死。
+  // 旧 cocoon_abuse の「飛行衝突」分岐をここへ移し替え（ココン廃止に伴う rename）。
+  bystander_collision: {
+    id: 'bystander_collision',
+    title: '巻き込まれて衝突死',
+    rare: false,
+    points: 8,
+    template: (n) => `${n}は飛んできた誰かに思いきり激突され、そのまま動かなくなった。`,
+  },
+  // M2.1: フラナの怒りパンチ/投げによる死亡。
+  // 旧 cocoon_abuse の「フラナ暴力」分岐をここへ移し替え（ココン廃止に伴う rename）。
+  furana_punch: {
+    id: 'furana_punch',
+    title: 'ママの怒りパンチで死亡',
+    rare: false,
+    points: 12,
+    template: (n) => `${n}は機嫌の悪いママに本気で殴られ、そのまま動かなくなった。`,
+  },
 } as const;
 
 export const DEATH_IDS = Object.keys(DEATH_CAUSES) as Array<keyof typeof DEATH_CAUSES>;

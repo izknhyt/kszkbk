@@ -187,14 +187,15 @@ export const HAZARDS: HazardZone[] = [
     requiresEvent: 'taiko_festival',
     note: '太鼓祭にテンション上がった冒険家／戦闘狂／太鼓っ子がやぐらに飛び込む',
   },
+  // M2.1: スズ廃止に伴い無効化。ハザード定義は legacy 図鑑に残すが ratePerSec を 0 にして発火停止。
   {
     id: 'suzu_kazoe_shikujiri',
     causeId: 'suzu_kazoe_shikujiri',
     kind: 'random',
-    ratePerSec: 0.012,
+    ratePerSec: 0,
     bypassSafeZone: true,
     requiresYoungSec: 4,
-    note: '生後4秒以内に消えてしまい、スズの点呼に間に合わない',
+    note: '[LEGACY M2.1] 生後4秒以内に消えてしまい、スズの点呼に間に合わない（廃止）',
   },
 
   // P6 追加 Uncommon
