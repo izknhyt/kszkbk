@@ -2363,6 +2363,10 @@ export function ensurePlots(w: WorldState) {
 }
 
 export function populationCap(w: WorldState): number {
+  // M2.1 Step 4.2: 旧 BUILDINGS の `pop+N` 効果は新規ランでは w.buildings=[]
+  // により自然に効かない。既存セーブで残っている旧建物分の cap+ は legacy
+  // として維持（読み取り専用、Step 4.4 で save migration を入れる予定）。
+  // 将来的に新 Feature `house` 等が pop+ を担う設計へ移行する。
   let cap = w.baseCap;
   for (const b of w.buildings) {
     const def = BUILDINGS[b.defId];
@@ -2378,6 +2382,10 @@ function countBuildingLevels(w: WorldState, defId: string): number {
 }
 
 function applyBuildingMods(w: WorldState) {
+  // M2.1 Step 4.2: 旧 BUILDINGS の `pmult+N` / `spawn+N` 効果は新規ランで
+  // w.buildings=[] により自然に no-op。既存セーブで残っている旧建物分は legacy
+  // として効果が残る（読み取り専用、Step 4.4 で save migration 予定）。
+  // 将来 hakaba feature が pmult、nursery feature が spawn を担う設計へ移行する。
   let mult = CONFIG.GLOBAL_POINT_MULT_BASE;
   let spawnMul = 1;
   for (const b of w.buildings) {
@@ -2403,8 +2411,12 @@ function computeOndoInterval(w: WorldState): number {
 }
 
 function computeFireInterval(w: WorldState): number {
-  const kouba = countBuildingLevels(w, 'kouba');
-  const base = CONFIG.FIRE_BASE_INTERVAL_SEC + CONFIG.FIRE_INTERVAL_PER_KOUBA * kouba;
+  // M2.1 Step 4.2: 旧 kouba（鍛冶場）建物による火事間隔短縮は廃止。
+  // 純粋に CONFIG.FIRE_BASE_INTERVAL_SEC を基準に揺らぎを与える。
+  // 旧式: const kouba = countBuildingLevels(w, 'kouba');
+  //       base = FIRE_BASE_INTERVAL_SEC + FIRE_INTERVAL_PER_KOUBA * kouba;
+  // 将来 forge 系新 feature が火事リスクを担う場合に再導入する。
+  const base = CONFIG.FIRE_BASE_INTERVAL_SEC;
   const floored = Math.max(CONFIG.FIRE_INTERVAL_MIN_SEC, base);
   return (floored + (Math.random() - 0.5) * 20) * DIFFICULTY_MODS[w.difficulty].eventIntervalMul;
 }
