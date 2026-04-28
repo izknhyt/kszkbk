@@ -129,12 +129,14 @@ class MinHeap {
 
 // =========================================================================
 // findPath: A* でタイル単位 waypoint 列を返す
-// 失敗時は null。maxNodes を超える探索は打ち切る（孤立タイル/遠隔ターゲット保険）
+// 失敗時は null。Σ-8-fix-1: maxNodes default を ROWS*COLS（≒5700）に拡大、
+// weighted A* (priority = g + h * 1.001) で goal 寄りに探索を寄せる。
+// 旧 800 では平坦 100×57 の対角でも fail していた。
 // =========================================================================
 export function findPath(
   terrain: TerrainTile[][],
   start: TilePoint, goal: TilePoint,
-  maxNodes = 800,
+  maxNodes?: number,
 ): TilePoint[] | null {
   const ROWS = terrain.length;
   const COLS = terrain[0]?.length ?? 0;
@@ -142,6 +144,8 @@ export function findPath(
   if (start.tx < 0 || start.tx >= COLS || start.ty < 0 || start.ty >= ROWS) return null;
   if (goal.tx < 0  || goal.tx >= COLS  || goal.ty < 0  || goal.ty >= ROWS)  return null;
   if (start.tx === goal.tx && start.ty === goal.ty) return [start];
+  // デフォルトはグリッド全体（孤立タイルも探索打ち切りまで時間がかかる用）
+  const limit = maxNodes ?? ROWS * COLS;
 
   // 目標タイルが通行不可なら諦める
   const goalTile = terrain[goal.ty]![goal.tx]!;
@@ -159,10 +163,14 @@ export function findPath(
 
   gScore[startKey] = 0;
   const open = new MinHeap();
-  open.push(Math.abs(start.tx - goal.tx) + Math.abs(start.ty - goal.ty), startKey);
+  // weighted A*: heuristic に 1.001 を掛けて、同 f コスト時に h が小さい方を優先。
+  // ε=0.001 なので最大 0.1% 程度のサブオプティマル、実用上は無視できる。
+  const H_WEIGHT = 1.001;
+  const h0 = Math.abs(start.tx - goal.tx) + Math.abs(start.ty - goal.ty);
+  open.push(h0 * H_WEIGHT, startKey);
 
   let visited = 0;
-  while (open.size() > 0 && visited < maxNodes) {
+  while (open.size() > 0 && visited < limit) {
     const { v: cur } = open.pop()!;
     if (closed[cur]) continue;
     if (cur === goalKey) {
@@ -195,7 +203,7 @@ export function findPath(
       gScore[nk] = tentative;
       cameFrom[nk] = cur;
       const h = Math.abs(nx - goal.tx) + Math.abs(ny - goal.ty);
-      open.push(tentative + h, nk);
+      open.push(tentative + h * H_WEIGHT, nk);
     }
   }
   return null;

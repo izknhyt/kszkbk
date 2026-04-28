@@ -994,7 +994,8 @@ async function start() {
   type UndoGroupJobs = { kind: 'jobs'; jobIds: string[]; description: string };
   type UndoGroupJobsCancelled = { kind: 'jobs-cancelled'; entries: JobRedoEntry[]; description: string };
   type UndoGroup = UndoGroupTiles | UndoGroupJobs | UndoGroupJobsCancelled;
-  const MAX_UNDO = 30;
+  // Σ-8-fix-4: PLAN.md の 50 に合わせる
+  const MAX_UNDO = 50;
   const undoStack: UndoGroup[] = [];
   const redoStack: UndoGroup[] = [];
   let _currentEditGroup: UndoGroupTiles | UndoGroupJobs | null = null;
@@ -1028,6 +1029,18 @@ async function start() {
     _editedInGroup.add(key);
     const snap = captureSnapshot(tx, ty);
     if (snap) _currentEditGroup.snapshots.push(snap);
+  }
+  // Σ-8-fix-4: 操作が no-change / failure だった場合は直前の snapshot を捨てる。
+  // tx,ty も _editedInGroup から外して同タイル再編集を許容。
+  function rollbackPreEdit(tx: number, ty: number) {
+    if (!_currentEditGroup || _currentEditGroup.kind !== 'tiles') return;
+    const key = `${tx},${ty}`;
+    if (!_editedInGroup.has(key)) return;
+    const last = _currentEditGroup.snapshots[_currentEditGroup.snapshots.length - 1];
+    if (last && last.tx === tx && last.ty === ty) {
+      _currentEditGroup.snapshots.pop();
+    }
+    _editedInGroup.delete(key);
   }
   function rememberJobId(jobId: string) {
     if (!_currentEditGroup || _currentEditGroup.kind !== 'jobs') return;
@@ -1165,31 +1178,46 @@ async function start() {
     if (s8EditMode === 'flatten') {
       rememberPreEdit(tx, ty);
       const r = flattenTile(world, tx, ty);
-      if (r === 'ok' && isFirstTile) {
-        flashToast(`平坦 [${tx},${ty}]`, 'info');
-        announceTileEdited(world, tx, ty, 'flatten');
-      } else if (r === 'is-sea' && isFirstTile)  flashToast('海は平坦化できないわふ', 'info');
-      else if (r === 'no-change' && isFirstTile) flashToast('もう揃ってるわふ', 'info');
+      if (r === 'ok') {
+        if (isFirstTile) {
+          flashToast(`平坦 [${tx},${ty}]`, 'info');
+          announceTileEdited(world, tx, ty, 'flatten');
+        }
+      } else {
+        rollbackPreEdit(tx, ty);  // 空 snapshot を捨てる
+        if (isFirstTile && r === 'is-sea')   flashToast('海は平坦化できないわふ', 'info');
+        else if (isFirstTile && r === 'no-change') flashToast('もう揃ってるわふ', 'info');
+      }
       return;
     }
     if (s8EditMode === 'smooth') {
       rememberPreEdit(tx, ty);
       const r = smoothTile(world, tx, ty);
-      if (r === 'ok' && isFirstTile) {
-        flashToast(`整地 [${tx},${ty}]`, 'info');
-        announceTileEdited(world, tx, ty, 'smooth');
-      } else if (r === 'is-sea' && isFirstTile)  flashToast('海は整地できないわふ', 'info');
-      else if (r === 'no-change' && isFirstTile) flashToast('崖じゃないから整地不要わふ', 'info');
+      if (r === 'ok') {
+        if (isFirstTile) {
+          flashToast(`整地 [${tx},${ty}]`, 'info');
+          announceTileEdited(world, tx, ty, 'smooth');
+        }
+      } else {
+        rollbackPreEdit(tx, ty);
+        if (isFirstTile && r === 'is-sea')   flashToast('海は整地できないわふ', 'info');
+        else if (isFirstTile && r === 'no-change') flashToast('崖じゃないから整地不要わふ', 'info');
+      }
       return;
     }
     if (s8EditMode === 'channel') {
       rememberPreEdit(tx, ty);
       const r = channelTile(world, tx, ty);
-      if (r === 'ok' && isFirstTile) {
-        flashToast(`水路 [${tx},${ty}]（土+${LOWER_SOIL_GAIN}）`, 'info');
-        announceTileEdited(world, tx, ty, 'channel');
-      } else if (r === 'is-sea' && isFirstTile)  flashToast('海はもう水路わふ', 'info');
-      else if (r === 'no-change' && isFirstTile) flashToast('もう深い溝になってるわふ', 'info');
+      if (r === 'ok') {
+        if (isFirstTile) {
+          flashToast(`水路 [${tx},${ty}]（土+${LOWER_SOIL_GAIN}）`, 'info');
+          announceTileEdited(world, tx, ty, 'channel');
+        }
+      } else {
+        rollbackPreEdit(tx, ty);
+        if (isFirstTile && r === 'is-sea')   flashToast('海はもう水路わふ', 'info');
+        else if (isFirstTile && r === 'no-change') flashToast('もう深い溝になってるわふ', 'info');
+      }
       return;
     }
     if (s8EditMode === 'ramp' && isFirstTile) {
@@ -1200,11 +1228,14 @@ async function start() {
       if (r === 'ok') {
         flashToast(`坂道化 [${tx},${ty}] → ${dir}`, 'info');
         announceRampPlaced(world, tx, ty);
-      } else if (r === 'no-step')         flashToast('高さ差がないわふ（隣との段差が必要）', 'info');
-      else if (r === 'wrong-direction')   flashToast('方向を逆にしてわふ（低い側にだけ坂道化できる）', 'info');
-      else if (r === 'too-steep')         flashToast('段差が大きすぎるわふ（高さ差 1 段だけ）', 'info');
-      else if (r === 'is-sea')            flashToast('海には立てられないわふ', 'info');
-      else                                flashToast('範囲外わふ', 'info');
+      } else {
+        rollbackPreEdit(tx, ty);
+        if (r === 'no-step')              flashToast('高さ差がないわふ（隣との段差が必要）', 'info');
+        else if (r === 'wrong-direction') flashToast('方向を逆にしてわふ（低い側にだけ坂道化できる）', 'info');
+        else if (r === 'too-steep')       flashToast('段差が大きすぎるわふ（高さ差 1 段だけ）', 'info');
+        else if (r === 'is-sea')          flashToast('海には立てられないわふ', 'info');
+        else                              flashToast('範囲外わふ', 'info');
+      }
       return;
     }
   }
@@ -1228,6 +1259,9 @@ async function start() {
     _editDragActive = true;
     _editDragLastTx = tx; _editDragLastTy = ty;
     _editDragHandledClick = true;  // この後の kszk-empty-click は無視
+    // Σ-8-fix-4: pointer capture でカーソルが canvas 外へ抜けても pointermove/up を受け取る。
+    // これで edit group の閉じ忘れ（次の pointermove まで undo group が開きっぱなし）を防ぐ。
+    try { stage.canvas.setPointerCapture(e.pointerId); } catch (_e) { /* unsupported */ }
     // Σ-8-g: undo group を開始。タイル編集系は 'tiles'、raise/lower は 'jobs'。
     if (s8EditMode === 'flatten' || s8EditMode === 'smooth' ||
         s8EditMode === 'channel' || s8EditMode === 'ramp') {
@@ -1264,6 +1298,11 @@ async function start() {
   }
   stage.canvas.addEventListener('pointerup', _endEditDrag);
   stage.canvas.addEventListener('pointercancel', _endEditDrag);
+  // Σ-8-fix-4: pointer capture を失った時も group を閉じる
+  stage.canvas.addEventListener('lostpointercapture', _endEditDrag);
+  // 念のため window でも安全網
+  window.addEventListener('pointerup', _endEditDrag);
+  window.addEventListener('pointercancel', _endEditDrag);
 
   // 空クリック → 建設 or 地形編集モード処理
   stage.canvas.addEventListener('kszk-empty-click', (e) => {

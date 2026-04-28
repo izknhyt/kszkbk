@@ -101,10 +101,18 @@ interface WanderEnv {
 export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: number }, env?: WanderEnv): string | null {
   let announcementKey: string | null = null;
 
-  // Σ-8-b: terrainVersion が変わったら path を捨てて再計算（target は維持して再ルート）
+  // Σ-8-b / Σ-8-fix-2: terrainVersion が変わったら path を捨てて即時再計算する。
+  // 旧実装は path だけ破棄して target を残し、次の wanderStep で「pathPoints が
+  // 空 + target あり → 直線 fallback」に落ちて崖や水を横断できてしまっていた。
+  // ここで requestPath を呼び直すことで、崩落・盛土・坂道設置の直後でも path
+  // ベースの正しい移動を保証する。
   if (env?.terrainVersion !== undefined && c.pathVersion !== undefined && c.pathVersion !== env.terrainVersion) {
     c.pathPoints = undefined;
     c.pathVersion = undefined;
+    if (c.target && env.terrain) {
+      // この tick 内で再ルート。失敗時は target も破棄され dazed になる。
+      requestPath(c, env);
+    }
   }
   // Σ-8-b: path 失敗 cooldown を消化中は移動しない（confused/idle）
   if ((c.pathFailedSec ?? 0) > 0) {
@@ -324,12 +332,20 @@ export function wanderStep(c: Chibiwafu, dt: number, bounds: { w: number; h: num
       c.faceLeft = wpdx < 0;
     }
   } else if (c.target) {
-    // path 計算前 / terrain 未提供時の旧来直線 fallback
-    const dx = c.target.x - c.pos.x;
-    const dy = c.target.y - c.pos.y;
-    const d = Math.max(0.001, Math.hypot(dx, dy));
-    c.pos.x += (dx / d) * c.speed * dt;
-    c.pos.y += (dy / d) * c.speed * dt;
+    // Σ-8-fix-2: terrain が提供されているのに pathPoints が無い = 通行不可 or
+    // path 計算未済。直線 fallback を許すと崖を貫通する事故が起きるので、
+    // terrain ありの時は移動せず idle に留めて次 tick で再ルート。
+    if (env?.terrain && env?.terrainVersion !== undefined) {
+      // 念のため再計算を試みる（無視されない target が放置されないよう）
+      requestPath(c, env);
+    } else {
+      // terrain 未提供（古い呼び出し互換、scripts/sim.ts 等）は旧来の直線 fallback
+      const dx = c.target.x - c.pos.x;
+      const dy = c.target.y - c.pos.y;
+      const d = Math.max(0.001, Math.hypot(dx, dy));
+      c.pos.x += (dx / d) * c.speed * dt;
+      c.pos.y += (dy / d) * c.speed * dt;
+    }
   }
   // target が null（path 失敗で破棄済み等）は移動せず、次回 wanderStep で再抽選
   return announcementKey;

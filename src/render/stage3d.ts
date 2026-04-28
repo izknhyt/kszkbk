@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import type { WorldState } from '../sim/world';
 import { POWERLINE_CONNECT_RADIUS, TERRAIN_TILE_SIZE } from '../sim/world';
-import { isSeaAt } from '../sim/terrain/query';
+import { elevAtTileSurface, isSeaAt } from '../sim/terrain/query';
 import type { ChibiState, DayPhase, Difficulty, HitTarget, PlacedBuilding, Season } from '../types';
 import { NPC_DEFS, type NpcId } from '../sim/npcs';
 import { CONFIG } from '../config';
@@ -458,36 +458,9 @@ function makeGradMap(): THREE.DataTexture {
 // 周囲より低い / 高いタイルでキャラが埋もれたり浮いたりしていた。
 // ============================================================
 function elevAt(terrain: import('../types').TerrainTile[][], wx: number, wy: number): number {
-  // Σ-8-c per-tile geometry に同期。各タイルは独立 4 頂点で：
-  //   - flat タイル: 4 corner が同じ elev → タイル内は完全平面 → tile.elev 固定で返す
-  //   - ramp タイル: 4 corner が傾斜 → 三角形 barycentric で補間
-  // これでメッシュ表面と elevAt() が完全一致。崖の境界で補間で「低い側の値」を
-  // 返してしまい chibi が壁にめり込む問題が解消する。
-  const ROWS = terrain.length;
-  const COLS = terrain[0]?.length ?? 0;
-  if (ROWS === 0 || COLS === 0) return 0;
-  const tx = Math.max(0, Math.min(COLS - 1, Math.floor(wx / TERRAIN_TILE_SIZE)));
-  const ty = Math.max(0, Math.min(ROWS - 1, Math.floor(wy / TERRAIN_TILE_SIZE)));
-  const tile = terrain[ty]![tx]!;
-  if (!tile.ramp) {
-    return tile.elev * ELEV_SCALE;  // flat タイルは平面、補間しない
-  }
-  // ramp タイル：対角線 NE-SW で 2 三角形分割の barycentric
-  const fu = Math.max(0, Math.min(1, (wx - tx * TERRAIN_TILE_SIZE) / TERRAIN_TILE_SIZE));
-  const fv = Math.max(0, Math.min(1, (wy - ty * TERRAIN_TILE_SIZE) / TERRAIN_TILE_SIZE));
-  const eNW = tileCornerElev(tile, 'NW');
-  const eNE = tileCornerElev(tile, 'NE');
-  const eSW = tileCornerElev(tile, 'SW');
-  const eSE = tileCornerElev(tile, 'SE');
-  let elev: number;
-  if (fu + fv < 1) {
-    // T1: NW(0,0), SW(0,1), NE(1,0)
-    elev = eNW * (1 - fu - fv) + eSW * fv + eNE * fu;
-  } else {
-    // T2: NE(1,0), SW(0,1), SE(1,1)
-    elev = eNE * (1 - fv) + eSW * (1 - fu) + eSE * (fu + fv - 1);
-  }
-  return elev * ELEV_SCALE;
+  // Σ-8-fix-3: sim 側 getElevation と同じ実装（terrain/query.ts elevAtTileSurface）に統一。
+  // ELEV_SCALE は描画側で掛ける（sim は生 elev 値で扱う）。
+  return elevAtTileSurface(terrain, wx, wy) * ELEV_SCALE;
 }
 
 // ============================================================
@@ -904,7 +877,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // 隣接タイルの elev 差が ELEV_STEP*2 (50) 以上の境界に縦壁を立てる。
   // PlaneGeometry(1,1) を east/south 境界ごとに matrix で配置。
   // ==========================================================
-  const MAX_CLIFF_WALLS = 2400;  // 5700 タイル × 2 境界の上限見積もり
+  // Σ-8-fix-4: 編集で崖だらけになると 5700 × 2 = 11400 まで増えうる。
+  // 起動時は 2400 で出して、必要に応じて rebuild 内で再アロケートする。
+  let MAX_CLIFF_WALLS = 2400;
   const _cliffWallGeo = new THREE.PlaneGeometry(1, 1);
   // PlaneGeometry の UV はデフォ (0,1)/(1,1)/(0,0)/(1,0)。これを atlas の
   // cliff cell (col=1, row=1) の bounds に書き換えて、texture 貼った時に正しい
@@ -918,25 +893,44 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     ua.setXY(3, cuv.uMax, cuv.vMin);
     ua.needsUpdate = true;
   }
-  const cliffWallIM = new THREE.InstancedMesh(
-    _cliffWallGeo,
-    new THREE.MeshToonMaterial({
-      color: 0x5a4030,          // 岩壁の暗茶（atlas 読込前のフォールバック）
-      side: THREE.DoubleSide,
-      gradientMap: gradMap,
-      // Σ-8-c-1.5: 壁面が深さ的に少し奥に描画されるよう polygonOffset を入れて、
-      // タイル境界の真上に立つビルボードちびわふが「壁の中に埋もれる」視覚事故を抑える。
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-    }),
-    MAX_CLIFF_WALLS,
-  );
-  cliffWallIM.count = 0;
-  cliffWallIM.castShadow = false;
-  cliffWallIM.receiveShadow = false;
-  cliffWallIM.renderOrder = 0;  // ビルボード (default 0) より先に描く
+  let cliffWallIM = makeCliffWallIM(MAX_CLIFF_WALLS);
   scene.add(cliffWallIM);
+  function makeCliffWallIM(cap: number): THREE.InstancedMesh {
+    const im = new THREE.InstancedMesh(
+      _cliffWallGeo,
+      new THREE.MeshToonMaterial({
+        color: 0x5a4030,
+        side: THREE.DoubleSide,
+        gradientMap: gradMap,
+        // Σ-8-c-1.5: 壁面が深さ的に少し奥に描画されるよう polygonOffset を入れて、
+        // ビルボードちびわふが壁に埋もれる視覚事故を抑える。
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
+      }),
+      cap,
+    );
+    im.count = 0;
+    im.castShadow = false;
+    im.receiveShadow = false;
+    im.renderOrder = 0;
+    return im;
+  }
+  // Σ-8-fix-4: rebuild で容量超過したら 2 倍に拡張して作り直す。
+  function ensureCliffCapacity(needed: number) {
+    if (needed <= MAX_CLIFF_WALLS) return;
+    while (MAX_CLIFF_WALLS < needed) MAX_CLIFF_WALLS *= 2;
+    const old = cliffWallIM;
+    // 旧 atlas マップは material 側に残るので新 IM 側にも継承
+    const oldMat = old.material as THREE.MeshToonMaterial;
+    const newIM = makeCliffWallIM(MAX_CLIFF_WALLS);
+    const newMat = newIM.material as THREE.MeshToonMaterial;
+    if (oldMat.map) { newMat.map = oldMat.map; newMat.color.setHex(0xffffff); newMat.needsUpdate = true; }
+    scene.remove(old);
+    old.dispose();
+    scene.add(newIM);
+    cliffWallIM = newIM;
+  }
 
   // ==========================================================
   // Σ-8-e Preview ghost（hover でタイル強調）
@@ -1568,6 +1562,30 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const _cliffScale = new THREE.Vector3();
       const _cliffEulerEW = new THREE.Euler(0, Math.PI / 2, 0); // east/west 境界用
       const _cliffEulerNS = new THREE.Euler(0, 0, 0);          // north/south 境界用
+      // Σ-8-fix-4: 1 pass 目で必要数を数えて capacity 確保 → 2 pass 目で setMatrixAt
+      let needed = 0;
+      for (let r2 = 0; r2 < ROWS2; r2++) for (let c2 = 0; c2 < COLS2; c2++) {
+        const t0 = world.terrain[r2]![c2]!;
+        if (c2 + 1 < COLS2) {
+          const tE = world.terrain[r2]![c2 + 1]!;
+          const diff = Math.abs(t0.elev - tE.elev);
+          if (diff >= CLIFF_WALL_THRESH) {
+            const lower = t0.elev < tE.elev ? t0 : tE;
+            const reqDir = t0.elev < tE.elev ? 'E' : 'W';
+            if (!(diff === 25 && lower.ramp === reqDir)) needed++;
+          }
+        }
+        if (r2 + 1 < ROWS2) {
+          const tS = world.terrain[r2 + 1]![c2]!;
+          const diff = Math.abs(t0.elev - tS.elev);
+          if (diff >= CLIFF_WALL_THRESH) {
+            const lower = t0.elev < tS.elev ? t0 : tS;
+            const reqDir = t0.elev < tS.elev ? 'S' : 'N';
+            if (!(diff === 25 && lower.ramp === reqDir)) needed++;
+          }
+        }
+      }
+      ensureCliffCapacity(needed);
       let cwCount = 0;
       for (let r2=0; r2<ROWS2; r2++) for (let c2=0; c2<COLS2; c2++){
         const t0 = world.terrain[r2]![c2]!;

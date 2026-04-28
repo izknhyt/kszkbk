@@ -1,7 +1,7 @@
 import type { Chibiwafu, DayPhase, DeathCauseId, DexEntry, Difficulty, Feature, FeatureKind, FlightState, FloodZone, Obstacle, ObstacleKind, PlacedBuilding, RampDir, Season, TerrainMaterial, TerrainTile, TerraformJob, Vec2, VillageRank, Weather, WeatherForecastEntry, WeatherKind, Wolf } from '../types';
 import { seedFromRunId } from './terrain/noise';
 import { generateTerrain } from './terrain/generators';
-import { findDryTile, isSeaAt, setQueryTerrain } from './terrain/query';
+import { elevAtTileSurface, findDryTile, isSeaAt, setQueryTerrain } from './terrain/query';
 import { DEATH_CAUSES } from './deaths';
 import { BUILDINGS, buildingsToHazards } from '../city/buildings';
 import {
@@ -1115,29 +1115,14 @@ export function initTerrain(
   return grid;
 }
 
-// bi-linear 補間で任意点の標高を返す。Σ-1 z 物理と既存コード全域から呼ばれる。
+// 任意点の標高を返す。Σ-1 z 物理 / 水流 / cliff_fall / slope_fall 等から呼ばれる。
+// Σ-8-fix-3: render 側 elevAt と完全に同じ式（terrain/query.ts elevAtTileSurface）に
+// 統一。flat タイル = tile.elev 固定、ramp タイルだけ三角形 barycentric。
+// これで sim と render が同じ地形ルールを見る。
 export function getElevation(x: number, y: number): number {
   const terrain = _activeTerrain;
   if (!terrain) return proceduralElevation(x, y);
-
-  const tc = x / TERRAIN_TILE_SIZE - 0.5;
-  const tr = y / TERRAIN_TILE_SIZE - 0.5;
-  const c0 = Math.floor(tc);
-  const r0 = Math.floor(tr);
-  const tx = tc - c0;
-  const ty = tr - r0;
-  const maxC = TERRAIN_COLS - 1;
-  const maxR = TERRAIN_ROWS - 1;
-
-  const e00 = terrain[Math.max(0, Math.min(maxR, r0))]?.[Math.max(0, Math.min(maxC, c0))]?.elev ?? 0;
-  const e10 = terrain[Math.max(0, Math.min(maxR, r0))]?.[Math.max(0, Math.min(maxC, c0 + 1))]?.elev ?? 0;
-  const e01 = terrain[Math.max(0, Math.min(maxR, r0 + 1))]?.[Math.max(0, Math.min(maxC, c0))]?.elev ?? 0;
-  const e11 = terrain[Math.max(0, Math.min(maxR, r0 + 1))]?.[Math.max(0, Math.min(maxC, c0 + 1))]?.elev ?? 0;
-
-  return e00 * (1 - tx) * (1 - ty)
-       + e10 * tx * (1 - ty)
-       + e01 * (1 - tx) * ty
-       + e11 * tx * ty;
+  return elevAtTileSurface(terrain, x, y);
 }
 
 // タイル座標からインデックスを安全に返す。範囲外は null。
