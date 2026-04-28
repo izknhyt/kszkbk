@@ -4624,14 +4624,10 @@ export function rankContext(w: WorldState): RankContext {
 
 // 指定種の建物のうち、Lv最小のものを1段階アップグレードする。
 // ランクで解禁されている Lv までしか上がらない。成功時 true。
-export function upgradeOne(w: WorldState, defId: string): boolean {
-  const def = BUILDINGS[defId];
-  if (!def) return false;
-  const info = getUpgradeInfo(w, defId);
-  if (!info || !info.possible || !info.target) return false;
-  w.points -= info.cost;
-  info.target.level += 1;
-  return true;
+// M2.1 Step 4.4: 旧 BUILDINGS の新規 upgrade は廃止。常に false を返して
+// プレイヤー側の点数消費とレベル増を防ぐ。既存セーブの旧建物 Lv は維持。
+export function upgradeOne(_w: WorldState, _defId: string): boolean {
+  return false;
 }
 
 export interface UpgradeInfo {
@@ -4643,6 +4639,7 @@ export interface UpgradeInfo {
 }
 
 export function getUpgradeInfo(w: WorldState, defId: string): UpgradeInfo | null {
+  // M2.1 Step 4.4: UI から呼ばれない（renderBuildList 停止済）。残置で動作互換。
   const def = BUILDINGS[defId];
   if (!def) return null;
   const maxLv = maxBuildingLevel(w.villageRank);
@@ -4658,23 +4655,14 @@ export function getUpgradeInfo(w: WorldState, defId: string): UpgradeInfo | null
   return { possible: w.points >= cost, cost, targetLevel: target.level + 1, target, capped: false };
 }
 
-export function buildAt(w: WorldState, defId: string): boolean {
-  const cost = buildingCost(w, defId);
-  if (w.points < cost) return false;
-  const def = BUILDINGS[defId];
-  if (!def) return false;
-  w.points -= cost;
-  // 建物は type ごとに別の帯に並べる。横はワールド幅をほぼ埋めるように伸ばす。
-  const typeOrder = ['noukou', 'kouba', 'hakaba', 'taiko'];
-  const typeIdx = Math.max(0, typeOrder.indexOf(defId));
-  const sameCount = w.buildings.filter((b) => b.defId === defId).length;
-  const laneY = 300 + typeIdx * 30;
-  const laneMargin = 80;
-  const laneW = w.bounds.w - laneMargin * 2;
-  const laneX = laneMargin + ((sameCount * 80) % laneW);
-  w.buildings.push({ defId, level: 1, pos: { x: laneX, y: laneY } });
-  return true;
+export function buildAt(_w: WorldState, _defId: string): boolean {
+  // M2.1 Step 4.4: 旧 BUILDINGS の新規購入は廃止。常に false を返す。
+  // プレイヤー新規建設は Feature 系（main.ts buildPlot 経由）に統一済み。
+  return false;
 }
+
+// LEGACY M2.1: 旧 buildAt 実装は git log で `M2.1 Step 4.4` 以前の commit を参照。
+// 旧仕様: w.points を消費 → BUILDINGS[defId] の建物を laneY (300 + typeIdx*30) に配置
 
 export function uniqueDexFound(w: WorldState): number {
   return Object.values(w.dex).filter((d) => d.count > 0).length;

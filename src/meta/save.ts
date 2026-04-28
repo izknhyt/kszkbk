@@ -292,6 +292,10 @@ export function save(w: WorldState, slot: SlotId) {
     stompCount: w.stompCount,
     timeSec: w.timeSec,
     dex: w.dex,
+    // M2.1 Step 4.4: 旧 BUILDINGS 由来の w.buildings は display-only として
+    // persist 維持（既存セーブの旧建物が消えると数値効果も急変するため）。
+    // 新規 buildAt / upgradeOne は no-op 化済み、UI からも入口なし。
+    // 将来 Feature 系へ完全置換した時点で migration（空配列化）を別 step で実施。
     buildings: w.buildings,
     recentDeaths: w.recentDeaths.slice(0, 24),
     sumDeathAgeSec: w.sumDeathAgeSec,
