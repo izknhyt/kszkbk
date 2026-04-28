@@ -1257,6 +1257,74 @@ export function clearRampOnTile(w: WorldState, tx: number, ty: number): boolean 
   return true;
 }
 
+// =========================================================================
+// Σ-8-d-1 flatten / smooth ブラシ
+// SPEC §ブラシ仕様 を最小実装：
+//   flatten = 対象を「自分 + 隣接 4 タイル」の中央値 elev に揃える
+//   smooth  = 隣接との段差が 2 段以上のときだけ、1 段ぶん近づける
+// 滑らかな自由斜面（SPEC 非目標）は作らず、必ず ELEV_STEP=25 単位に丸める。
+// =========================================================================
+export type EditTileResult =
+  | 'ok'
+  | 'no-change'
+  | 'is-sea'
+  | 'out-of-bounds';
+
+export function flattenTile(w: WorldState, tx: number, ty: number): EditTileResult {
+  const t = getTile(w.terrain, tx, ty);
+  if (!t) return 'out-of-bounds';
+  if (t.isSea) return 'is-sea';
+  const elevs: number[] = [t.elev];
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+    const n = getTile(w.terrain, tx + dx, ty + dy);
+    if (n && !n.isSea) elevs.push(n.elev);
+  }
+  elevs.sort((a, b) => a - b);
+  const median = elevs[Math.floor(elevs.length / 2)]!;
+  const newElev = snapElev(median);
+  if (newElev === t.elev) return 'no-change';
+  t.elev = newElev;
+  t.material = elevToMaterial(t.elev, t.isSea);
+  t.ramp = null;
+  t.stability = Math.min(t.stability, 0.7);
+  w.terrainVersion++;
+  return 'ok';
+}
+
+export function smoothTile(w: WorldState, tx: number, ty: number): EditTileResult {
+  const t = getTile(w.terrain, tx, ty);
+  if (!t) return 'out-of-bounds';
+  if (t.isSea) return 'is-sea';
+  let maxDiff = 0;
+  let sumNeighbor = 0;
+  let cnt = 0;
+  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+    const n = getTile(w.terrain, tx + dx, ty + dy);
+    if (n && !n.isSea) {
+      sumNeighbor += n.elev;
+      cnt++;
+      const d = Math.abs(t.elev - n.elev);
+      if (d > maxDiff) maxDiff = d;
+    }
+  }
+  if (cnt === 0) return 'out-of-bounds';
+  if (maxDiff < ELEV_STEP * 2) return 'no-change';  // 1 段差は崖でなく段差扱い、smooth しない
+  const avg = sumNeighbor / cnt;
+  const targetElev = snapElev(avg);
+  // 一気に 2 段以上動かさず、1 段だけ近づける
+  let newElev: number;
+  if (targetElev > t.elev) newElev = snapElev(Math.min(MAX_ELEV, t.elev + ELEV_STEP));
+  else if (targetElev < t.elev) newElev = snapElev(Math.max(0, t.elev - ELEV_STEP));
+  else return 'no-change';
+  if (newElev === t.elev) return 'no-change';
+  t.elev = newElev;
+  t.material = elevToMaterial(t.elev, t.isSea);
+  t.ramp = null;
+  t.stability = Math.min(t.stability, 0.7);
+  w.terrainVersion++;
+  return 'ok';
+}
+
 // タイルの elev を変更し stability を減衰。Σ-8 で 25 単位に正規化。
 export function raiseTile(terrain: TerrainTile[][], tx: number, ty: number, amount: number): void {
   const tile = getTile(terrain, tx, ty);

@@ -10,6 +10,8 @@ import {
   enqueueTerraformRaise,
   ensurePlots,
   setRampOnTile,
+  flattenTile,
+  smoothTile,
   forceSpawn,
   launchFlight,
   LOWER_SOIL_GAIN,
@@ -807,15 +809,17 @@ async function start() {
     hintEl.textContent = def.hint;
     if (rampRow) rampRow.style.display = (m === 'ramp') ? 'grid' : 'none';
   }
-  // Σ-8-b-2: ramp 設置モード（terraform mode と排他）
-  let s8RampMode = false;
-  function setS8RampMode(active: boolean) {
-    s8RampMode = active;
+  // Σ-8-b-2 / Σ-8-d-1: 排他モード管理。raise/lower は terraformMode 側、
+  // ramp / flatten / smooth は s8EditMode 側で持つ。
+  type S8EditMode = 'ramp' | 'flatten' | 'smooth' | null;
+  let s8EditMode: S8EditMode = null;
+  function setS8EditMode(mode: S8EditMode) {
+    s8EditMode = mode;
     document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((b) => {
-      b.classList.toggle('active', active && b.dataset.s8tool === 'ramp');
+      b.classList.toggle('active', mode !== null && b.dataset.s8tool === mode);
     });
-    updateSigma8Panel(active ? 'ramp' : null);
-    if (active) {
+    updateSigma8Panel(mode);
+    if (mode !== null) {
       setTerraformMode(null);
       setBuildMode(null);
     }
@@ -825,19 +829,22 @@ async function start() {
     btn.addEventListener('click', () => {
       const tool = btn.dataset.s8tool as S8Tool;
       if (tool === 'raise' || tool === 'lower') {
-        if (s8RampMode) setS8RampMode(false);
+        if (s8EditMode) setS8EditMode(null);
         setTerraformMode(terraformMode === tool ? null : tool);
         return;
       }
-      if (tool === 'ramp') {
-        // Σ-8-b-2: ramp 設置モード。方向は #s8-ramp-dir で選択
-        setS8RampMode(!s8RampMode);
-        if (s8RampMode) flashToast('坂道化モード：方向を選んで低い側のタイルをクリック', 'info');
+      if (tool === 'ramp' || tool === 'flatten' || tool === 'smooth') {
+        // Σ-8-b-2 / Σ-8-d-1: タイル単位の編集ブラシ群。同じものを 2 度押しで OFF。
+        const next = (s8EditMode === tool) ? null : tool;
+        setS8EditMode(next);
+        if (next === 'ramp')    flashToast('坂道化モード：方向を選んで低い側のタイルをクリック', 'info');
+        if (next === 'flatten') flashToast('平坦モード：クリックしたタイルを周囲の中央値に揃える', 'info');
+        if (next === 'smooth')  flashToast('整地モード：2 段差以上の崖を 1 段ずつ均す', 'info');
         return;
       }
       if (tool === 'build') {
         // 既存 build パネルへ誘導
-        if (s8RampMode) setS8RampMode(false);
+        if (s8EditMode) setS8EditMode(null);
         setTerraformMode(null);
         flashToast('右の建設パネルから建物を選んでわふ', 'info');
         updateSigma8Panel('build');
@@ -846,10 +853,10 @@ async function start() {
         });
         return;
       }
-      // flatten / smooth / channel：骨格段階。Σ-8-b-3 以降で本実装。
-      if (s8RampMode) setS8RampMode(false);
+      // channel: Σ-8-d-2 で本実装予定
+      if (s8EditMode) setS8EditMode(null);
       setTerraformMode(null);
-      flashToast(`${S8_TOOL_LABELS[tool].name} は Σ-8 後続フェーズで実装予定`, 'info');
+      flashToast(`${S8_TOOL_LABELS[tool].name} は次フェーズで実装予定`, 'info');
       updateSigma8Panel(tool);
       document.querySelectorAll<HTMLButtonElement>('.s8-tool').forEach((b) => {
         b.classList.toggle('active', b === btn);
@@ -884,20 +891,38 @@ async function start() {
   // 空クリック → 建設 or 地形編集モード処理
   stage.canvas.addEventListener('kszk-empty-click', (e) => {
     const detail = (e as CustomEvent).detail as { worldX: number; worldY: number };
-    // Σ-8-b-2: ramp 設置モード優先（terraform より上）
-    if (s8RampMode) {
+    // Σ-8-b-2 / Σ-8-d-1: タイル編集ブラシ（terraform より優先）
+    if (s8EditMode) {
       const { tx, ty } = worldToTile(detail.worldX, detail.worldY);
-      const dirSel = document.getElementById('s8-ramp-dir') as HTMLSelectElement | null;
-      const dir = (dirSel?.value ?? 'N') as 'N' | 'S' | 'E' | 'W';
-      const r = setRampOnTile(world, tx, ty, dir);
-      if (r === 'ok') {
-        flashToast(`坂道化 [${tx},${ty}] → ${dir}`, 'info');
-        announceRampPlaced(world, tx, ty);
-      } else if (r === 'no-step')         flashToast('高さ差がないわふ（隣との段差が必要）', 'info');
-      else if (r === 'wrong-direction')   flashToast('方向を逆にしてわふ（低い側にだけ坂道化できる）', 'info');
-      else if (r === 'too-steep')         flashToast('段差が大きすぎるわふ（高さ差 1 段だけ）', 'info');
-      else if (r === 'is-sea')            flashToast('海には立てられないわふ', 'info');
-      else                                flashToast('範囲外わふ', 'info');
+      if (s8EditMode === 'ramp') {
+        const dirSel = document.getElementById('s8-ramp-dir') as HTMLSelectElement | null;
+        const dir = (dirSel?.value ?? 'N') as 'N' | 'S' | 'E' | 'W';
+        const r = setRampOnTile(world, tx, ty, dir);
+        if (r === 'ok') {
+          flashToast(`坂道化 [${tx},${ty}] → ${dir}`, 'info');
+          announceRampPlaced(world, tx, ty);
+        } else if (r === 'no-step')         flashToast('高さ差がないわふ（隣との段差が必要）', 'info');
+        else if (r === 'wrong-direction')   flashToast('方向を逆にしてわふ（低い側にだけ坂道化できる）', 'info');
+        else if (r === 'too-steep')         flashToast('段差が大きすぎるわふ（高さ差 1 段だけ）', 'info');
+        else if (r === 'is-sea')            flashToast('海には立てられないわふ', 'info');
+        else                                flashToast('範囲外わふ', 'info');
+      } else if (s8EditMode === 'flatten') {
+        const r = flattenTile(world, tx, ty);
+        if (r === 'ok') {
+          flashToast(`平坦 [${tx},${ty}]`, 'info');
+          announceTileEdited(world, tx, ty, 'flatten');
+        } else if (r === 'is-sea')         flashToast('海は平坦化できないわふ', 'info');
+        else if (r === 'no-change')        flashToast('もう揃ってるわふ', 'info');
+        else                                flashToast('範囲外わふ', 'info');
+      } else if (s8EditMode === 'smooth') {
+        const r = smoothTile(world, tx, ty);
+        if (r === 'ok') {
+          flashToast(`整地 [${tx},${ty}]（1段近づけた）`, 'info');
+          announceTileEdited(world, tx, ty, 'smooth');
+        } else if (r === 'is-sea')         flashToast('海は整地できないわふ', 'info');
+        else if (r === 'no-change')        flashToast('崖じゃないから整地不要わふ', 'info');
+        else                                flashToast('範囲外わふ', 'info');
+      }
       return;
     }
     if (terraformMode) {
@@ -1504,39 +1529,74 @@ async function start() {
   window.addEventListener('beforeunload', saveOnUnload);
 }
 
-// Σ-8-b-2: ramp 設置時の周辺ちびわふ反応（trait 別の個性反映）
-const RAMP_LINES_NOUMIN = ['いいみちわふ！', 'はかどるわふ！', 'はたらくわふー！'];
-const RAMP_LINES_SEKKACHI = ['はやくいくわふ！', 'おさきにわふ！', 'いそぐわふ！'];
-const RAMP_LINES_NONBIRI = ['まあまあわふ', 'のんびりいこうわふ', 'いいながめわふ'];
-const RAMP_LINES_SHINPAI = ['だいじょうぶわふ？', 'こわれないわふ？', 'のぼれるかなわふ…'];
-const RAMP_LINES_BOUKEN = ['ぼうけんわふ！', 'のぼるわふー！', 'やまわふ！'];
-const RAMP_LINES_NAKIMUSHI = ['たかいよ〜わふ', 'こわいわふ…', 'ママぁ…わふ'];
-const RAMP_LINES_GUNSUKI = ['みんなくるわふ！', 'いっしょわふー！'];
-const RAMP_LINES_TAIKO_KKO = ['まつりだわふ！', 'どんどんわふ！'];
-const RAMP_LINES_GENERIC = ['さかみちわふ！', 'のぼるわふ', 'これでいけるわふ'];
+// Σ-8-b-2 / Σ-8-d-1: タイル編集時の周辺ちびわふ反応（trait 別の個性反映）。
+// ramp / flatten / smooth で別々のセリフプールを持つ。半径 110px 内の最大 3 体だけ
+// 反応する（連打でうるさくならないように抑制）。
+type EditEventKind = 'ramp' | 'flatten' | 'smooth';
 
-function announceRampPlaced(world: WorldState, tx: number, ty: number) {
+const EDIT_LINES: Record<EditEventKind, Record<string, string[]>> = {
+  ramp: {
+    noumin:    ['いいみちわふ！', 'はかどるわふ！', 'はたらくわふー！'],
+    sekkachi:  ['はやくいくわふ！', 'おさきにわふ！', 'いそぐわふ！'],
+    nonbiri:   ['まあまあわふ', 'のんびりいこうわふ', 'いいながめわふ'],
+    shinpai:   ['だいじょうぶわふ？', 'こわれないわふ？', 'のぼれるかなわふ…'],
+    bouken:    ['ぼうけんわふ！', 'のぼるわふー！', 'やまわふ！'],
+    nakimushi: ['たかいよ〜わふ', 'こわいわふ…', 'ママぁ…わふ'],
+    gunsuki:   ['みんなくるわふ！', 'いっしょわふー！'],
+    taiko_kko: ['まつりだわふ！', 'どんどんわふ！'],
+    generic:   ['さかみちわふ！', 'のぼるわふ', 'これでいけるわふ'],
+  },
+  flatten: {
+    noumin:    ['きれいになったわふ！', 'たがやすわふー！', 'はたけにできるわふ！'],
+    sekkachi:  ['はやくしてわふ！', 'もうおわった？わふ', 'まだまだわふ！'],
+    nonbiri:   ['ふぅ…ねむいわふ', 'のんびりやろうわふ', 'いいきもちわふ'],
+    shinpai:   ['ちゃんとできたわふ？', 'もういちどみるわふ…', 'だいじょうぶわふ？'],
+    bouken:    ['へいちすぎてつまんないわふ', 'やまがいいわふ！'],
+    nakimushi: ['えーん…ぐらぐらしたわふ', 'こわかったわふ…'],
+    gunsuki:   ['みんなのひろばわふ！', 'あつまろうわふ！'],
+    taiko_kko: ['ひろばで まつりわふ！', 'たいこたたくわふ！'],
+    generic:   ['たいらわふ！', 'うまくいったわふ', 'すっきりわふ'],
+  },
+  smooth: {
+    noumin:    ['ならされたわふ！', 'よくなったわふ！'],
+    sekkachi:  ['まだ？まだ？わふ', 'もっとはやくわふ！'],
+    nonbiri:   ['まったりわふ…', 'いいかんじわふ'],
+    shinpai:   ['くずれないわふ？', 'こわいわふ…'],
+    bouken:    ['もったいないわふ！', 'がけのままがよかったわふ'],
+    nakimushi: ['えーん…おちそうわふ', 'こわかったわふ'],
+    gunsuki:   ['みんなでみるわふ！'],
+    taiko_kko: ['まつりだわふー！'],
+    generic:   ['ならしたわふ！', 'なめらかわふ'],
+  },
+};
+
+function announceTileEdited(world: WorldState, tx: number, ty: number, kind: EditEventKind) {
   const cx = (tx + 0.5) * 32;
   const cy = (ty + 0.5) * 32;
   const candidates = world.chibis.filter((c) =>
     isChibiAlive(c) && !c.flight && Math.hypot(c.pos.x - cx, c.pos.y - cy) <= 110,
   );
   if (candidates.length === 0) return;
-  // 反応するのは半径内の最大 3 体（うるさくならないよう抑える）
   const reacted = candidates.slice(0, 3);
+  const pools = EDIT_LINES[kind];
   for (const c of reacted) {
-    let pool = RAMP_LINES_GENERIC;
-    if (c.traits.includes('noumin'))           pool = RAMP_LINES_NOUMIN;
-    else if (c.traits.includes('sekkachi'))    pool = RAMP_LINES_SEKKACHI;
-    else if (c.traits.includes('nonbiri'))     pool = RAMP_LINES_NONBIRI;
-    else if (c.traits.includes('shinpai'))     pool = RAMP_LINES_SHINPAI;
-    else if (c.traits.includes('bouken'))      pool = RAMP_LINES_BOUKEN;
-    else if (c.traits.includes('nakimushi'))   pool = RAMP_LINES_NAKIMUSHI;
-    else if (c.traits.includes('gunsuki'))     pool = RAMP_LINES_GUNSUKI;
-    else if (c.traits.includes('taiko_kko'))   pool = RAMP_LINES_TAIKO_KKO;
+    let pool = pools.generic!;
+    if (c.traits.includes('noumin'))           pool = pools.noumin ?? pool;
+    else if (c.traits.includes('sekkachi'))    pool = pools.sekkachi ?? pool;
+    else if (c.traits.includes('nonbiri'))     pool = pools.nonbiri ?? pool;
+    else if (c.traits.includes('shinpai'))     pool = pools.shinpai ?? pool;
+    else if (c.traits.includes('bouken'))      pool = pools.bouken ?? pool;
+    else if (c.traits.includes('nakimushi'))   pool = pools.nakimushi ?? pool;
+    else if (c.traits.includes('gunsuki'))     pool = pools.gunsuki ?? pool;
+    else if (c.traits.includes('taiko_kko'))   pool = pools.taiko_kko ?? pool;
     const line = pool[Math.floor(Math.random() * pool.length)]!;
     spawnBubble(world.bubbles, c.pos, line, 'speech', 1.6);
   }
+}
+
+// 旧 announceRampPlaced は announceTileEdited('ramp') へリダイレクト
+function announceRampPlaced(world: WorldState, tx: number, ty: number) {
+  announceTileEdited(world, tx, ty, 'ramp');
 }
 
 type ToastKind = 'info' | 'discovery';
