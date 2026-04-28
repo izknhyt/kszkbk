@@ -419,19 +419,20 @@ export function currentMods(w: WorldState): DifficultyMods {
 
 // ============================================================
 // 建設優先指示（Σ-6-x）：プレイヤーが「ここを優先して建てて」と指定した feature の
-// 有効期限を timestamp で管理。期限切れは自動で通常扱いに戻る。
+// 有効期限を sim 時間で管理。期限切れは自動で通常扱いに戻る。
+// Σ-8-fix-8: epoch(ms) → world.timeSec（ゲーム速度 / 一時停止 / セーブ&ロードと整合）
 // wanderStep env の priorityConstructionPositions に反映される。
 // ============================================================
-const constructionPriorityExpire = new Map<string, number>();  // featureId → epoch(ms)
+const constructionPriorityExpire = new Map<string, number>();  // featureId → expireSimTimeSec
 
-/** featureId に優先指示を付ける（期限 durationSec 秒、デフォ 300=5分） */
-export function setConstructionPriority(featureId: string, durationSec = 300): void {
-  constructionPriorityExpire.set(featureId, Date.now() + durationSec * 1000);
+/** featureId に優先指示を付ける（期限 durationSec 秒、デフォ 300=5分、sim 時間ベース） */
+export function setConstructionPriority(w: WorldState, featureId: string, durationSec = 300): void {
+  constructionPriorityExpire.set(featureId, w.timeSec + durationSec);
 }
 
 /** 現在優先中の featureId セット（期限切れを自動削除） */
-function getActivePriorityIds(): Set<string> {
-  const now = Date.now();
+function getActivePriorityIds(w: WorldState): Set<string> {
+  const now = w.timeSec;
   const active = new Set<string>();
   for (const [id, expire] of constructionPriorityExpire) {
     if (expire < now) constructionPriorityExpire.delete(id);
@@ -441,10 +442,10 @@ function getActivePriorityIds(): Set<string> {
 }
 
 /** 外部（main.ts UI）から優先状態を問い合わせるためのヘルパー */
-export function isConstructionPriority(featureId: string): boolean {
+export function isConstructionPriority(w: WorldState, featureId: string): boolean {
   const expire = constructionPriorityExpire.get(featureId);
   if (expire == null) return false;
-  if (expire < Date.now()) {
+  if (expire < w.timeSec) {
     constructionPriorityExpire.delete(featureId);
     return false;
   }
@@ -1150,15 +1151,16 @@ export const LOWER_STONE_GAIN = 7;  // rock タイルから
 
 // 盛り土ジョブをキューに追加。soil 消費は即時（ジョブ登録時点で予約）。
 // Σ-6-x: terraform ジョブ優先指示（Map で transient に管理、5 分で expire）。
+// Σ-8-fix-8: epoch(ms) → world.timeSec（ゲーム速度 / 一時停止 / セーブ&ロードと整合）
 // プレイヤーがクリックで置いたジョブは自動的に優先扱い → ちびわふが集まる。
-const terraformPriorityExpire = new Map<string, number>();
+const terraformPriorityExpire = new Map<string, number>();  // jobId → expireSimTimeSec
 
-function markTerraformPriority(jobId: string, durationSec = 300): void {
-  terraformPriorityExpire.set(jobId, Date.now() + durationSec * 1000);
+function markTerraformPriority(w: WorldState, jobId: string, durationSec = 300): void {
+  terraformPriorityExpire.set(jobId, w.timeSec + durationSec);
 }
 
-function getActiveTerraformPriorityIds(): Set<string> {
-  const now = Date.now();
+function getActiveTerraformPriorityIds(w: WorldState): Set<string> {
+  const now = w.timeSec;
   const active = new Set<string>();
   for (const [id, expire] of terraformPriorityExpire) {
     if (expire < now) terraformPriorityExpire.delete(id);
@@ -1182,7 +1184,7 @@ export function enqueueTerraformRaise(w: WorldState, tx: number, ty: number): bo
   w.resources.soil -= RAISE_COST_SOIL;
   const jobId = `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   w.terraformJobs.push({ id: jobId, tx, ty, target: 'raise', progress: 0 });
-  markTerraformPriority(jobId, 300);  // 新規登録時は 5 分間優先
+  markTerraformPriority(w, jobId, 300);  // 新規登録時は 5 分間優先（sim 時間）
   return true;
 }
 
@@ -1195,7 +1197,7 @@ export function enqueueTerraformLower(w: WorldState, tx: number, ty: number): bo
   }
   const jobId = `tj-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   w.terraformJobs.push({ id: jobId, tx, ty, target: 'lower', progress: 0 });
-  markTerraformPriority(jobId, 300);  // 新規登録時は 5 分間優先
+  markTerraformPriority(w, jobId, 300);  // 新規登録時は 5 分間優先（sim 時間）
   return true;
 }
 
@@ -3015,7 +3017,7 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   const shrinePositions: Vec2[] = [];
   const constructionPositions: Vec2[] = [];
   const priorityConstructionPositions: Vec2[] = [];
-  const priorityIds = getActivePriorityIds();
+  const priorityIds = getActivePriorityIds(w);
   for (const f of w.features) {
     if (f.kind === 'farm') farmPositions.push(f.pos);
     else if (f.kind === 'shrine') shrinePositions.push(f.pos);
@@ -3038,7 +3040,7 @@ function getWanderEnv(w: WorldState): WanderEnvCache {
   // Σ-6-x: 直近置かれたジョブは priorityTerraformJobPositions に入れる（自動 5 分優先）
   const terraformJobPositions: Vec2[] = [];
   const priorityTerraformJobPositions: Vec2[] = [];
-  const terraformPriorityIds = getActiveTerraformPriorityIds();
+  const terraformPriorityIds = getActiveTerraformPriorityIds(w);
   for (const j of w.terraformJobs) {
     const p = { x: (j.tx + 0.5) * TERRAIN_TILE_SIZE, y: (j.ty + 0.5) * TERRAIN_TILE_SIZE };
     terraformJobPositions.push(p);

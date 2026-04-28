@@ -4,7 +4,38 @@ import { activateTerrain, TERRAIN_COLS, TERRAIN_ROWS } from '../sim/world';
 import { peekNextId, resetIdCounter } from '../sim/chibiwafu';
 import { CONFIG } from '../config';
 
-// 3 スロット制のローグライク向けセーブ。スロット毎に独立した run / difficulty を持つ。
+// =========================================================================
+// 3 スロット制のセーブ。スロット毎に独立した run / difficulty を持つ。
+//
+// ## 永続化スコープ（仕様）
+//
+// **persist する**:
+//   - メタ: runId / runStartedAtMs / difficulty / nextId
+//   - 進行: points / totalPointsEarned / totalDeaths / totalBirths / stompCount
+//          / timeSec / dex / villageRank（buildings 経由）
+//   - 統計: recentDeaths / sumDeathAgeSec / longestLife / shortestLife
+//          / wolvesKilled
+//   - 配置: buildings / features（transient flow/saturated は除外）/ obstacles
+//   - 資源: resources（food/wood/stone/plank/power/brick/wool/cloth/soil 等）
+//   - 気象: weather / weatherForecast / lastWeatherDayCount
+//   - 地形: terrain RLE 圧縮（elev/material/stability/waterLevel/ramp/wetness/
+//          mud/snow/isSea）/ terrainSeed / terraformJobs
+//
+// **persist しない（ロード時に再生成）**:
+//   - chibis: ロード後に initial spawn ロジックで再生成（個体は使い捨て）
+//   - npcs: ロード後に createNpcs(difficulty) で初期配置から再生成
+//          フラナの mood / hp も初期値から開始
+//   - corpses: 死体は次ランで持ち越さない
+//   - wolves: 夜の襲撃は次ロード時に再キュー
+//   - bubbles / floodZones: transient FX
+//   - terrainVersion: ロード後 0 リセット、A* path も全 chibi で初期化される
+//   - hydroTimer: 0 リセット
+//   - terraformPriorityExpire / constructionPriorityExpire: モジュール状態、
+//     ロード後は空（プレイヤーが再指示）
+//
+// 「ちびわふは使い捨て、ランの記憶は数値統計と地形に残す」設計思想。
+// 続編プレイでも村の地形・資源・建設は維持される。
+// =========================================================================
 export type SlotId = 1 | 2 | 3;
 
 const OLD_SINGLE_KEY = 'kszkbk:save:v1';

@@ -1445,10 +1445,10 @@ async function start() {
           f,
           () => cancelConstruction(f.id),
           () => {
-            setConstructionPriority(f.id, 300);
+            setConstructionPriority(world, f.id, 300);
             flashToast('📣 優先建設にしたわふ（5 分間）', 'info');
           },
-          isConstructionPriority(f.id),
+          isConstructionPriority(world, f.id),
         );
         return;
       }
