@@ -39,6 +39,7 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `50_prompt_templates.md` | 発注マスタープロンプト（コピペ用）|
 | `90_qa_checklist.md` | 納品検品チェックリスト |
 | `SIGMA-8-UI-ASSET-SPEC.md` | 地形 atlas / Ground props / 工事ポーズ / UI Icons の仕様 |
+| `SIGMA-8-ASSET-IMPLEMENTATION-SPEC.md` | 生成済み terrain/props/features のセル対応・実装順・Claude引き継ぎ |
 | `sigma-8-mockup.png` | 画風基準の参考画像（pixel-perfect ではない、構図の手本） |
 
 ### 3. 古い / 参考扱い（読まなくていい）
@@ -63,6 +64,7 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `SIGMA-8-DEVELOPMENT-SPEC.md` | Sigma-8 の実装仕様・禁止事項・検証基準 | Sigma-8 実装時 |
 | `SIGMA-8-IMPLEMENTATION-STATUS.md` | Sigma-8 の Done / Gap / Deferred 一覧 | Sigma-8 実装着手前 |
 | `SIGMA-8-UI-ASSET-SPEC.md` | Sigma-8 の UI / terrain atlas / prop / icon 仕様 | UI・素材実装/発注時 |
+| `SIGMA-8-ASSET-IMPLEMENTATION-SPEC.md` | 生成済み terrain/props/features asset の実装マッピング | 素材統合時 |
 | `M2-DIRECTION-RESET.md` | M2.1 以降の設計方針。旧 points 建設 / 旧 NPC / 音頭の整理 | 次フェーズ設計時 |
 | `M2-MIGRATION-PLAN.md` | M2.1 実装ステップ計画。7 段階に分解、grep 調査済 | M2.1 コード変更前 |
 | `DIALOGUE-CATALOG.md` | セリフ、死因テンプレート、発言プールの棚卸し | 台詞・死因整理時 |

@@ -2,6 +2,8 @@
 
 この仕様書は Sigma-8 の UI と素材発注の正本。基準画像は
 [sigma-8-mockup.png](sigma-8-mockup.png) とする。
+生成済み素材を実装へ渡すセル対応・優先順は
+`SIGMA-8-ASSET-IMPLEMENTATION-SPEC.md` を正本にする。
 
 目的は「かわいい画面」ではなく、地形開発ゲームとして必要な情報が一瞬で読めること。
 UI、地形タイル、overlay、アイコン、props は同じ画面言語で揃える。

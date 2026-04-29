@@ -2321,17 +2321,20 @@ export function createWorld(difficulty: Difficulty = 'standard'): WorldState {
 }
 
 // 初期 feature/障害物 を生成してワールドに載せる。createWorld / load 後に呼ぶ。
-export function ensurePlots(w: WorldState) {
+export function ensurePlots(w: WorldState, opts: { preserveWeather?: boolean } = {}) {
   if (!w.features || w.features.length === 0) {
     w.features = createInitialFeatures(w.bounds);
   }
   if (!w.obstacles || w.obstacles.length === 0) {
     w.obstacles = createInitialObstacles(w.bounds, DIFFICULTY_MODS[w.difficulty].obstacleCount);
   }
-  // 天気予報を実際の季節に合わせて再生成（ロード直後の不整合対策）
-  w.weatherForecast = generateForecast(w);
-  const today = w.weatherForecast.find((e) => e.dayOffset === 0);
-  if (today) w.weather = { kind: today.kind, remainingSec: CONFIG.SECONDS_PER_DAY };
+  // 新規ランでは天気予報を実際の季節に合わせて生成する。
+  // ロード時は save.ts が復元した weather / forecast / remainingSec を維持する。
+  if (!opts.preserveWeather) {
+    w.weatherForecast = generateForecast(w);
+    const today = w.weatherForecast.find((e) => e.dayOffset === 0);
+    if (today) w.weather = { kind: today.kind, remainingSec: CONFIG.SECONDS_PER_DAY };
+  }
   // transient フィールドのロード後初期化
   if (!w.floodZones) w.floodZones = [];
   if (!w.wolves) w.wolves = [];
@@ -2428,8 +2431,7 @@ function scheduleEvents(w: WorldState, dt: number) {
   // M2.1: pickOndo 常に false（旧条件 ondoReady && (!fireReady || ...)）
   const pickOndo = false;
   if (pickOndo) {
-    // LEGACY M2.1: 旧 ondo 自動発火コード（scheduleEvents 経由）。
-    // triggerOndo 直接呼び出しは debug ボタンで残るが、自動 schedule は停止。
+    // LEGACY M2.1: 旧 ondo 自動発火コード（scheduleEvents 経由、現在到達しない）。
     w.event = {
       kind: 'ondo',
       duration: CONFIG.ONDO_DURATION_SEC,
@@ -2932,14 +2934,9 @@ function resolveEvent(w: WorldState, dt: number) {
   }
 }
 
-export function triggerOndo(w: WorldState) {
-  w.event = {
-    kind: 'ondo',
-    duration: CONFIG.ONDO_DURATION_SEC,
-    remaining: CONFIG.ONDO_DURATION_SEC,
-    intensity: CONFIG.ONDO_KILL_RATE + 0.05,
-  };
-  reactNpcsToOndo(w);
+export function triggerOndo(_w: WorldState): boolean {
+  // M2.1: くそざこ音頭は廃止。legacy API は外部参照互換のため残すが発火しない。
+  return false;
 }
 
 export function triggerBokaigi(w: WorldState) {
