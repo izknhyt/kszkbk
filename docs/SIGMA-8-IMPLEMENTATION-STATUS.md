@@ -151,7 +151,12 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
   - **R1 完了（Cliff Readability Reform）**: cliff wall を 3 バリアント IM（soil/rock/damp）+
     底面コンタクトシャドウ IM に置き換え。deterministic brightness variation で縦壁紙感を低減。
     lower tile の material/waterLevel/isSea で atlas cell を選択（docs/SIGMA-8-ASSET-IMPLEMENTATION-SPEC.md 準拠）。
-- 残課題: 水際/滝、工事状態、雨雪状態モック
+  - **R2 完了（Water/Shoreline/Flow Reform）**: 水位 tier 閾値を danger threshold 0.35 に合わせ再設計。
+    海タイルに per-tile depth color variation 追加。危険域（wl≥0.35）に pulsing 赤橙オーバーレイ。
+    海岸線 foam（sea-land 境界）追加。inland water foam は別色で区別。
+    cliff 上端に waterLevel≥0.25 の境界で 縦水流パネル（waterfallIM）を配置、下向き UV scroll。
+    atlas WATERFALL_CELL(3,3) UV + 手続きテクスチャ（画像ファイルなし）。
+- 残課題: 工事状態、雨雪状態モック、水際 atlas 画像（Batch B 判断待ち）
 - cliff variants v2 画像生成は、R1 コード改善後の実機スクショを見て再判断（→ Gap-2a 参照）
 - 次の正本: `SIGMA-8-VISUAL-ASSET-ROADMAP.md`
 - 優先度: **中〜高**（商業見た目へ寄せる主作業）
@@ -236,11 +241,12 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 
 1. **Visual System 固定** — `SIGMA-8-VISUAL-SYSTEM-SPEC.md` を正本にして状態/見た目/素材の対応を守る
 2. **Gameplay Reform R1** — 崖描画をコード先行で改善 ✅ **完了**（3 variant IM + shadow + brightness variation）
-3. **Gap-2a: cliff variants v2 判断** — 実機スクショで wallpaper 感が残るか確認、残るなら Batch A 生成
-4. **Gameplay Reform R2** — 水位 / 水際 / 流れ / 滝の表示を改善
-5. **Gameplay Reform R3** — ramp 工事ジョブ化と worksite 表示
-6. **追加素材生成** — cliff / water / worksite の必要 batch だけ生成
-7. **旧要素の完全削除判断** — legacy 温存から削除へ進めるか決める
-8. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
+3. **Gameplay Reform R2** — 水位 / 水際 / 流れ / 滝の表示を改善 ✅ **完了**（tier color, danger pulse, sea foam, waterfall IM）
+4. **Gap-2a: cliff variants v2 判断** — 実機スクショで wallpaper 感が残るか確認、残るなら Batch A 生成
+5. **Gap-2b: water/shoreline 画像生成判断** — R2 コード先行後の実機スクショで Batch B 必要か判断
+6. **Gameplay Reform R3** — ramp 工事ジョブ化と worksite 表示
+7. **追加素材生成** — cliff / water / worksite の必要 batch だけ生成
+8. **旧要素の完全削除判断** — legacy 温存から削除へ進めるか決める
+9. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
 
 更新タイミング: 新フェーズ commit 時に該当行を Done に動かす、新規 Gap が見つかったら追加。
