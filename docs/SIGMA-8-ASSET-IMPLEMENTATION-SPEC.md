@@ -2,6 +2,7 @@
 
 この仕様書は、ChatGPT 生成済みの Sigma-8 visual asset を実装へ渡すための正本。
 画風判断は `docs/sigma-8-mockup.png`、実装対象素材は `public/` 配下の v1/v2 画像を参照する。
+上位判断は `SIGMA-8-VISUAL-SYSTEM-SPEC.md` に従い、素材はそこで定義された表示状態を埋める用途に限定する。
 
 ## 目的
 
@@ -11,22 +12,27 @@
 この段階では pixel-perfect な最終素材ではなく、M2.1/M2.2 で見た目を一段上げるための
 実装基準素材として扱う。実装後のスクショを見て、必要セルだけ再生成する。
 
+次に生成すべきモック / cliff / water / worksite 系アセットは
+`SIGMA-8-VISUAL-SYSTEM-SPEC.md` で状態を確認し、
+`SIGMA-8-VISUAL-ASSET-ROADMAP.md` で batch と採用ゲートを決める。
+
 ## Asset Files
 
 | 種別 | Raw | 実装参照 | 用途 |
 |---|---|---|---|
 | Terrain atlas v2 | `public/terrain/sigma8_terrain_atlas_v2_raw.png` | `public/terrain/sigma8_terrain_atlas_v2_1024.png` | 地表、崖、坂、水際 |
-| Ground props v1 | `public/props/sigma8_ground_props_v1_raw.png` | `public/props/sigma8_ground_props_v1_1024.png` | 草、石、低木、工事小物 |
-| Feature sprites v1 | `public/features/sigma8_feature_sprites_v1_raw.png` | `public/features/sigma8_feature_sprites_v1_1024.png` | 家、畑、水源、井戸、塔など |
+| Ground props v1 | `public/props/sigma8_ground_props_v1_raw.png` | `public/props/sigma8_ground_props_v1_processed.png` | 草、石、低木、工事小物 |
+| Feature sprites v1 | `public/features/sigma8_feature_sprites_v1_raw.png` | `public/features/sigma8_feature_sprites_v1_processed.png` | 家、畑、水源、井戸、塔など |
 
-Raw は生成物そのまま。実装参照版は 1024x1024 にリサイズ済み。
+Raw は生成物そのまま。実装参照版は 1024x1024 にリサイズし、props/features は
+チェッカーボード背景を alpha 化した processed PNG。
 4x4 grid として扱い、1 cell = 256x256 px。
 
 ## Important Caveats
 
-- 生成画像は RGB PNG。props/features は透明PNGではない。
-- 実装でそのままビルボードに貼ると背景矩形が出る可能性が高い。
-- props/features は先にセル切り出しし、背景抜きまたは alpha mask 化する。
+- raw / 1024 版の生成画像は RGB PNG。props/features は透明PNGではない。
+- 実装では `*_processed.png` を使う。チェッカーボード背景を edge-connected alpha key で抜いている。
+- processed 版でも薄い白煙や淡色部の欠けがないか、実機スクショで確認する。
 - Terrain atlas は地表テクスチャとしてそのまま試してよいが、セル境界のにじみ確認が必要。
 - `texture.repeat` で強く繰り返すより、tile ごとに UV を atlas cell へ張る運用を優先する。
 
@@ -66,7 +72,7 @@ Grid coordinate は `(col,row)`、左上が `(0,0)`。
 
 ## Ground Props v1 Cell Map
 
-File: `public/props/sigma8_ground_props_v1_1024.png`
+File: `public/props/sigma8_ground_props_v1_processed.png`
 
 | Cell | Coord | Name | Suggested Feature |
 |---|---:|---|---|
@@ -102,7 +108,7 @@ File: `public/props/sigma8_ground_props_v1_1024.png`
 
 ## Feature Sprites v1 Cell Map
 
-File: `public/features/sigma8_feature_sprites_v1_1024.png`
+File: `public/features/sigma8_feature_sprites_v1_processed.png`
 
 | Cell | Coord | Feature Kind |
 |---|---:|---|
@@ -138,9 +144,9 @@ File: `public/features/sigma8_feature_sprites_v1_1024.png`
 ## Implementation Priority
 
 1. Terrain atlas v2 top materials + cliff cells.
-2. Terraform job visual: cut-earth cell + construction props 11-15.
+2. Feature sprites for `house`, `farm`, `water`, `well`, `firewatch`, `sawmill`.
 3. Ground props random placement on grass/soil/rock.
-4. Feature sprites for `house`, `farm`, `water`, `well`, `firewatch`, `sawmill`.
+4. Terraform job visual: cut-earth cell + construction props 11-15.
 5. Remaining feature sprites.
 6. Water edge / waterfall cells after terrain screenshot review.
 
@@ -162,12 +168,12 @@ Implement Sigma-8 visual asset integration using docs/SIGMA-8-ASSET-IMPLEMENTATI
 
 Scope:
 1. Load public/terrain/sigma8_terrain_atlas_v2_1024.png and update terrain material/cliff/ramp cell mapping.
-2. Add a deterministic ground prop sprite system using public/props/sigma8_ground_props_v1_1024.png.
-3. Add feature sprite rendering using public/features/sigma8_feature_sprites_v1_1024.png for at least house/farm/water/well/firewatch/sawmill.
+2. Add a deterministic ground prop sprite system using public/props/sigma8_ground_props_v1_processed.png.
+3. Add feature sprite rendering using public/features/sigma8_feature_sprites_v1_processed.png for at least house/farm/water/well/firewatch/sawmill.
 
 Constraints:
 - Do not change gameplay rules.
 - Preserve current hit testing and feature ids.
-- Props/features sheets are RGB, not transparent; if used directly, implement safe alpha/keying or first create processed transparent cell sprites.
+- Props/features raw sheets are RGB; use the processed transparent PNGs unless regenerating the assets.
 - Keep changes incremental. Typecheck/test/build must pass.
 ```

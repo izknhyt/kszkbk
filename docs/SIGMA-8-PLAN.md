@@ -233,6 +233,14 @@ M2 で UI は後回しにしない。最低限、次を入れる。
 AI 生成アセットは必ずゲーム内で検品する。シームレス性、縮小表示、彩度、ちびわふとの整合が
 崩れる場合は再発注または補正する。
 
+2026-04-29 時点の追加方針:
+
+- terrain atlas v2 / ground props v1 / feature sprites v1 は runtime 接続済み
+- ただしモック生成は完了ではない。雨・雪・工事・水際・キャラ比較の追加モックが必要
+- 素材追加の前に `SIGMA-8-VISUAL-SYSTEM-SPEC.md` で表示状態とゲーム条件を固定する
+- 実装順は `SIGMA-8-GAMEPLAY-REFORM-PLAN.md` を参照する
+- 次の生成 batch と採用ゲートは `SIGMA-8-VISUAL-ASSET-ROADMAP.md` を正本にする
+
 ## M2 後の分岐
 
 Week 9 に M2 評価を行う。

@@ -61,9 +61,9 @@ npm run dev
 
 | 作業 | 現状 |
 |---|---|
-| terrain atlas 処理 | 手動生成済み。`public/terrain/sigma8_terrain_atlas_v1_processed.png` が runtime 正本 |
+| terrain atlas 処理 | 手動生成済み。`public/terrain/sigma8_terrain_atlas_v2_1024.png` が runtime 正本 |
 | dialogue catalog 生成 | 未自動化。`docs/DIALOGUE-CATALOG.md` を手動更新 |
-| props 生成 | ChatGPT サブスク版 UI で生成、検品後に `public/terrain/props/` へ保存 |
+| props/features 生成 | ChatGPT サブスク版 UI で生成、背景 alpha 化後に `public/props/` / `public/features/` へ保存 |
 | 工事ポーズ生成 | ChatGPT サブスク版 UI で生成、検品後に `public/chibiwafu/` へ保存 |
 
 将来追加候補:
@@ -82,4 +82,3 @@ npm run dev
 - 未追跡の `mockup.html` / `progress.md` はユーザー作業の可能性があるため、明示指示なしに stage しない
 - ブランチを荒らしたくない場合は `codex/` prefix で作業 branch を切る
 - docs だけの変更でも `npm run typecheck` は不要。ただしコード参照を変えた場合は実行する
-

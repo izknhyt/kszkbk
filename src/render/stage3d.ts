@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import type { WorldState } from '../sim/world';
 import { POWERLINE_CONNECT_RADIUS, TERRAIN_TILE_SIZE } from '../sim/world';
 import { elevAtTileSurface, isSeaAt } from '../sim/terrain/query';
-import type { ChibiState, DayPhase, Difficulty, HitTarget, PlacedBuilding, Season } from '../types';
+import type { ChibiState, DayPhase, Difficulty, FeatureKind, HitTarget, PlacedBuilding, Season } from '../types';
 import { NPC_DEFS, type NpcId } from '../sim/npcs';
 import { CONFIG } from '../config';
 import type { Bubble } from '../sim/bubbles';
@@ -257,13 +257,14 @@ function atlasUVBounds(col: number, row: number): { uMin: number; uMax: number; 
   };
 }
 const MAT_CELL: Record<string, [number, number]> = {
-  // material → (col, row)
-  grass: [0, 0], soil: [1, 0], rock: [2, 0], sand: [3, 0],
-  snow:  [0, 1],
+  // sigma8_terrain_atlas_v2_1024.png / docs/SIGMA-8-ASSET-IMPLEMENTATION-SPEC.md
+  grass: [0, 0], soil: [1, 0], rock: [0, 1], sand: [2, 0],
+  snow:  [3, 0],
 };
-const CLIFF_CELL: [number, number] = [1, 1];
-const RAMP_NS_CELL: [number, number] = [2, 1];  // 'N' そのまま / 'S' は上下反転
-const RAMP_EW_CELL: [number, number] = [3, 1];  // 'E' そのまま / 'W' は左右反転
+const CLIFF_CELL: [number, number] = [0, 2];
+const WATER_CELL: [number, number] = [1, 1];
+const RAMP_NS_CELL: [number, number] = [3, 2];  // 'N' そのまま / 'S' は上下反転
+const RAMP_EW_CELL: [number, number] = [0, 3];  // 'E' そのまま / 'W' は左右反転
 
 // ramp 方向 + コーナーごとに、atlas 上の UV 座標 (u, v) を返す。
 function rampCornerUV(rampDir: 'N'|'S'|'E'|'W', corner: 'NW'|'NE'|'SW'|'SE'): { u: number; v: number } {
@@ -486,6 +487,127 @@ function spriteMesh(w: number, h: number, tex: THREE.Texture): THREE.Mesh {
 }
 
 // ============================================================
+// Sigma-8 generated sheet sprites
+// ============================================================
+let featureSheetTex: THREE.Texture | null = null;
+let propSheetTex: THREE.Texture | null = null;
+
+function atlasPlaneGeometry(cell: [number, number], w: number, h: number): THREE.PlaneGeometry {
+  const geo = new THREE.PlaneGeometry(w, h);
+  const b = atlasUVBounds(cell[0], cell[1]);
+  const uv = geo.attributes.uv as THREE.BufferAttribute;
+  uv.setXY(0, b.uMin, b.vMax);
+  uv.setXY(1, b.uMax, b.vMax);
+  uv.setXY(2, b.uMin, b.vMin);
+  uv.setXY(3, b.uMax, b.vMin);
+  uv.needsUpdate = true;
+  return geo;
+}
+
+function atlasSprite(w: number, h: number, tex: THREE.Texture, cell: [number, number]): THREE.Mesh {
+  const mesh = new THREE.Mesh(
+    atlasPlaneGeometry(cell, w, h),
+    new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      alphaTest: 0.08,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  mesh.renderOrder = 2;
+  return mesh;
+}
+
+function makeContactShadow(rx: number, rz: number): THREE.Mesh {
+  const geo = new THREE.CircleGeometry(1, 24);
+  geo.rotateX(-Math.PI / 2);
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    color: 0x1a1208,
+    transparent: true,
+    opacity: 0.18,
+    depthWrite: false,
+  }));
+  mesh.scale.set(rx, rz, 1);
+  mesh.position.y = 1;
+  mesh.renderOrder = 1;
+  return mesh;
+}
+
+const FEATURE_SPRITE_CELL: Partial<Record<FeatureKind, [number, number]>> = {
+  house: [0, 0],
+  farm: [2, 0],
+  water: [0, 1],
+  well: [1, 1],
+  firewatch: [2, 1],
+  sawmill: [3, 1],
+  shrine: [0, 2],
+  kiln: [1, 2],
+  generator: [2, 2],
+  streetlamp: [3, 2],
+  powerline: [0, 3],
+  pasture: [1, 3],
+  loom: [2, 3],
+};
+const FEATURE_SPRITE_SIZE: Partial<Record<FeatureKind, [number, number]>> = {
+  house: [92, 82],
+  farm: [86, 60],
+  water: [80, 58],
+  well: [64, 72],
+  firewatch: [68, 96],
+  sawmill: [90, 74],
+  shrine: [78, 76],
+  kiln: [70, 72],
+  generator: [82, 66],
+  streetlamp: [44, 92],
+  powerline: [62, 92],
+  pasture: [88, 62],
+  loom: [78, 76],
+};
+
+const GROUND_PROP_DEFS = [
+  { cell: [0, 0] as [number, number], w: 24, h: 28, tags: ['grass'] },
+  { cell: [1, 0] as [number, number], w: 30, h: 38, tags: ['grass'] },
+  { cell: [2, 0] as [number, number], w: 30, h: 34, tags: ['flower'] },
+  { cell: [3, 0] as [number, number], w: 34, h: 34, tags: ['shrub'] },
+  { cell: [0, 1] as [number, number], w: 34, h: 42, tags: ['shrub'] },
+  { cell: [1, 1] as [number, number], w: 30, h: 30, tags: ['mushroom'] },
+  { cell: [2, 1] as [number, number], w: 26, h: 18, tags: ['rock'] },
+  { cell: [3, 1] as [number, number], w: 34, h: 32, tags: ['rock'] },
+  { cell: [0, 2] as [number, number], w: 32, h: 34, tags: ['wood'] },
+  { cell: [1, 2] as [number, number], w: 42, h: 28, tags: ['wood'] },
+  { cell: [2, 2] as [number, number], w: 30, h: 26, tags: ['soil'] },
+  { cell: [3, 2] as [number, number], w: 34, h: 28, tags: ['soil'] },
+];
+
+function tileHash01(x: number, y: number, seed = 1, salt = 0): number {
+  let n = (x * 374761393 + y * 668265263 + seed * 2246822519 + salt * 3266489917) >>> 0;
+  n = Math.imul(n ^ (n >>> 13), 1274126177) >>> 0;
+  return ((n ^ (n >>> 16)) >>> 0) / 0xffffffff;
+}
+
+function featureSpriteCell(f: import('../types').Feature): [number, number] | null {
+  if (f.devLevel < 2) return [3, 3];
+  if (f.kind === 'farm' && (f.saturated || f.wateredByTile)) return [3, 0];
+  if (f.kind === 'house' && f.devLevel >= 2) return [1, 0];
+  return FEATURE_SPRITE_CELL[f.kind] ?? null;
+}
+
+function makeFeatureSpriteGroup(f: import('../types').Feature): THREE.Group | null {
+  if (!featureSheetTex) return null;
+  const cell = featureSpriteCell(f);
+  if (!cell) return null;
+  const [w, h] = f.devLevel < 2 ? [74, 62] : (FEATURE_SPRITE_SIZE[f.kind] ?? [72, 66]);
+  const g = new THREE.Group();
+  g.add(makeContactShadow(Math.max(18, w * 0.34), Math.max(10, w * 0.18)));
+  const sprite = atlasSprite(w, h, featureSheetTex, cell);
+  sprite.position.y = h / 2;
+  g.add(sprite);
+  if (f.devLevel >= 2 && f.devLevel > 2) g.add(makeLvLabel(f.devLevel));
+  return g;
+}
+
+// ============================================================
 // 日時計ティント
 // ============================================================
 const PHASE_TINT: Record<DayPhase,{sky:number;amb:number;dir:number;dirC:number}> = {
@@ -559,6 +681,9 @@ function makeScaffoldGroup(opacity: number): THREE.Group {
 }
 
 function makeFeatureGroup(f: import('../types').Feature): THREE.Group {
+  const spriteGroup = makeFeatureSpriteGroup(f);
+  if (spriteGroup) return spriteGroup;
+
   const g = new THREE.Group();
   const lv = f.devLevel;
 
@@ -864,11 +989,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // rippleTex 適用は後で（rippleTex 定義後に行う必要があるため、参照は draw() 内で）。
   const _waterTileGeo = new THREE.PlaneGeometry(TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE);
   _waterTileGeo.rotateX(-Math.PI/2);
-  // Σ-8-d-2: atlas water overlay cell (0, 2) に UV を合わせる。読込前は
+  // Σ-8-d-2: atlas water overlay cell に UV を合わせる。読込前は
   // map=null で MeshBasicMaterial の color が出るだけ、読込後にこの UV で
   // 波模様が貼られる。
   {
-    const wuv = atlasUVBounds(0, 2);
+    const wuv = atlasUVBounds(WATER_CELL[0], WATER_CELL[1]);
     const ua = _waterTileGeo.attributes.uv as THREE.BufferAttribute;
     // 4 vertices の順序は PlaneGeometry default：(0,1)/(1,1)/(0,0)/(1,0)
     ua.setXY(0, wuv.uMin, wuv.vMax);
@@ -903,7 +1028,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   let MAX_CLIFF_WALLS = 2400;
   const _cliffWallGeo = new THREE.PlaneGeometry(1, 1);
   // PlaneGeometry の UV はデフォ (0,1)/(1,1)/(0,0)/(1,0)。これを atlas の
-  // cliff cell (col=1, row=1) の bounds に書き換えて、texture 貼った時に正しい
+  // cliff cell の bounds に書き換えて、texture 貼った時に正しい
   // 範囲を取れるように。読み込み前は color tint で岩茶のまま。
   {
     const cuv = atlasUVBounds(CLIFF_CELL[0], CLIFF_CELL[1]);
@@ -975,7 +1100,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // 1024×1024 RGBA / 4×4 / 256px cell の処理済アセットを地形 mesh と
   // 崖壁面 mesh の map にぶら下げる。読込前は vertexColors のみで描画、
   // 完了で map を inject（一度切り替わるとそのまま）。
-  const ATLAS_URL = '/terrain/sigma8_terrain_atlas_v1_processed.png';
+  const ATLAS_URL = '/terrain/sigma8_terrain_atlas_v2_1024.png';
   new THREE.TextureLoader().load(ATLAS_URL, (tex) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.minFilter = THREE.LinearFilter;
@@ -988,15 +1113,16 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     cwMat.map = tex;
     cwMat.color.setHex(0xffffff);  // map に色を任せる
     cwMat.needsUpdate = true;
-    // Σ-8-d-2: water tile IM 4 種にも atlas (0,2) water overlay を貼る。
-    // 既存の青色 tint に重ねる形で「波模様」が見えるはず（atlas v1 で water
-    // overlay が控えめなら現状の青も透けて残る）。
+    // Σ-8-d-2: water tile IM 4 種にも atlas water cell を貼る。
+    // 既存の青色 tint に重ね、v2 の水面筆致を水たまりにも反映する。
     for (const im of [waterDampIM, waterShallowIM, waterMidIM, waterDeepIM]) {
       const m = im.material as THREE.MeshBasicMaterial;
       m.map = tex;
       m.needsUpdate = true;
     }
   });
+  try { featureSheetTex = await loadTex('/features/sigma8_feature_sprites_v1_processed.png'); } catch(e){ console.warn('[3d] feature sheet',e); }
+  try { propSheetTex = await loadTex('/props/sigma8_ground_props_v1_processed.png'); } catch(e){ console.warn('[3d] prop sheet',e); }
   const waterIMs = [waterDampIM, waterShallowIM, waterMidIM, waterDeepIM];
 
   // specular ハイライト：水面に sin(time) で揺らぐ白い斑点。深い水たまりだけ。
@@ -1020,6 +1146,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
   // --- レイヤーグループ ---
   const featGrp  = new THREE.Group();
+  const propGrp  = new THREE.Group();
   const bldGrp   = new THREE.Group();
   const obsGrp   = new THREE.Group();
   const corpseGrp= new THREE.Group();
@@ -1027,7 +1154,26 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   const npcGrp   = new THREE.Group();
   const wolfGrp  = new THREE.Group();
   const fxGrp    = new THREE.Group();
-  scene.add(featGrp, bldGrp, obsGrp, corpseGrp, chibiGrp, npcGrp, wolfGrp, fxGrp);
+  scene.add(featGrp, propGrp, bldGrp, obsGrp, corpseGrp, chibiGrp, npcGrp, wolfGrp, fxGrp);
+
+  const groundPropIMs = propSheetTex ? GROUND_PROP_DEFS.map((def) => {
+    const im = new THREE.InstancedMesh(
+      atlasPlaneGeometry(def.cell, def.w, def.h),
+      new THREE.MeshBasicMaterial({
+        map: propSheetTex!,
+        transparent: true,
+        alphaTest: 0.08,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+      Math.ceil(T_COLS * T_ROWS * 0.08),
+    );
+    im.count = 0;
+    im.renderOrder = 2;
+    propGrp.add(im);
+    return im;
+  }) : [];
+  let groundPropsBuiltVersion = -1;
 
   // --- スプライトテクスチャ ---
   let chibiTexs: THREE.Texture[] = [];
@@ -1171,6 +1317,48 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   fxGrp.add(stWarnIM,stCritIM);
 
   const _imDummy = new THREE.Object3D();
+
+  function rebuildGroundProps(world: WorldState) {
+    if (!groundPropIMs.length || !world.terrain.length) return;
+    const counts = new Array(groundPropIMs.length).fill(0);
+    const seed = world.terrainSeed ?? 1;
+    const rows = world.terrain.length;
+    const cols = world.terrain[0]?.length ?? 0;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const tile = world.terrain[r]![c]!;
+      if (tile.isSea || tile.ramp || tile.waterLevel >= 0.20) continue;
+      const densityRoll = tileHash01(c, r, seed, 1);
+      const density = tile.material === 'grass' ? 0.065 : tile.material === 'soil' ? 0.045 : tile.material === 'rock' ? 0.035 : 0.02;
+      if (densityRoll > density) continue;
+
+      let candidates: number[];
+      if (tile.material === 'rock') candidates = [6, 7];
+      else if (tile.material === 'soil') candidates = [10, 11, 0];
+      else if (tile.material === 'sand') candidates = [6, 10];
+      else candidates = [0, 1, 2, 3, 4, 5, 8, 9];
+      const pick = candidates[Math.floor(tileHash01(c, r, seed, 2) * candidates.length)] ?? 0;
+      const im = groundPropIMs[pick];
+      if (!im) continue;
+      const idx = counts[pick]!;
+      if (idx >= im.instanceMatrix.count) continue;
+      const jx = (tileHash01(c, r, seed, 3) - 0.5) * TERRAIN_TILE_SIZE * 0.42;
+      const jz = (tileHash01(c, r, seed, 4) - 0.5) * TERRAIN_TILE_SIZE * 0.42;
+      const scale = 0.75 + tileHash01(c, r, seed, 5) * 0.35;
+      const def = GROUND_PROP_DEFS[pick]!;
+      const wx = (c + 0.5) * TERRAIN_TILE_SIZE + jx;
+      const wy = (r + 0.5) * TERRAIN_TILE_SIZE + jz;
+      _imDummy.position.set(wx, elevAt(world.terrain, wx, wy) + (def.h * scale) / 2, wy);
+      _imDummy.scale.setScalar(scale);
+      _imDummy.updateMatrix();
+      im.setMatrixAt(idx, _imDummy.matrix);
+      counts[pick] = idx + 1;
+    }
+    for (let i = 0; i < groundPropIMs.length; i++) {
+      groundPropIMs[i]!.count = counts[i]!;
+      groundPropIMs[i]!.instanceMatrix.needsUpdate = true;
+    }
+    _imDummy.scale.setScalar(1);
+  }
 
   // ============================================================
   // カメラ状態
@@ -1588,6 +1776,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
       seaTileIM.count = seaIdx;
       seaTileIM.instanceMatrix.needsUpdate = true;
+      const propVersion = world.terrainVersion ?? 0;
+      if (groundPropsBuiltVersion !== propVersion) {
+        rebuildGroundProps(world);
+        groundPropsBuiltVersion = propVersion;
+      }
 
       // 崩落検出 → 土煙パーティクル（前フレーム比 elev 差 ≥10 のタイル）
       if(prevElevs){

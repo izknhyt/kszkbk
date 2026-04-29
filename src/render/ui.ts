@@ -170,7 +170,7 @@ function renderSigma8TimeHud(w: WorldState) {
 const DANGEROUS_WEATHER = new Set(['storm', 'heatwave', 'blizzard', 'drought']);
 
 function renderStats(w: WorldState, cb: UICallbacks) {
-  byId('stat-points').textContent = String(w.points);
+  byId('stat-points').textContent = String(Math.floor(w.points));
   byId('stat-pop').textContent = String(w.chibis.length);
   byId('stat-cap').textContent = String(populationCap(w));
   byId('stat-deaths').textContent = String(w.totalDeaths);

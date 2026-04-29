@@ -16,10 +16,10 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
   },
   ondo: {
     id: 'ondo',
-    title: 'くそざこ音頭で転倒',
+    title: 'ふらつき転倒',
     rare: false,
     points: 8,
-    template: (n) => `${n}は音頭の最中に前の個体の足に引っかかり転倒、動かなくなった。`,
+    template: (n) => `${n}は足元を確認しないまま小走りし、前の個体に引っかかって転倒した。`,
   },
   mudriver: {
     id: 'mudriver',
@@ -100,24 +100,24 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
   },
   kouba_spark: {
     id: 'kouba_spark',
-    title: '鍛冶場の火花で発火',
+    title: '火花で発火',
     rare: false,
     points: 13,
-    template: (n) => `${n}は鍛冶場の火花に引火、まもりんから燃え尽きた。`,
+    template: (n) => `${n}は作業場の小さな火花を見に行き、まもりんから燃え広がった。`,
   },
   taiko_crush: {
     id: 'taiko_crush',
-    title: 'わふ太鼓やぐらで圧死',
+    title: '足場の下敷き',
     rare: false,
     points: 14,
-    template: (n) => `${n}は太鼓の真下を覗き込み、次の一打で平たくなった。`,
+    template: (n) => `${n}は作業足場の真下を覗き込み、落ちてきた板で平たくなった。`,
   },
   cocoon_abuse: {
     id: 'cocoon_abuse',
-    title: 'ココンのいじめで死亡',
+    title: '棒つつき事故',
     rare: false,
     points: 15,
-    template: (n) => `${n}はココンに棒で突かれ続け、最後には動かなくなった。`,
+    template: (n) => `${n}は落ちていた棒を調べすぎ、周りに突かれ続けて動かなくなった。`,
   },
 
   // =========================================================================
@@ -145,7 +145,7 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     rare: false,
     uncommon: true,
     points: 19,
-    template: (n) => `${n}は音頭の足音で息ができなくなり、まもりんごと膝をついた。`,
+    template: (n) => `${n}は遠くの足音を全部危険だと思い込み、息ができなくなって膝をついた。`,
   },
   ukiyo_shoushitsu: {
     id: 'ukiyo_shoushitsu',
@@ -161,7 +161,7 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     rare: false,
     uncommon: true,
     points: 26,
-    template: (n) => `${n}はココンの棒を奪おうとして、両方とも泥に転がった。`,
+    template: (n) => `${n}は落ちていた棒を奪い合い、勝つ前に泥へ転がった。`,
   },
   noumin_umore: {
     id: 'noumin_umore',
@@ -173,19 +173,19 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
   },
   suzu_kazoe_shikujiri: {
     id: 'suzu_kazoe_shikujiri',
-    title: 'スズの点呼に数えられず',
+    title: '点呼に数えられず',
     rare: false,
     uncommon: true,
     points: 17,
-    template: (n) => `${n}はスズが点呼を終える前に消え、記録簿から名前だけが残った。`,
+    template: (n) => `${n}は点呼が終わる前にどこかへ転がり、記録簿から名前だけが残った。`,
   },
   taiko_tobikomi: {
     id: 'taiko_tobikomi',
-    title: '祭りのやぐら飛び込み',
+    title: '足場への飛び込み',
     rare: false,
     uncommon: true,
     points: 28,
-    template: (n) => `${n}は太鼓の真ん中に飛び込むのが一番目立つと信じた。`,
+    template: (n) => `${n}は作業足場の真ん中に飛び込むのが一番近道だと信じた。`,
   },
 
   // --- P6 ------
@@ -203,7 +203,7 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
     rare: false,
     uncommon: true,
     points: 21,
-    template: (n) => `${n}は音頭中もしゃべり続け、酸素を忘れて息絶えた。`,
+    template: (n) => `${n}は移動中もしゃべり続け、酸素を吸う順番を忘れて息絶えた。`,
   },
   tabikko_boundary: {
     id: 'tabikko_boundary',

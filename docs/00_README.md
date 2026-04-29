@@ -21,6 +21,9 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `M2-MIGRATION-PLAN.md` | **M2.1 実装ステップ計画**（7 段階 + grep 調査済 + 検証チェック） | M2.1 コード変更前 |
 | `SIGMA-8-IMPLEMENTATION-STATUS.md` | **実装側の事実**（Done / Gap / Deferred） | 実装着手前 |
 | `SIGMA-8-DEVELOPMENT-SPEC.md` | **目標仕様**（型 / 通行ルール / 描画 / ブラシ）| 実装中の判断基準 |
+| `SIGMA-8-VISUAL-SYSTEM-SPEC.md` | **表示システム正本**（状態 / ルール / 見た目 / 素材の対応） | 見た目・素材・UI 改修前 |
+| `SIGMA-8-GAMEPLAY-REFORM-PLAN.md` | **ゲーム改修順序**（素材生成前に固めるシステム改修） | 次フェーズ実装前 |
+| `SIGMA-8-R1-CLAUDE-PROMPT.md` | **R1 崖改善の Claude 依頼文**（スコープ / 非スコープ / 検証） | Claude に実装を依頼する時 |
 | `SIGMA-8-PLAN.md` | M2 ロードマップと判断記録 | 全体方針確認時 |
 | `DIALOGUE-CATALOG.md` | 発言/死因テンプレ/セリフ棚卸し | 台詞整理時 |
 | `SCRIPT-CATALOG.md` | npm scripts / 検証コマンド一覧 | 作業前後 |
@@ -40,6 +43,7 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `90_qa_checklist.md` | 納品検品チェックリスト |
 | `SIGMA-8-UI-ASSET-SPEC.md` | 地形 atlas / Ground props / 工事ポーズ / UI Icons の仕様 |
 | `SIGMA-8-ASSET-IMPLEMENTATION-SPEC.md` | 生成済み terrain/props/features のセル対応・実装順・Claude引き継ぎ |
+| `SIGMA-8-VISUAL-ASSET-ROADMAP.md` | 次に必要なモック / アセット生成 / 検品順 |
 | `sigma-8-mockup.png` | 画風基準の参考画像（pixel-perfect ではない、構図の手本） |
 
 ### 3. 古い / 参考扱い（読まなくていい）
@@ -63,8 +67,12 @@ ChatGPT やその他 AI / 絵師 に発注する際の一貫性を担保する�
 | `SIGMA-8-PLAN.md` | M2 地形リワークのロードマップ v2 | Sigma-8 実装時 |
 | `SIGMA-8-DEVELOPMENT-SPEC.md` | Sigma-8 の実装仕様・禁止事項・検証基準 | Sigma-8 実装時 |
 | `SIGMA-8-IMPLEMENTATION-STATUS.md` | Sigma-8 の Done / Gap / Deferred 一覧 | Sigma-8 実装着手前 |
+| `SIGMA-8-VISUAL-SYSTEM-SPEC.md` | 表示状態、ゲーム条件、描画レイヤー、必要素材の対応 | 見た目・UI・素材実装前 |
+| `SIGMA-8-GAMEPLAY-REFORM-PLAN.md` | 崖、水、工事、UI、因果整理の実装順 | Claude/Codex への実装依頼前 |
+| `SIGMA-8-R1-CLAUDE-PROMPT.md` | Phase R1 cliff readability reform の依頼プロンプト | Claude に貼る時 |
 | `SIGMA-8-UI-ASSET-SPEC.md` | Sigma-8 の UI / terrain atlas / prop / icon 仕様 | UI・素材実装/発注時 |
 | `SIGMA-8-ASSET-IMPLEMENTATION-SPEC.md` | 生成済み terrain/props/features asset の実装マッピング | 素材統合時 |
+| `SIGMA-8-VISUAL-ASSET-ROADMAP.md` | 未生成モック、次回アセット batch、採用ゲート | 素材追加・画面検品時 |
 | `M2-DIRECTION-RESET.md` | M2.1 以降の設計方針。旧 points 建設 / 旧 NPC / 音頭の整理 | 次フェーズ設計時 |
 | `M2-MIGRATION-PLAN.md` | M2.1 実装ステップ計画。7 段階に分解、grep 調査済 | M2.1 コード変更前 |
 | `DIALOGUE-CATALOG.md` | セリフ、死因テンプレート、発言プールの棚卸し | 台詞・死因整理時 |

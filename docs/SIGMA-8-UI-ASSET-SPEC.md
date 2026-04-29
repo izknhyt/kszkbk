@@ -271,13 +271,12 @@ Tool 別項目:
 
 ## Terrain Asset Spec
 
-### Atlas v1（実装で使用中）
+### Atlas v2（実装で使用中）
 
 実装で読み込んでいるアセット:
 
-- **使用ファイル（正本）: `public/terrain/sigma8_terrain_atlas_v1_processed.png`**
-- 原本 PNG: `public/terrain/sigma8_terrain_atlas_v1_raw.png`（処理前）
-- レビュー用: `public/terrain/sigma8_terrain_atlas_v1_review.png`
+- **使用ファイル（正本）: `public/terrain/sigma8_terrain_atlas_v2_1024.png`**
+- 原本 PNG: `public/terrain/sigma8_terrain_atlas_v2_raw.png`（処理前）
 - canvas: 1024×1024 PNG / 4×4 grid / 256px cell
 - inset（テクスチャブリード対策）: 各セル内側 1/16 cell（=16px / 256px）
 - color space: sRGB
@@ -288,10 +287,10 @@ Tool 別項目:
 
 | Row | Col 1 | Col 2 | Col 3 | Col 4 |
 |---|---|---|---|---|
-| 1 | grass flat | soil flat | rock flat | sand flat |
-| 2 | snow flat | cliff wall | ramp north | ramp east |
-| 3 | water overlay | mud overlay | snow overlay | wetness overlay |
-| 4 | dirt path | shallow channel | cliff top cap | reserved transparent |
+| 1 | grass flat | soil flat | sand flat | snow flat |
+| 2 | rock flat | water overlay | wet mud | cut-earth construction |
+| 3 | cliff grass/soil | cliff rock | damp cliff edge | ramp north/south |
+| 4 | ramp east/west | grass-soil transition | shoreline | waterfall/ledge |
 
 ### 実装側のセル定数対応（`src/render/stage3d.ts`）
 
@@ -299,17 +298,14 @@ Tool 別項目:
 |---|---|---|---|
 | `MAT_CELL.grass` | (0, 0) | flat 草地 | ✅ 使用中 |
 | `MAT_CELL.soil` | (1, 0) | flat 土 | ✅ |
-| `MAT_CELL.rock` | (2, 0) | flat 岩 | ✅ |
-| `MAT_CELL.sand` | (3, 0) | flat 砂 / 海底 | ✅ |
-| `MAT_CELL.snow` | (0, 1) | flat 雪 | ✅ |
-| `CLIFF_CELL` | (1, 1) | 崖壁面 InstancedMesh | ✅ |
-| `RAMP_NS_CELL` | (2, 1) | ramp 北/南向き（S は UV 上下反転） | ✅ |
-| `RAMP_EW_CELL` | (3, 1) | ramp 東/西向き（W は UV 左右反転） | ✅ |
-| water overlay | (0, 2) | water tile geometry の UV を書き換えて適用 | ✅ |
-| mud overlay | (1, 2) | （vertex color tint 経由なので未使用） | ⚠️ 予約 |
-| snow overlay | (2, 2) | （同上） | ⚠️ 予約 |
-| wetness overlay | (3, 2) | （同上） | ⚠️ 予約 |
-| Row 4（dirt path / shallow channel / cliff top cap） | (0, 3)〜(3, 3) | 未統合 | ⚠️ 予約 |
+| `MAT_CELL.rock` | (0, 1) | flat 岩 | ✅ |
+| `MAT_CELL.sand` | (2, 0) | flat 砂 / 海底 | ✅ |
+| `MAT_CELL.snow` | (3, 0) | flat 雪 | ✅ |
+| `CLIFF_CELL` | (0, 2) | 崖壁面 InstancedMesh | ✅ |
+| `RAMP_NS_CELL` | (3, 2) | ramp 北/南向き（S は UV 上下反転） | ✅ |
+| `RAMP_EW_CELL` | (0, 3) | ramp 東/西向き（W は UV 左右反転） | ✅ |
+| water overlay | (1, 1) | water tile geometry の UV を書き換えて適用 | ✅ |
+| mud / cut-earth / shoreline / waterfall | (2,1)〜(3,3) | 未統合 | ⚠️ 予約 |
 
 vertex color tint で mud/snow/wetness を blend している現状（Σ-8-c-2）は
 overlay cell を使わずに済む簡易実装。将来 atlas v2 で別 InstancedMesh に
@@ -351,17 +347,19 @@ Overlay:
 
 | 種類 | アセット | 仕様準拠 | 発注 | 配置インフラ | 統合 |
 |---|---|---|---|---|---|
-| Terrain Atlas v1 | `sigma8_terrain_atlas_v1_processed.png` | ✅ | ✅ | ✅ | ✅ Σ-8-c で完了 |
-| Terrain Atlas v2 | — | — | ⚠️ 必要なら（v1 でも体感成立中）| — | — |
-| Ground Props 10 種 | — | ✅ 仕様あり | ❌ **次フェーズで ChatGPT 発注予定** | ❌ | ❌ |
+| Terrain Atlas v2 | `sigma8_terrain_atlas_v2_1024.png` | ✅ | ✅ | ✅ | ✅ |
+| Ground Props 12 種 | `sigma8_ground_props_v1_processed.png` | ✅ | ✅ | ✅ | ✅ 最小密度で統合 |
+| Feature Sprites 13 種 | `sigma8_feature_sprites_v1_processed.png` | ✅ | ✅ | ✅ | ✅ 完成 feature に統合 |
 | 工事ポーズ 6 種 | — | ✅ 仕様あり | ❌ M2 範囲外、polish | ❌ | ❌ |
 | UI Icons | emoji で代替中 | — | — | — | △ 必要に応じて |
 
-「次フェーズ」は `docs/SIGMA-8-IMPLEMENTATION-STATUS.md` の Gap-2 / Gap-3 を参照。
+「次フェーズ」は `docs/SIGMA-8-VISUAL-SYSTEM-SPEC.md` で表示状態を固定してから、
+`docs/SIGMA-8-VISUAL-ASSET-ROADMAP.md` と
+`docs/SIGMA-8-IMPLEMENTATION-STATUS.md` の Gap-2 / Gap-3 を参照。
 
 ### Ground Props
 
-- directory: `public/terrain/props/`
+- directory: `public/props/`
 - format: PNG RGBA
 - canvas: 256x256
 - background: transparent

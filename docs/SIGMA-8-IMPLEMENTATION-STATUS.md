@@ -146,11 +146,11 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 - 個性反映: noumin/sekkachi 駆けつける、shinpai 安全確認、nakimushi 渋る
 - 優先度: **高**（Codex 推奨、Σ-8 の主役操作の体感が一段上がる）
 
-### Gap-2: props 描画インフラ + アセット発注
-- 現状: 0 props（ground は素のテクスチャのみ）
-- 想定: 草/茂み/花/茸/若木/葦/小石/雪草/泥塊 の 10 種を ChatGPT で発注 → InstancedMesh 配置
-- 発注プロンプト: `SIGMA-8-UI-ASSET-SPEC.md §Ground Props` 参照
-- 優先度: **中**（見た目密度の最大の飛躍、Codex「画像生成に頼るべき」）
+### Gap-2: visual asset v2 検品 + 追加生成
+- 現状: terrain atlas v2 / ground props v1 / feature sprites v1 は runtime 接続済み
+- 残課題: 崖の縦線反復、水際/滝、工事状態、雨雪状態モック
+- 次の正本: `SIGMA-8-VISUAL-ASSET-ROADMAP.md`
+- 優先度: **中〜高**（商業見た目へ寄せる主作業）
 
 ### Gap-3: 工事ポーズ（6 種）発注 + 統合
 - 現状: 既存 work_a/b で代用
@@ -167,10 +167,10 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 - 想定: 「→ +25 / -25」「方向 ↑」のテキスト or アイコン
 - 優先度: **低**（情報表示 polish）
 
-### Gap-6: atlas v2 への差し替え
-- 現状: v1 (sigma8_terrain_atlas_v1_processed.png) で動作中
-- 想定: 絵の品質次第で再発注
-- 優先度: **低**（v1 で box-garden 体感は出ている）
+### Gap-6: atlas / props / feature sprite の見た目検品
+- 現状: v2 terrain atlas と processed props/features を runtime へ接続済み
+- 想定: 実機スクショでセルずれ、alpha 抜け、密度過多を確認して必要セルだけ再生成
+- 優先度: **中**（見た目品質の主要確認ポイント）
 
 ---
 
@@ -224,11 +224,12 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 
 ## 次の優先順序
 
-1. **Gap-0 M2.1 方針リセットの実装設計** — 旧 points 建設 / 旧 NPC / 音頭の整理
-2. **カメラ / 海表示 / 高さスケールの小検証** — 見た目の違和感を先に潰す
-3. **Gap-1 ramp 工事ジョブ化** — 地形開発の主役操作を労働ループへ接続
-4. **Gap-2 props 配置インフラ + ChatGPT 発注** — 見た目の密度
-5. **Gap-3 / Gap-4 / Gap-5** — polish
-6. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
+1. **Visual System 固定** — `SIGMA-8-VISUAL-SYSTEM-SPEC.md` を正本にして状態/見た目/素材の対応を守る
+2. **Gameplay Reform R1** — 崖描画をコード先行で改善
+3. **Gameplay Reform R2** — 水位 / 水際 / 流れ / 滝の表示を改善
+4. **Gameplay Reform R3** — ramp 工事ジョブ化と worksite 表示
+5. **追加素材生成** — cliff / water / worksite の必要 batch だけ生成
+6. **旧要素の完全削除判断** — legacy 温存から削除へ進めるか決める
+7. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
 
 更新タイミング: 新フェーズ commit 時に該当行を Done に動かす、新規 Gap が見つかったら追加。
