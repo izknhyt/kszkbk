@@ -466,8 +466,6 @@ export const CONSTRUCTION_PTS: Partial<Record<FeatureKind, number>> = {
   water:      45,
   farm:       45,
   house:      80,
-  nursery:    80,
-  hakaba:     60,
   well:       80,
   firewatch:  80,
   pasture:    80,
@@ -2365,12 +2363,10 @@ export function ensurePlots(w: WorldState) {
 }
 
 export function populationCap(w: WorldState): number {
-  // 新 Feature: 完成した house（devLevel>=2）1棟につき +3。
-  // 旧 BUILDINGS legacy は新規ランでは w.buildings=[] で自然に0。
-  let cap = w.baseCap;
-  for (const f of w.features) {
-    if (f.kind === 'house' && f.devLevel >= 2) cap += 3;
-  }
+  // 完成した feature（devLevel>=2）1つにつき +2。種類問わず何を建てても増える。
+  // 旧 BUILDINGS legacy は新規ランでは w.buildings=[] で自然に 0。
+  const completedFeatures = w.features.filter((f) => f.devLevel >= 2).length;
+  let cap = w.baseCap + completedFeatures * 2;
   for (const b of w.buildings) {
     const def = BUILDINGS[b.defId];
     if (!def) continue;
@@ -2385,15 +2381,9 @@ function countBuildingLevels(w: WorldState, defId: string): number {
 }
 
 function applyBuildingMods(w: WorldState) {
-  // 新 Feature: 完成した hakaba（devLevel>=2）1基につき pmult+0.10、
-  //             完成した nursery（devLevel>=2）1棟につき spawnMul+0.18。
-  // 旧 BUILDINGS legacy は新規ランでは w.buildings=[] で自然に0。
+  // 旧 BUILDINGS legacy は新規ランでは w.buildings=[] で自然に no-op。
   let mult = CONFIG.GLOBAL_POINT_MULT_BASE;
   let spawnMul = 1;
-  for (const f of w.features) {
-    if (f.kind === 'hakaba' && f.devLevel >= 2) mult += 0.10;
-    if (f.kind === 'nursery' && f.devLevel >= 2) spawnMul += 0.18;
-  }
   for (const b of w.buildings) {
     const def = BUILDINGS[b.defId];
     if (!def) continue;
@@ -4569,6 +4559,14 @@ export function tickWorld(w: WorldState, dt: number) {
   }
   w.villageRank = computeRank(rankContext(w));
   applyBuildingMods(w);
+  // パッシブポイント：完成 feature 数 × レート × dt
+  // 開発度合いが主な点数源になるよう、毎 tick 自動加算する。
+  const completedFeaturesForPts = w.features.filter((f) => f.devLevel >= 2).length;
+  const passive = dt * completedFeaturesForPts * CONFIG.PASSIVE_PTS_PER_FEATURE;
+  if (passive > 0) {
+    w.points += passive;
+    w.totalPointsEarned += passive;
+  }
   spawnIfRoom(w);
   maybeStartTaikoFestival(w);
   maybeTriggerBokaigi(w, dt);

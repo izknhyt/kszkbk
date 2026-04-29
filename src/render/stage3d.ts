@@ -638,30 +638,6 @@ function makeFeatureGroup(f: import('../types').Feature): THREE.Group {
       if(lv>=2) g.add(makeLvLabel(lv));
       break;
     }
-    case 'nursery': {
-      // 産屋: 丸みのある小屋（薄ピンク）+ 赤いノレン
-      const wall=new THREE.Mesh(new THREE.BoxGeometry(28,20,28),toonMat(0xf0b8a8));
-      wall.position.y=10; g.add(wall);
-      const roof=new THREE.Mesh(new THREE.ConeGeometry(20,14,4),toonMat(0xe07060));
-      roof.position.y=28; g.add(roof);
-      const noren=new THREE.Mesh(new THREE.PlaneGeometry(20,10),toonMat(0xd04040));
-      noren.position.set(0,8,14); g.add(noren);
-      if(lv>=2) g.add(makeLvLabel(lv));
-      break;
-    }
-    case 'hakaba': {
-      // 墓地: お墓 3 基（石柱）+ 枯れ木
-      for(const [mx,mz] of [[-10,0],[0,0],[10,0]] as [number,number][]){
-        const stone=new THREE.Mesh(new THREE.BoxGeometry(6,14,4),toonMat(0x8a8a8a));
-        stone.position.set(mx,7,mz); g.add(stone);
-        const cap=new THREE.Mesh(new THREE.BoxGeometry(8,3,6),toonMat(0x6a6a6a));
-        cap.position.set(mx,15,mz); g.add(cap);
-      }
-      const trunk=new THREE.Mesh(new THREE.CylinderGeometry(2,3,22,6),toonMat(0x4a3018));
-      trunk.position.set(-18,11,0); g.add(trunk);
-      if(lv>=2) g.add(makeLvLabel(lv));
-      break;
-    }
     case 'well': {
       const shaft=new THREE.Mesh(new THREE.CylinderGeometry(8,8,20,8),toonMat(0x7a6050));
       shaft.position.y=10; g.add(shaft);
@@ -2042,9 +2018,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
 
     // ---- Σ-5-e-e: 建設進捗オーバーレイ（pt 数値表示）----
     {
-      const FEAT_NAME_SHORT: Partial<Record<string,string>>={water:'水源',farm:'畑',channel:'水路',path:'道',house:'家',nursery:'産屋',hakaba:'墓地',well:'井戸',firewatch:'火の見',sawmill:'製材所',shrine:'神社',generator:'発電所',streetlamp:'街灯',powerline:'電線',kiln:'精錬所',pasture:'牧場',loom:'織機'};
+      const FEAT_NAME_SHORT: Partial<Record<string,string>>={water:'水源',farm:'畑',channel:'水路',path:'道',house:'家',well:'井戸',firewatch:'火の見',sawmill:'製材所',shrine:'神社',generator:'発電所',streetlamp:'街灯',powerline:'電線',kiln:'精錬所',pasture:'牧場',loom:'織機'};
       // Σ-5-e-e: CONSTRUCTION_PTS に合わせた値（world.ts の CONSTRUCTION_PTS と同値）
-      const CONSTRUCTION_PTS_LOCAL: Partial<Record<string,number>>={channel:25,path:25,streetlamp:25,powerline:25,water:45,farm:45,house:80,nursery:80,hakaba:60,well:80,firewatch:80,pasture:80,sawmill:120,shrine:120,kiln:120,loom:120,generator:120};
+      const CONSTRUCTION_PTS_LOCAL: Partial<Record<string,number>>={channel:25,path:25,streetlamp:25,powerline:25,water:45,farm:45,house:80,well:80,firewatch:80,pasture:80,sawmill:120,shrine:120,kiln:120,loom:120,generator:120};
       // 複数人ボーナス倍率（world.ts の CONSTRUCTION_BONUS_MUL と同値）
       const BONUS_MUL=[0,1.0,1.8,2.5,3.0];
       const liveIds=new Set(world.features.filter(f=>f.devLevel<2).map(f=>f.id));

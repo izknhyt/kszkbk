@@ -215,7 +215,7 @@ async function start() {
   // 対象はちびわふ（世界.chibis）と NPC（世界.npcs）の両方。
   let pinnedId: number | null = null;
   // 建設モード：null 以外の時、空クリックで cleared プロットを指定種に建設
-  type BuildKind = 'water' | 'farm' | 'channel' | 'path' | 'house' | 'nursery' | 'hakaba' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln' | 'pasture' | 'loom';
+  type BuildKind = 'water' | 'farm' | 'channel' | 'path' | 'house' | 'well' | 'firewatch' | 'sawmill' | 'shrine' | 'generator' | 'streetlamp' | 'powerline' | 'kiln' | 'pasture' | 'loom';
   let buildMode: BuildKind | null = null;
   const plotBuildCosts: Record<BuildKind, { wood: number; stone: number; plank?: number; soil?: number }> = {
     water:      { wood: 0, stone: 5, soil: 10 },
@@ -223,8 +223,6 @@ async function start() {
     channel:    { wood: 0, stone: 1 },
     path:       { wood: 0, stone: 1 },
     house:      { wood: 6, stone: 3 },
-    nursery:    { wood: 5, stone: 2 },
-    hakaba:     { wood: 2, stone: 4 },
     well:       { wood: 1, stone: 8 },
     firewatch:  { wood: 10, stone: 2 },
     sawmill:    { wood: 8, stone: 4 },
@@ -238,14 +236,12 @@ async function start() {
   };
   const buildModeLabel: Record<BuildKind, string> = {
     water: '水源', farm: '畑', channel: '水路', path: '道', house: '家',
-    nursery: '産屋', hakaba: '墓地',
     well: '井戸', firewatch: '火の見やぐら', sawmill: '製材所', shrine: '神社',
     generator: 'ペダル発電所', streetlamp: '街灯', powerline: '電線', kiln: '精錬所',
     pasture: '牧場', loom: '織機',
   };
   const FEAT_EMOJI_MAP: Record<BuildKind, string> = {
     water:'💧', farm:'🌾', channel:'🌊', path:'🛤', house:'🏠',
-    nursery:'🍼', hakaba:'🪦',
     well:'⛲', firewatch:'🔥', sawmill:'🪚', shrine:'⛩',
     generator:'⚡', streetlamp:'💡', powerline:'🪜', kiln:'🧱',
     pasture:'🐑', loom:'🧶',
@@ -255,9 +251,7 @@ async function start() {
     farm:       'watered で 🍞 0.08/秒生産',
     channel:    '水源↔畑 70px 以内で通水',
     path:       '移動ルート（将来実装）',
-    house:      '定員 4 人、夜間野宿ペナルティ回避、人口キャップ +3',
-    nursery:    '産屋 1 棟で出産速度 +18%（複数棟で加算）',
-    hakaba:     '墓地 1 基でくそざこP獲得 +10%（複数基で加算）',
+    house:      '定員 4 人、夜間野宿ペナルティ回避（建設完了で人口キャップ +2）',
     well:       '乾燥でも畑が 0.4 倍生産を維持',
     firewatch:  '半径 180px の火事ダメージ ×0.25',
     sawmill:    '🪵×2 → 🪚×1（ちびわふ労働）',
@@ -321,7 +315,7 @@ async function start() {
   const BUILD_CATEGORIES: Array<{ id: string; kinds: BuildKind[] }> = [
     { id: 'water',    kinds: ['water', 'channel', 'path'] },
     { id: 'food',     kinds: ['farm', 'pasture'] },
-    { id: 'home',     kinds: ['house', 'nursery', 'hakaba', 'well'] },
+    { id: 'home',     kinds: ['house', 'well'] },
     { id: 'defense',  kinds: ['firewatch'] },
     { id: 'industry', kinds: ['sawmill', 'kiln', 'loom'] },
     { id: 'power',    kinds: ['generator', 'streetlamp', 'powerline'] },
@@ -1391,7 +1385,6 @@ async function start() {
     world.features.push({ id, pos: { x, y }, kind: buildMode, devLevel: 0, workSec: 0 });
     const emojiMap: Record<BuildKind, string> = {
       water: '💧 水源', farm: '🌾 畑', channel: '🌊 水路', path: '🛤 道', house: '🏠 家',
-      nursery: '🍼 産屋', hakaba: '🪦 墓地',
       well: '⛲ 井戸', firewatch: '🔥 火の見やぐら', sawmill: '🪚 製材所', shrine: '⛩ 神社',
       generator: '⚡ ペダル発電所', streetlamp: '💡 街灯', powerline: '🪜 電線', kiln: '🧱 精錬所',
       pasture: '🐑 牧場', loom: '🧶 織機',
@@ -1826,14 +1819,12 @@ async function start() {
     if (world.newConstructions.length > 0) {
       const FEAT_EMOJI: Partial<Record<string, string>> = {
         water:'💧', farm:'🌾', channel:'🌊', path:'🛤', house:'🏠',
-        nursery:'🍼', hakaba:'🪦',
         well:'⛲', firewatch:'🔥', sawmill:'🪚', shrine:'⛩',
         generator:'⚡', streetlamp:'💡', powerline:'🪜', kiln:'🧱',
         pasture:'🐑', loom:'🧶',
       };
       const FEAT_NAME: Partial<Record<string, string>> = {
         water:'水源', farm:'畑', channel:'水路', path:'道', house:'家',
-        nursery:'産屋', hakaba:'墓地',
         well:'井戸', firewatch:'火の見やぐら', sawmill:'製材所', shrine:'神社',
         generator:'発電所', streetlamp:'街灯', powerline:'電線', kiln:'精錬所',
         pasture:'牧場', loom:'織機',
@@ -2327,14 +2318,12 @@ function showFeatureModal(f: Feature, onCancelBuild?: () => void, onSetPriority?
   modal.classList.remove('hidden');
   const FEAT_EMOJI: Partial<Record<string, string>> = {
     water:'💧', farm:'🌾', channel:'🌊', path:'🛤', house:'🏠',
-    nursery:'🍼', hakaba:'🪦',
     well:'⛲', firewatch:'🔥', sawmill:'🪚', shrine:'⛩',
     generator:'⚡', streetlamp:'💡', powerline:'🪜', kiln:'🧱',
     pasture:'🐑', loom:'🧶',
   };
   const FEAT_NAME: Partial<Record<string, string>> = {
     water:'水源', farm:'畑', channel:'水路', path:'道', house:'家',
-    nursery:'産屋', hakaba:'墓地',
     well:'井戸', firewatch:'火の見やぐら', sawmill:'製材所', shrine:'神社',
     generator:'ペダル発電所', streetlamp:'街灯', powerline:'電線', kiln:'精錬所',
     pasture:'牧場', loom:'織機',
@@ -2344,9 +2333,7 @@ function showFeatureModal(f: Feature, onCancelBuild?: () => void, onSetPriority?
     channel: '水源/水路から 70px 以内で通水、畑へ繋げる',
     farm: '水源/水路から 65px 以内で 🍞 0.08/秒生産',
     path: '移動ルート整備（将来実装予定）',
-    house: '定員 4 人。夜間睡眠場所、野宿ペナルティ回避。人口キャップ +3',
-    nursery: '産屋 1 棟で出産速度 +18%（複数棟で加算）',
-    hakaba: '墓地 1 基でくそざこP獲得 +10%（複数基で加算）',
+    house: '定員 4 人。夜間睡眠場所、野宿ペナルティ回避。建設完了で人口キャップ +2',
     well: '乾燥/雪でも畑が 0.4 倍生産を維持',
     firewatch: '夜間オオカミ忌避＋火災検知半径 180px',
     sawmill: '近くのちびわふが 🪵×2 → 🪚×1 変換',
