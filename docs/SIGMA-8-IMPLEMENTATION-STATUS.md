@@ -238,9 +238,9 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 2. **Gameplay Reform R1** — 崖描画をコード先行で改善 ✅ **完了**（3 variant IM + shadow + brightness variation）
 3. **Gap-2a: cliff variants v2 判断** — 実機スクショで wallpaper 感が残るか確認、残るなら Batch A 生成
 4. **Gameplay Reform R2** — 水位 / 水際 / 流れ / 滝の表示を改善
-4. **Gameplay Reform R3** — ramp 工事ジョブ化と worksite 表示
-5. **追加素材生成** — cliff / water / worksite の必要 batch だけ生成
-6. **旧要素の完全削除判断** — legacy 温存から削除へ進めるか決める
-7. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
+5. **Gameplay Reform R3** — ramp 工事ジョブ化と worksite 表示
+6. **追加素材生成** — cliff / water / worksite の必要 batch だけ生成
+7. **旧要素の完全削除判断** — legacy 温存から削除へ進めるか決める
+8. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
 
 更新タイミング: 新フェーズ commit 時に該当行を Done に動かす、新規 Gap が見つかったら追加。

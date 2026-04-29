@@ -282,8 +282,8 @@ function cliffBright(r: number, c: number, isEast: boolean): number {
 // Returns cliff variant index 0=soil, 1=rock, 2=damp
 // for the wall between upper tile (higher elev) and lower tile (lower elev).
 function cliffVariant(upperMat: string, lowerMat: string, lowerWaterLevel: number, lowerIsSea: boolean): 0 | 1 | 2 {
-  if (upperMat === 'rock' || lowerMat === 'rock') return 1;
   if (lowerWaterLevel >= 0.35 || lowerIsSea) return 2;
+  if (upperMat === 'rock' || lowerMat === 'rock') return 1;
   return 0;
 }
 
