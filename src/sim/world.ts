@@ -1245,6 +1245,15 @@ export type RampSetResult =
   | 'wrong-direction'   // 隣接が低い（自分が高い側）
   | 'too-steep';        // 隣接との高低差が 2 段以上
 
+// R3: RampSetResult → 表示用日本語メッセージ
+export function rampBlockedMsg(r: RampSetResult): string {
+  if (r === 'no-step')          return '高低差がなくなったわふ';
+  if (r === 'wrong-direction')  return '方向が逆になったわふ';
+  if (r === 'too-steep')        return '段差が大きすぎるわふ';
+  if (r === 'is-sea')           return '海になったわふ';
+  return '範囲外わふ';
+}
+
 // 妥当性のみチェック（既存挙動の互換用、テスト用）。設置はジョブ経由が推奨。
 function validateRampPlacement(w: WorldState, tx: number, ty: number, dir: RampDir): RampSetResult {
   const t = getTile(w.terrain, tx, ty);
@@ -1542,6 +1551,19 @@ export function updateTerraformJobs(w: WorldState, dt: number): void {
     const job = w.terraformJobs[i]!;
     const cx = (job.tx + 0.5) * TERRAIN_TILE_SIZE;
     const cy = (job.ty + 0.5) * TERRAIN_TILE_SIZE;
+
+    // R3: ramp ジョブは毎フレーム妥当性を検証。地形変動で無効化された場合は
+    //     blockedReason をセットして進行を停止する。地形が修正されたら解除。
+    if (job.target === 'ramp' && job.dir) {
+      const validity = validateRampPlacement(w, job.tx, job.ty, job.dir);
+      if (validity !== 'ok') {
+        job.blockedReason = rampBlockedMsg(validity);
+        continue;  // ワーカーが来ても進捗を積まない
+      } else {
+        job.blockedReason = undefined;  // 地形が直ったら解除
+      }
+    }
+
     let workers = 0;
     for (const c of w.chibis) {
       if (!isAlive(c) || c.flight || c.state === 'sleep' || c.state === 'dead') continue;
@@ -1561,13 +1583,9 @@ export function updateTerraformJobs(w: WorldState, dt: number): void {
         }
         lowerTile(w.terrain, job.tx, job.ty, RAISE_ELEV_AMOUNT);
       } else if (job.target === 'ramp' && job.dir) {
-        // Σ-8-h: ramp 工事完了 → 妥当性が今でも成立してるか確認（地形変動で崩れていないか）
-        const r = validateRampPlacement(w, job.tx, job.ty, job.dir);
-        if (r === 'ok') {
-          const tile = getTile(w.terrain, job.tx, job.ty)!;
-          tile.ramp = job.dir;
-        }
-        // 妥当性 NG ならジョブだけ削除（無音）
+        // ramp 工事完了（上で妥当性 OK 確認済みのフレームのみここに到達）
+        const tile = getTile(w.terrain, job.tx, job.ty)!;
+        tile.ramp = job.dir;
       }
       // Σ-8-b: 地形が変わったので path cache を破棄（chibi 全員が再計算）
       w.terrainVersion++;

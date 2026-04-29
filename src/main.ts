@@ -54,7 +54,7 @@ import { CONFIG, type TimeScale } from './config';
 import { DEATH_CAUSES } from './sim/deaths';
 import type { Difficulty } from './types';
 import { BUILDINGS } from './city/buildings';
-import { CONSTRUCTION_SEC, isConstructionPriority, setConstructionPriority } from './sim/world';
+import { CONSTRUCTION_SEC, isConstructionPriority, setConstructionPriority, TERRAIN_TILE_SIZE } from './sim/world';
 
 const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   beginner: '初心者',
@@ -1498,11 +1498,30 @@ async function start() {
 
   // terraform ジョブ完了 toast
   stage.canvas.addEventListener('kszk-terraform-complete', (e) => {
-    const {target} = (e as CustomEvent).detail as {target: 'raise'|'lower'};
+    const { target, tx, ty } = (e as CustomEvent).detail as { target: 'raise' | 'lower' | 'ramp'; tx: number; ty: number };
     if(target==='raise'){
       flashToast('⛰ 盛り土完了！', 'info');
-    } else {
+    } else if(target==='lower'){
       flashToast(`⛏ 切り土完了（🌱soil+${LOWER_SOIL_GAIN} 獲得）`, 'info');
+    } else if(target==='ramp'){
+      flashToast('📐 坂道完成！A* が通るようになったわふ', 'info');
+      // R3: 完成バブル — 近隣ちびわふ最大 2 体から反応
+      const wx = (tx + 0.5) * TERRAIN_TILE_SIZE;
+      const wy = (ty + 0.5) * TERRAIN_TILE_SIZE;
+      const RAMP_DONE_LINES = [
+        'できたわふ！',
+        '坂道できたわふ〜',
+        'やったわふ！',
+        '登れるわふ！',
+        '通れるわふ〜',
+      ];
+      const nearChibis = world.chibis
+        .filter(c => c.state !== 'dead' && !c.flight && Math.hypot(c.pos.x - wx, c.pos.y - wy) < 96)
+        .slice(0, 2);
+      for(const c of nearChibis){
+        const line = RAMP_DONE_LINES[Math.floor(Math.random() * RAMP_DONE_LINES.length)]!;
+        spawnBubble(world.bubbles, { x: c.pos.x, y: c.pos.y - 14 }, line, 'speech', 2.0);
+      }
     }
   });
 

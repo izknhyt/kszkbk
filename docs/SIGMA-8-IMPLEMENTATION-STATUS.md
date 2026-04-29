@@ -140,11 +140,36 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 - ondo / 音頭 / taiko: 94 箇所
 - 旧建物個別 ID: 17 箇所
 
-### Gap-1: ramp 工事ジョブ化
-- 現状: `setRampOnTile` 即時設置
-- 想定: `enqueueRampJob` でジョブ積み、chibi 労働で進行、3D に半完成 ramp 表示
-- 個性反映: noumin/sekkachi 駆けつける、shinpai 安全確認、nakimushi 渋る
-- 優先度: **高**（Codex 推奨、Σ-8 の主役操作の体感が一段上がる）
+### ✅ Gap-1: ramp 工事ジョブ化 → **R3 完了**
+
+**R3（Ramp / Worksite Reform）完了**: commit on branch `claude/merge-r1-r2-readability-Pcqys`
+
+| 項目 | 実装 |
+|---|---|
+| `TerraformJob.blockedReason?: string` | `types.ts` |
+| ramp ジョブ毎フレーム妥当性検証 + blockedReason セット | `world.ts updateTerraformJobs` |
+| `rampBlockedMsg()` エクスポート | `world.ts` |
+| blocked ramp は workers 来ても進捗停止、地形修正で自動解除 | `world.ts` |
+| ramp worksite 3D overlay（planned/working/blocked 3 状態） | `stage3d.ts` |
+| `tfRampIM`（黄緑フットプリント）/ `tfRampBlockedIM`（赤）| `stage3d.ts` |
+| `tfRampStakeIM`（四隅 4 本の工事杭）| `stage3d.ts` |
+| `tfRampArrowIM`（方向矢印）| `stage3d.ts` |
+| ramp worksite アウトライン（緑/赤 LineSegments）| `stage3d.ts` |
+| HTML overlay: planned / working / blocked を別レイアウトで表示 | `stage3d.ts` |
+| `kszk-terraform-complete` に `tx, ty` 追加 | `stage3d.ts` |
+| ramp 完成 toast + 近傍ちびわふ最大 2 体に反応バブル | `main.ts` |
+
+**視覚仕様まとめ**:
+- `planned`（workers=0）: 暗黄緑フットプリント + 4 本杭 + 方向矢印 + "🚧 坂道予約 ↑ 0%"
+- `working`（workers>0）: 輝く黄緑フットプリント（1Hz パルス）+ 4 本杭 + "🚧 工事中 ↑ 45% (2人)"
+- `blocked`（検証失敗）: 赤フットプリント（2Hz パルス）+ "⛔ 高低差がなくなったわふ"
+- `completed`: toast + 近傍バブル "できたわふ！" + tile.ramp = dir + terrainVersion++
+
+**Non-goals 維持**:
+- 新規画像なし（全て手続きジオメトリ）
+- A* 変更なし
+- hydrology 変更なし
+- save schema 変更なし（blockedReason は transient、persist しない）
 
 ### Gap-2: visual asset v2 検品 + 追加生成
 - 現状: terrain atlas v2 / ground props v1 / feature sprites v1 は runtime 接続済み
@@ -242,11 +267,12 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 1. **Visual System 固定** — `SIGMA-8-VISUAL-SYSTEM-SPEC.md` を正本にして状態/見た目/素材の対応を守る
 2. **Gameplay Reform R1** — 崖描画をコード先行で改善 ✅ **完了**（3 variant IM + shadow + brightness variation）
 3. **Gameplay Reform R2** — 水位 / 水際 / 流れ / 滝の表示を改善 ✅ **完了**（tier color, danger pulse, sea foam, waterfall IM）
-4. **Gap-2a: cliff variants v2 判断** — 実機スクショで wallpaper 感が残るか確認、残るなら Batch A 生成
-5. **Gap-2b: water/shoreline 画像生成判断** — R2 コード先行後の実機スクショで Batch B 必要か判断
-6. **Gameplay Reform R3** — ramp 工事ジョブ化と worksite 表示
-7. **追加素材生成** — cliff / water / worksite の必要 batch だけ生成
-8. **旧要素の完全削除判断** — legacy 温存から削除へ進めるか決める
-9. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
+4. **Gameplay Reform R3** — ramp 工事ジョブ化と worksite 表示 ✅ **完了**（blockedReason / worksite overlay 4 IM / HTML label 3 状態 / 完成バブル）
+5. **Gap-2a: cliff variants v2 判断** — 実機スクショで wallpaper 感が残るか確認、残るなら Batch A 生成
+6. **Gap-2b: water/shoreline 画像生成判断** — R2 コード先行後の実機スクショで Batch B 必要か判断
+7. **Gap-2c: worksite props 画像判断** — R3 コード先行後の実機スクショで Batch C 必要か判断（杭/板/縄）
+8. **追加素材生成** — cliff / water / worksite の必要 batch だけ生成
+9. **旧要素の完全削除判断** — legacy 温存から削除へ進めるか決める
+10. **M3 Defer-1 ファイル分割** — 機能追加が重くなる前に
 
 更新タイミング: 新フェーズ commit 時に該当行を Done に動かす、新規 Gap が見つかったら追加。

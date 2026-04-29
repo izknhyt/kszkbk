@@ -1372,7 +1372,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // 前フレームのジョブ {id → {target, progress}} を保持。
   // 削除されたジョブは「完了」と「再クリックでの置き換え」が区別つかないので、
   // 最後の progress >= 0.95 だったものだけを完了通知する。
-  const tfPrevJobIds = new Map<string, { target: 'raise' | 'lower' | 'ramp'; progress: number }>();
+  // R3: tx/ty を追加して ramp 完成位置に bubble を出せるようにした
+  const tfPrevJobIds = new Map<string, { target: 'raise' | 'lower' | 'ramp'; progress: number; tx: number; ty: number }>();
 
   // --- Σ-5-e-c: 建設進捗オーバーレイ ---
   const cnOverlay = document.createElement('div');
@@ -1435,8 +1436,38 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   tfRaiseIM.count=0; tfLowerIM.count=0;
   fxGrp.add(tfRaiseIM,tfLowerIM);
 
+  // R3: ramp worksite overlay IM
+  // planned/working: 黄緑のフットプリント（raise/lower とは別色で区別）
+  const _tfRampGeo = new THREE.BoxGeometry(TERRAIN_TILE_SIZE*0.82, 5, TERRAIN_TILE_SIZE*0.82);
+  const tfRampIM = new THREE.InstancedMesh(_tfRampGeo,
+    new THREE.MeshBasicMaterial({color:0x90e840,transparent:true,opacity:0.55}), 50);
+  tfRampIM.count = 0;
+  fxGrp.add(tfRampIM);
+
+  // blocked: 赤いフットプリント
+  const tfRampBlockedIM = new THREE.InstancedMesh(_tfRampGeo,
+    new THREE.MeshBasicMaterial({color:0xff2828,transparent:true,opacity:0.60}), 50);
+  tfRampBlockedIM.count = 0;
+  fxGrp.add(tfRampBlockedIM);
+
+  // ramp 工事杭マーカー（タイル四隅に 4 本の小さな柱）: capacity = 50 jobs × 4 corners
+  const _stakeGeo = new THREE.BoxGeometry(4, 20, 4);
+  const tfRampStakeIM = new THREE.InstancedMesh(_stakeGeo,
+    new THREE.MeshBasicMaterial({color:0x8b5a2b,transparent:true,opacity:0.85}), 200);
+  tfRampStakeIM.count = 0;
+  fxGrp.add(tfRampStakeIM);
+
+  // ramp 方向矢印（細長いボックスで向きを示す）
+  const _arrowGeo = new THREE.BoxGeometry(6, 6, TERRAIN_TILE_SIZE*0.55);
+  const tfRampArrowIM = new THREE.InstancedMesh(_arrowGeo,
+    new THREE.MeshBasicMaterial({color:0xfff000,transparent:true,opacity:0.90}), 50);
+  tfRampArrowIM.count = 0;
+  fxGrp.add(tfRampArrowIM);
+
   // terraform タイル境界アウトライン（白線、毎フレーム再構築）
   let tfOutlineLines: THREE.LineSegments | null = null;
+  // R3: ramp worksite アウトライン（緑/赤線）
+  let tfRampOutlineLines: THREE.LineSegments | null = null;
 
   const _stGeo = new THREE.BoxGeometry(TERRAIN_TILE_SIZE*0.94,3,TERRAIN_TILE_SIZE*0.94);
   const stWarnIM = new THREE.InstancedMesh(_stGeo,
@@ -2149,61 +2180,156 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       const currentJobIds = new Set(world.terraformJobs.map(j=>j.id));
       for(const [id, prev] of tfPrevJobIds){
         if(!currentJobIds.has(id) && prev.progress >= 0.95){
-          canvas.dispatchEvent(new CustomEvent('kszk-terraform-complete',{detail:{target: prev.target}}));
+          // R3: tx/ty を detail に追加して ramp 完成 bubble を出せるようにした
+          canvas.dispatchEvent(new CustomEvent('kszk-terraform-complete',{
+            detail:{ target: prev.target, tx: prev.tx, ty: prev.ty }
+          }));
         }
       }
       tfPrevJobIds.clear();
-      for(const job of world.terraformJobs) tfPrevJobIds.set(job.id, { target: job.target, progress: job.progress });
+      for(const job of world.terraformJobs) tfPrevJobIds.set(job.id, { target: job.target, progress: job.progress, tx: job.tx, ty: job.ty });
 
-      // 作業者有無を判定（raise / lower 別に any-worker フラグ）
+      // 作業者有無を判定（raise / lower / ramp 別に any-worker フラグ）
       const WORKER_R2 = 28;
       let raiseHasWorker = false, lowerHasWorker = false;
+      // ramp ごとの作業者数を追跡
+      const rampWorkerMap = new Map<string, number>();
       for(const job of world.terraformJobs){
         const cx=(job.tx+0.5)*TERRAIN_TILE_SIZE, cy=(job.ty+0.5)*TERRAIN_TILE_SIZE;
+        let wCnt = 0;
         for(const c of world.chibis){
           if(c.state==='dead'||c.flight) continue;
           if(Math.hypot(c.pos.x-cx,c.pos.y-cy)<=WORKER_R2){
-            if(job.target==='raise') raiseHasWorker=true; else lowerHasWorker=true;
-            break;
+            if(job.target==='raise') raiseHasWorker=true;
+            else if(job.target==='lower') lowerHasWorker=true;
+            else wCnt++;
           }
         }
+        if(job.target==='ramp') rampWorkerMap.set(job.id, wCnt);
       }
 
       // 1Hz パルス（作業者あり）または静止暗色（作業者なし）
       const pulse = Math.sin(world.timeSec*2*Math.PI)*0.5+0.5; // 0→1
-      // ノイズ感削減：作業中 0.40+pulse*0.18 / 待機 0.22（前は 0.50+pulse*0.20 / 0.38）
+      // 2Hz パルス（blocked 警告用）
+      const pulseFast = Math.sin(world.timeSec*4*Math.PI)*0.5+0.5;
+      // ノイズ感削減：作業中 0.40+pulse*0.18 / 待機 0.22
       (tfRaiseIM.material as THREE.MeshBasicMaterial).opacity = raiseHasWorker ? 0.40+pulse*0.18 : 0.22;
       (tfLowerIM.material as THREE.MeshBasicMaterial).opacity = lowerHasWorker ? 0.40+pulse*0.18 : 0.22;
 
-      let tfRI=0, tfLI=0;
+      let tfRI=0, tfLI=0, tfRampI=0, tfRampBlockedI=0, tfStakeI=0, tfArrowI=0;
       const outlinePts:number[]=[];
+      const rampOutlinePts:number[]=[];
       const HS = TERRAIN_TILE_SIZE*0.5;
+      const STAKE_OFFSET = HS * 0.72;  // 角から少し内側
+      const STAKE_H = 20;
+
       for(const job of world.terraformJobs){
         const wx=(job.tx+0.5)*TERRAIN_TILE_SIZE, wz=(job.ty+0.5)*TERRAIN_TILE_SIZE;
         const ey=elevAt(world.terrain,wx,wz);
-        _imDummy.position.set(wx,ey+4,wz); _imDummy.updateMatrix();
-        if(job.target==='raise') tfRaiseIM.setMatrixAt(tfRI++,_imDummy.matrix);
-        else tfLowerIM.setMatrixAt(tfLI++,_imDummy.matrix);
-        // タイル上面の白アウトライン（4辺）
-        const top=ey+8;
-        outlinePts.push(
-          wx-HS,top,wz-HS, wx+HS,top,wz-HS,
-          wx+HS,top,wz-HS, wx+HS,top,wz+HS,
-          wx+HS,top,wz+HS, wx-HS,top,wz+HS,
-          wx-HS,top,wz+HS, wx-HS,top,wz-HS,
-        );
+
+        if(job.target==='ramp'){
+          const isBlocked = !!job.blockedReason;
+          const workers = rampWorkerMap.get(job.id) ?? 0;
+          const hasWorker = workers > 0;
+
+          if(isBlocked){
+            // blocked: 赤フットプリント + 速パルス
+            (tfRampBlockedIM.material as THREE.MeshBasicMaterial).opacity = 0.40+pulseFast*0.30;
+            _imDummy.position.set(wx,ey+3,wz); _imDummy.rotation.set(0,0,0); _imDummy.scale.setScalar(1);
+            _imDummy.updateMatrix();
+            if(tfRampBlockedI < 50) tfRampBlockedIM.setMatrixAt(tfRampBlockedI++,_imDummy.matrix);
+          } else {
+            // planned/working: 黄緑フットプリント
+            (tfRampIM.material as THREE.MeshBasicMaterial).opacity = hasWorker ? 0.45+pulse*0.20 : 0.28;
+            _imDummy.position.set(wx,ey+3,wz); _imDummy.rotation.set(0,0,0); _imDummy.scale.setScalar(1);
+            _imDummy.updateMatrix();
+            if(tfRampI < 50) tfRampIM.setMatrixAt(tfRampI++,_imDummy.matrix);
+
+            // 工事杭（四隅に 4 本）: planned / working 共通
+            if(tfStakeI + 4 <= 200){
+              const stakeY = ey + STAKE_H * 0.5 + 4;
+              const corners:[number,number][] = [
+                [wx-STAKE_OFFSET, wz-STAKE_OFFSET],
+                [wx+STAKE_OFFSET, wz-STAKE_OFFSET],
+                [wx-STAKE_OFFSET, wz+STAKE_OFFSET],
+                [wx+STAKE_OFFSET, wz+STAKE_OFFSET],
+              ];
+              for(const [sx,sz] of corners){
+                _imDummy.position.set(sx, stakeY, sz); _imDummy.rotation.set(0,0,0); _imDummy.scale.setScalar(1);
+                _imDummy.updateMatrix();
+                tfRampStakeIM.setMatrixAt(tfStakeI++, _imDummy.matrix);
+              }
+            }
+
+            // 方向矢印（ramp の向く方向に細長ボックス）
+            if(job.dir && tfArrowI < 50){
+              const arrowY = ey + 8;
+              let ax=wx, az=wz, rotY=0;
+              const ARROW_DIST = HS * 0.45;
+              if(job.dir==='N'){ az=wz-ARROW_DIST; rotY=0; }
+              else if(job.dir==='S'){ az=wz+ARROW_DIST; rotY=0; }
+              else if(job.dir==='E'){ ax=wx+ARROW_DIST; rotY=Math.PI*0.5; }
+              else if(job.dir==='W'){ ax=wx-ARROW_DIST; rotY=Math.PI*0.5; }
+              _imDummy.position.set(ax, arrowY, az);
+              _imDummy.rotation.set(0, rotY, 0);
+              _imDummy.scale.setScalar(1);
+              _imDummy.updateMatrix();
+              tfRampArrowIM.setMatrixAt(tfArrowI++, _imDummy.matrix);
+            }
+          }
+
+          // ramp アウトライン（緑=valid / 赤=blocked）
+          const top = ey + 6;
+          rampOutlinePts.push(
+            wx-HS,top,wz-HS, wx+HS,top,wz-HS,
+            wx+HS,top,wz-HS, wx+HS,top,wz+HS,
+            wx+HS,top,wz+HS, wx-HS,top,wz+HS,
+            wx-HS,top,wz+HS, wx-HS,top,wz-HS,
+          );
+        } else {
+          _imDummy.position.set(wx,ey+4,wz); _imDummy.rotation.set(0,0,0); _imDummy.scale.setScalar(1);
+          _imDummy.updateMatrix();
+          if(job.target==='raise') tfRaiseIM.setMatrixAt(tfRI++,_imDummy.matrix);
+          else tfLowerIM.setMatrixAt(tfLI++,_imDummy.matrix);
+          // タイル上面の白アウトライン（4辺）
+          const top=ey+8;
+          outlinePts.push(
+            wx-HS,top,wz-HS, wx+HS,top,wz-HS,
+            wx+HS,top,wz-HS, wx+HS,top,wz+HS,
+            wx+HS,top,wz+HS, wx-HS,top,wz+HS,
+            wx-HS,top,wz+HS, wx-HS,top,wz-HS,
+          );
+        }
       }
       tfRaiseIM.count=tfRI; tfLowerIM.count=tfLI;
+      tfRampIM.count=tfRampI; tfRampBlockedIM.count=tfRampBlockedI;
+      tfRampStakeIM.count=tfStakeI; tfRampArrowIM.count=tfArrowI;
       tfRaiseIM.instanceMatrix.needsUpdate=true;
       tfLowerIM.instanceMatrix.needsUpdate=true;
+      tfRampIM.instanceMatrix.needsUpdate=true;
+      tfRampBlockedIM.instanceMatrix.needsUpdate=true;
+      tfRampStakeIM.instanceMatrix.needsUpdate=true;
+      tfRampArrowIM.instanceMatrix.needsUpdate=true;
 
-      // アウトライン LineSegments 更新
+      // raise/lower アウトライン（白線）
       if(tfOutlineLines){ fxGrp.remove(tfOutlineLines); tfOutlineLines.geometry.dispose(); tfOutlineLines=null; }
       if(outlinePts.length){
         const olg=new THREE.BufferGeometry();
         olg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(outlinePts),3));
         tfOutlineLines=new THREE.LineSegments(olg,new THREE.LineBasicMaterial({color:0xffffff,opacity:0.8,transparent:true}));
         fxGrp.add(tfOutlineLines);
+      }
+      // R3: ramp アウトライン（緑/赤線）
+      if(tfRampOutlineLines){ fxGrp.remove(tfRampOutlineLines); tfRampOutlineLines.geometry.dispose(); tfRampOutlineLines=null; }
+      if(rampOutlinePts.length){
+        const rlg=new THREE.BufferGeometry();
+        rlg.setAttribute('position',new THREE.BufferAttribute(new Float32Array(rampOutlinePts),3));
+        // blocked が 1 つでもあれば赤、全部 valid なら黄緑
+        const anyBlocked = world.terraformJobs.some(j=>j.target==='ramp'&&j.blockedReason);
+        tfRampOutlineLines=new THREE.LineSegments(rlg,new THREE.LineBasicMaterial({
+          color: anyBlocked ? 0xff4040 : 0x90e840, opacity:0.9, transparent:true
+        }));
+        fxGrp.add(tfRampOutlineLines);
       }
     }
 
@@ -2767,17 +2893,46 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         div.style.top=`${sc.y - 20}px`;
 
         const pct=Math.round(job.progress*100);
-        const label=job.target==='raise'?'⛰ 盛り土':'⛏ 切り土';
-        const barFill=abandoned?'#ff8020':'#4ad870';
-        const bg=abandoned?'rgba(200,80,0,0.85)':'rgba(20,10,5,0.75)';
         const zoomedOut = zoom < 0.48;
-        const text = abandoned ? '⚠ 作業者不在' : (zoomedOut ? `${pct}%` : `${label} ${pct}% (${workers}人)`);
-        const width = zoomedOut ? 30 : 40;
-        const fontSize = zoomedOut ? 9 : 10;
-        div.innerHTML=`<div style="background:${bg};border-radius:3px;padding:2px 4px;font-size:${fontSize}px;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">` +
-          `${text}` +
-          `</div><div style="width:${width}px;height:4px;background:#333;border-radius:2px;margin-top:1px">` +
-          `<div style="width:${pct}%;height:100%;background:${barFill};border-radius:2px;transition:width 0.3s"></div></div>`;
+
+        // R3: ramp ジョブは専用レイアウト（blocked / working / planned の 3 状態）
+        if(job.target === 'ramp'){
+          const dirLabel = job.dir ? ({N:'↑',S:'↓',E:'→',W:'←'} as const)[job.dir] : '';
+          if(job.blockedReason){
+            // blocked 状態: 赤背景 + X マーク + 理由
+            const bgR='rgba(200,30,30,0.90)';
+            div.innerHTML=`<div style="background:${bgR};border-radius:3px;padding:2px 5px;font-size:10px;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">` +
+              `⛔ ${zoomedOut ? 'NG' : job.blockedReason}</div>`;
+          } else if(workers > 0){
+            // working 状態: 緑背景 + 進捗バー
+            const bgW='rgba(20,80,20,0.85)';
+            const text = zoomedOut ? `🚧${pct}%` : `🚧 坂道 ${dirLabel} ${pct}% (${workers}人)`;
+            div.innerHTML=`<div style="background:${bgW};border-radius:3px;padding:2px 4px;font-size:10px;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">` +
+              `${text}</div>` +
+              `<div style="width:40px;height:4px;background:#333;border-radius:2px;margin-top:1px">` +
+              `<div style="width:${pct}%;height:100%;background:#60e030;border-radius:2px;transition:width 0.3s"></div></div>`;
+          } else {
+            // planned 状態: 暗黄緑背景 + 予約表示
+            const bgP = abandoned ? 'rgba(160,60,0,0.85)' : 'rgba(50,70,20,0.80)';
+            const text = abandoned ? (zoomedOut ? '⚠' : '⚠ 作業者不在') :
+                         (zoomedOut ? `🚧${pct}%` : `🚧 坂道予約 ${dirLabel} ${pct}%`);
+            div.innerHTML=`<div style="background:${bgP};border-radius:3px;padding:2px 4px;font-size:10px;color:#ddf;font-weight:700;white-space:nowrap;line-height:1.3">` +
+              `${text}</div>` +
+              `<div style="width:40px;height:4px;background:#333;border-radius:2px;margin-top:1px">` +
+              `<div style="width:${pct}%;height:100%;background:#90e840;border-radius:2px;transition:width 0.3s"></div></div>`;
+          }
+        } else {
+          const label=job.target==='raise'?'⛰ 盛り土':'⛏ 切り土';
+          const barFill=abandoned?'#ff8020':'#4ad870';
+          const bg=abandoned?'rgba(200,80,0,0.85)':'rgba(20,10,5,0.75)';
+          const text = abandoned ? '⚠ 作業者不在' : (zoomedOut ? `${pct}%` : `${label} ${pct}% (${workers}人)`);
+          const width = zoomedOut ? 30 : 40;
+          const fontSize = zoomedOut ? 9 : 10;
+          div.innerHTML=`<div style="background:${bg};border-radius:3px;padding:2px 4px;font-size:${fontSize}px;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">` +
+            `${text}` +
+            `</div><div style="width:${width}px;height:4px;background:#333;border-radius:2px;margin-top:1px">` +
+            `<div style="width:${pct}%;height:100%;background:${barFill};border-radius:2px;transition:width 0.3s"></div></div>`;
+        }
       }
     }
 
