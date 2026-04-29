@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import type { WorldState } from '../sim/world';
 import { POWERLINE_CONNECT_RADIUS, TERRAIN_TILE_SIZE } from '../sim/world';
 import { elevAtTileSurface, isSeaAt } from '../sim/terrain/query';
-import type { ChibiState, DayPhase, Difficulty, FeatureKind, HitTarget, PlacedBuilding, Season } from '../types';
+import type { ChibiState, DayPhase, Difficulty, FeatureKind, HitTarget, PlacedBuilding, Season, TerrainTile } from '../types';
 import { NPC_DEFS, type NpcId } from '../sim/npcs';
 import { CONFIG } from '../config';
 import type { Bubble } from '../sim/bubbles';
@@ -1265,6 +1265,10 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   // R2: 海岸線 foam（sea と陸の境界）。inland water foam とは色で区別。
   let seaFoamLines: THREE.LineSegments | null = null;
   const seaFoamMat = new THREE.LineBasicMaterial({color:0xc0f0ff,transparent:true,opacity:0.70});
+  // R2: 水位勾配から出す短い流れ線。全水面一律 UV scroll だけでは方向が読めないため、
+  // tile ごとの downhill 方向を細い streak で補助表示する。
+  let waterFlowLines: THREE.LineSegments | null = null;
+  const waterFlowMat = new THREE.LineBasicMaterial({color:0xbfeeff,transparent:true,opacity:0.62});
 
   // --- Σ-7-b: 雨粒 LineSegments（雨天時のみ出現、frustum 内 300-500 本）---
   let rainLines: THREE.LineSegments | null = null;
@@ -1834,9 +1838,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     rippleTex.offset.x -= dt * 0.04;
     rippleTex.offset.y -= dt * 0.025;
 
-    // R2: 危険域パルス（wl >= 0.35）— sin で赤橙を点滅させて危険を示す。
+    // R2: 危険域パルス（wl >= 0.35）— 非負 sin で赤橙を点滅させて危険を示す。
     (waterDangerIM.material as THREE.MeshBasicMaterial).opacity =
-      0.08 + Math.sin(world.timeSec * 3.5) * 0.10;
+      0.08 + (Math.sin(world.timeSec * 3.5) * 0.5 + 0.5) * 0.10;
 
     // R2: 滝テクスチャを下向きにスクロール（waterfall は Y 方向に流れる）
     waterfallTex.offset.y -= dt * 1.2;
@@ -2211,7 +2215,9 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       let dampIdx=0, sIdx=0, mIdx=0, dIdx=0, dangerIdx=0, shimmerIdx=0;
       const foamPts: number[] = [];
       const seaFoamPts: number[] = [];
+      const flowPts: number[] = [];
       const HS = TERRAIN_TILE_SIZE*0.5;
+      const WL_SCALE_VIS = 13;
 
       // inland water tile 判定（foam edge 用）
       const isWaterTile = (rr: number, cc: number): boolean => {
@@ -2226,6 +2232,28 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if (rr<0||rr>=ROWS||cc<0||cc>=COLS) return false;
         const tcx=(cc+0.5)*TERRAIN_TILE_SIZE, tcy=(rr+0.5)*TERRAIN_TILE_SIZE;
         return isSeaAt(tcx, tcy);
+      };
+      const waterSurfaceLevel = (rr: number, cc: number): number | null => {
+        if (rr<0||rr>=ROWS||cc<0||cc>=COLS) return null;
+        const t = world.terrain[rr]![cc]!;
+        if (t.isSea) return null;
+        return t.elev + t.waterLevel * WL_SCALE_VIS;
+      };
+      const rampConnectsEast = (left: TerrainTile, right: TerrainTile): boolean => {
+        const diff = Math.abs(left.elev - right.elev);
+        if (diff !== 25) return false;
+        const lowerLeft = left.elev < right.elev;
+        const lower = lowerLeft ? left : right;
+        const requiredDir = lowerLeft ? 'E' : 'W';
+        return lower.ramp === requiredDir;
+      };
+      const rampConnectsSouth = (topTile: TerrainTile, bottomTile: TerrainTile): boolean => {
+        const diff = Math.abs(topTile.elev - bottomTile.elev);
+        if (diff !== 25) return false;
+        const lowerTop = topTile.elev < bottomTile.elev;
+        const lower = lowerTop ? topTile : bottomTile;
+        const requiredDir = lowerTop ? 'S' : 'N';
+        return lower.ramp === requiredDir;
       };
 
       for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
@@ -2278,6 +2306,30 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
           if (!isWaterTile(r, c-1)) foamPts.push(cx-HS,top,cy-HS, cx-HS,top,cy+HS);
           if (!isWaterTile(r, c+1)) foamPts.push(cx+HS,top,cy-HS, cx+HS,top,cy+HS);
         }
+
+        // R2: 水位勾配から流れ方向 streak を出す。水面高さが最も低い隣接タイルへ短線を引く。
+        // 泡より控えめにし、puddle 以上だけ表示する。
+        if (wl >= 0.20) {
+          const myLevel = waterSurfaceLevel(r, c);
+          if (myLevel !== null) {
+            let bestDx = 0, bestDy = 0, bestDrop = 0;
+            for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]] as const) {
+              const nl = waterSurfaceLevel(r + dy, c + dx);
+              if (nl === null) continue;
+              const drop = myLevel - nl;
+              if (drop > bestDrop) { bestDrop = drop; bestDx = dx; bestDy = dy; }
+            }
+            if (bestDrop > 0.35) {
+              const len = Math.min(14, 7 + bestDrop * 1.2);
+              const sx = cx - bestDx * len * 0.35;
+              const sz = cy - bestDy * len * 0.35;
+              const ex = cx + bestDx * len * 0.65;
+              const ez = cy + bestDy * len * 0.65;
+              const top = y + 1.15;
+              flowPts.push(sx, top, sz, ex, top, ez);
+            }
+          }
+        }
       }
       waterDampIM.count=dampIdx;   waterDampIM.instanceMatrix.needsUpdate=true;
       waterShallowIM.count=sIdx;   waterShallowIM.instanceMatrix.needsUpdate=true;
@@ -2304,6 +2356,15 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         scene.add(seaFoamLines);
       }
 
+      // R2: 水流方向 LineSegments 更新
+      if (waterFlowLines){ scene.remove(waterFlowLines); waterFlowLines.geometry.dispose(); waterFlowLines=null; }
+      if (flowPts.length){
+        const wg=new THREE.BufferGeometry();
+        wg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(flowPts),3));
+        waterFlowLines=new THREE.LineSegments(wg, waterFlowMat);
+        scene.add(waterFlowLines);
+      }
+
       // R2: 滝ストリップ検出 + InstancedMesh 更新
       // 崖の上タイルが waterLevel >= 0.25 の場合に縦水流パネルを置く。
       // 崖壁面走査と同じ EW/NS 境界走査（ただし上タイル水判定のみ）。
@@ -2312,8 +2373,8 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       let wfNeeded = 0;
       for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
         const t0=world.terrain[r]![c]!;
-        if(c+1<COLS){const tE=world.terrain[r]![c+1]!;const diff=Math.abs(t0.elev-tE.elev);if(diff>=CLIFF_THRESH){const up=(t0.elev>tE.elev)?t0:tE;if(up.waterLevel>=0.25) wfNeeded++;}}
-        if(r+1<ROWS){const tS=world.terrain[r+1]![c]!;const diff=Math.abs(t0.elev-tS.elev);if(diff>=CLIFF_THRESH){const up=(t0.elev>tS.elev)?t0:tS;if(up.waterLevel>=0.25) wfNeeded++;}}
+        if(c+1<COLS){const tE=world.terrain[r]![c+1]!;const diff=Math.abs(t0.elev-tE.elev);if(diff>=CLIFF_THRESH && !rampConnectsEast(t0,tE)){const up=(t0.elev>tE.elev)?t0:tE;if(up.waterLevel>=0.25) wfNeeded++;}}
+        if(r+1<ROWS){const tS=world.terrain[r+1]![c]!;const diff=Math.abs(t0.elev-tS.elev);if(diff>=CLIFF_THRESH && !rampConnectsSouth(t0,tS)){const up=(t0.elev>tS.elev)?t0:tS;if(up.waterLevel>=0.25) wfNeeded++;}}
       }
       if(wfNeeded > MAX_WATERFALL_WALLS){
         while(MAX_WATERFALL_WALLS < wfNeeded) MAX_WATERFALL_WALLS *= 2;
@@ -2337,7 +2398,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(c+1<COLS){
           const tE=world.terrain[r]![c+1]!;
           const diff=Math.abs(t0.elev-tE.elev);
-          if(diff>=CLIFF_THRESH){
+          if(diff>=CLIFF_THRESH && !rampConnectsEast(t0,tE)){
             const isUpperLeft=t0.elev>tE.elev;
             const upper=isUpperLeft?t0:tE;
             if(upper.waterLevel>=0.25){
@@ -2355,7 +2416,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         if(r+1<ROWS){
           const tS=world.terrain[r+1]![c]!;
           const diff=Math.abs(t0.elev-tS.elev);
-          if(diff>=CLIFF_THRESH){
+          if(diff>=CLIFF_THRESH && !rampConnectsSouth(t0,tS)){
             const isUpperTop=t0.elev>tS.elev;
             const upper=isUpperTop?t0:tS;
             if(upper.waterLevel>=0.25){
