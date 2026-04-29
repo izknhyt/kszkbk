@@ -148,9 +148,19 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 
 ### Gap-2: visual asset v2 検品 + 追加生成
 - 現状: terrain atlas v2 / ground props v1 / feature sprites v1 は runtime 接続済み
-- 残課題: 崖の縦線反復、水際/滝、工事状態、雨雪状態モック
+  - **R1 完了（Cliff Readability Reform）**: cliff wall を 3 バリアント IM（soil/rock/damp）+
+    底面コンタクトシャドウ IM に置き換え。deterministic brightness variation で縦壁紙感を低減。
+    lower tile の material/waterLevel/isSea で atlas cell を選択（docs/SIGMA-8-ASSET-IMPLEMENTATION-SPEC.md 準拠）。
+- 残課題: 水際/滝、工事状態、雨雪状態モック
+- cliff variants v2 画像生成は、R1 コード改善後の実機スクショを見て再判断（→ Gap-2a 参照）
 - 次の正本: `SIGMA-8-VISUAL-ASSET-ROADMAP.md`
 - 優先度: **中〜高**（商業見た目へ寄せる主作業）
+
+### Gap-2a: cliff variants v2 画像生成判断（R1 後）
+- 現状: R1 コード先行で brightness variation + 3 cell 選択を実装済み
+- 次のステップ: 標準カメラ / 遠景スクショを見て、1 cell 反復の壁紙感が残るか判断
+- 残るなら `SIGMA-8-VISUAL-ASSET-ROADMAP.md Batch A` を生成する
+- 優先度: **中**（R1 実機確認後に判断）
 
 ### Gap-3: 工事ポーズ（6 種）発注 + 統合
 - 現状: 既存 work_a/b で代用
@@ -225,8 +235,9 @@ M2.1 以降の設計リセットは `M2-DIRECTION-RESET.md` を正本とする�
 ## 次の優先順序
 
 1. **Visual System 固定** — `SIGMA-8-VISUAL-SYSTEM-SPEC.md` を正本にして状態/見た目/素材の対応を守る
-2. **Gameplay Reform R1** — 崖描画をコード先行で改善
-3. **Gameplay Reform R2** — 水位 / 水際 / 流れ / 滝の表示を改善
+2. **Gameplay Reform R1** — 崖描画をコード先行で改善 ✅ **完了**（3 variant IM + shadow + brightness variation）
+3. **Gap-2a: cliff variants v2 判断** — 実機スクショで wallpaper 感が残るか確認、残るなら Batch A 生成
+4. **Gameplay Reform R2** — 水位 / 水際 / 流れ / 滝の表示を改善
 4. **Gameplay Reform R3** — ramp 工事ジョブ化と worksite 表示
 5. **追加素材生成** — cliff / water / worksite の必要 batch だけ生成
 6. **旧要素の完全削除判断** — legacy 温存から削除へ進めるか決める

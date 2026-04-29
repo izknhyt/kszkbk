@@ -261,10 +261,31 @@ const MAT_CELL: Record<string, [number, number]> = {
   grass: [0, 0], soil: [1, 0], rock: [0, 1], sand: [2, 0],
   snow:  [3, 0],
 };
-const CLIFF_CELL: [number, number] = [0, 2];
+// Cliff wall atlas cells (docs/SIGMA-8-ASSET-IMPLEMENTATION-SPEC.md):
+//   (0,2) grass-over-soil default, (1,2) rock cliff, (2,2) damp/wet lower edge
+const CLIFF_CELL_SOIL: [number, number] = [0, 2];
+const CLIFF_CELL_ROCK: [number, number] = [1, 2];
+const CLIFF_CELL_DAMP: [number, number] = [2, 2];
 const WATER_CELL: [number, number] = [1, 1];
 const RAMP_NS_CELL: [number, number] = [3, 2];  // 'N' そのまま / 'S' は上下反転
 const RAMP_EW_CELL: [number, number] = [0, 3];  // 'E' そのまま / 'W' は左右反転
+
+// Deterministic brightness for cliff wall instances [0.80, 1.02].
+// Based on tile position + edge direction so the same save always produces
+// the same cliff pattern.
+function cliffBright(r: number, c: number, isEast: boolean): number {
+  let h = ((r * 2654435761 + c * 2246822519 + (isEast ? 0 : 1234567891)) >>> 0);
+  h = (h ^ (h >>> 16)) >>> 0;
+  return 0.80 + (h & 0xff) / 255 * 0.22;
+}
+
+// Returns cliff variant index 0=soil, 1=rock, 2=damp
+// for the wall between upper tile (higher elev) and lower tile (lower elev).
+function cliffVariant(upperMat: string, lowerMat: string, lowerWaterLevel: number, lowerIsSea: boolean): 0 | 1 | 2 {
+  if (upperMat === 'rock' || lowerMat === 'rock') return 1;
+  if (lowerWaterLevel >= 0.35 || lowerIsSea) return 2;
+  return 0;
+}
 
 // ramp 方向 + コーナーごとに、atlas 上の UV 座標 (u, v) を返す。
 function rampCornerUV(rampDir: 'N'|'S'|'E'|'W', corner: 'NW'|'NE'|'SW'|'SE'): { u: number; v: number } {
@@ -312,7 +333,7 @@ function tileCornerElev(tile: import('../types').TerrainTile, corner: Corner): n
 // ============================================================
 // 地形 BufferGeometry 構築（Σ-8-c per-tile 独立頂点型）
 // 4 頂点/タイル × ROWS × COLS。共有頂点を持たないので、隣接タイルとの elev gap が
-// あれば視覚的にギャップが出るが、≥1 段差は cliffWallIM が壁面で埋める。
+// あれば視覚的にギャップが出るが、≥1 段差は cliff variant IM が壁面で埋める。
 // 各頂点に atlas UV を割り当てて material 別のテクスチャを per-tile で貼る。
 // ============================================================
 function buildTerrainGeo(terrain: import('../types').TerrainTile[][]): THREE.BufferGeometry {
@@ -1019,36 +1040,42 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   scene.add(waterDampIM, waterShallowIM, waterMidIM, waterDeepIM);
 
   // ==========================================================
-  // Σ-8-b-3 崖の壁面 InstancedMesh
-  // 隣接タイルの elev 差が ELEV_STEP*2 (50) 以上の境界に縦壁を立てる。
-  // PlaneGeometry(1,1) を east/south 境界ごとに matrix で配置。
+  // R1: 崖の壁面 InstancedMesh (3 バリアント + 底面コンタクトシャドウ)
+  // soil (デフォルト) / rock (岩質) / damp (水辺) の 3 セルを atlas から使い分け、
+  // 壁ごとに deterministic brightness variation を加えて「壁紙感」を減らす。
+  // 各壁の根本には半透明の水平シャドウストリップを置いて地面との接点を読ませる。
   // ==========================================================
-  // Σ-8-fix-4: 編集で崖だらけになると 5700 × 2 = 11400 まで増えうる。
-  // 起動時は 2400 で出して、必要に応じて rebuild 内で再アロケートする。
-  let MAX_CLIFF_WALLS = 2400;
-  const _cliffWallGeo = new THREE.PlaneGeometry(1, 1);
-  // PlaneGeometry の UV はデフォ (0,1)/(1,1)/(0,0)/(1,0)。これを atlas の
-  // cliff cell の bounds に書き換えて、texture 貼った時に正しい
-  // 範囲を取れるように。読み込み前は color tint で岩茶のまま。
-  {
-    const cuv = atlasUVBounds(CLIFF_CELL[0], CLIFF_CELL[1]);
-    const ua = _cliffWallGeo.attributes.uv as THREE.BufferAttribute;
+  let MAX_CLIFF_CAPACITY = 2400;
+
+  // 崖壁面用 UV 付き PlaneGeometry を atlas cell から生成
+  function makeCliffGeoForCell(col: number, row: number): THREE.PlaneGeometry {
+    const geo = new THREE.PlaneGeometry(1, 1);
+    const cuv = atlasUVBounds(col, row);
+    const ua = geo.attributes.uv as THREE.BufferAttribute;
     ua.setXY(0, cuv.uMin, cuv.vMax);
     ua.setXY(1, cuv.uMax, cuv.vMax);
     ua.setXY(2, cuv.uMin, cuv.vMin);
     ua.setXY(3, cuv.uMax, cuv.vMin);
     ua.needsUpdate = true;
+    return geo;
   }
-  let cliffWallIM = makeCliffWallIM(MAX_CLIFF_WALLS);
-  scene.add(cliffWallIM);
-  function makeCliffWallIM(cap: number): THREE.InstancedMesh {
+  const _cliffSoilGeo = makeCliffGeoForCell(CLIFF_CELL_SOIL[0], CLIFF_CELL_SOIL[1]);
+  const _cliffRockGeo = makeCliffGeoForCell(CLIFF_CELL_ROCK[0], CLIFF_CELL_ROCK[1]);
+  const _cliffDampGeo = makeCliffGeoForCell(CLIFF_CELL_DAMP[0], CLIFF_CELL_DAMP[1]);
+
+  // 底面コンタクトシャドウ用の水平 PlaneGeometry (1×1、X 軸回転で地面に寝かせる)
+  const _cliffShadowGeo = new THREE.PlaneGeometry(1, 1);
+  _cliffShadowGeo.rotateX(-Math.PI / 2);
+
+  // 崖壁面 IM を atlas セル付き MeshToonMaterial で作成
+  function makeCliffVariantIM(geo: THREE.PlaneGeometry, cap: number): THREE.InstancedMesh {
     const im = new THREE.InstancedMesh(
-      _cliffWallGeo,
+      geo,
       new THREE.MeshToonMaterial({
         color: 0x5a4030,
         side: THREE.DoubleSide,
         gradientMap: gradMap,
-        // Σ-8-c-1.5: 壁面が深さ的に少し奥に描画されるよう polygonOffset を入れて、
+        // 壁面が depth-wise 少し奥に描画されるよう polygonOffset で
         // ビルボードちびわふが壁に埋もれる視覚事故を抑える。
         polygonOffset: true,
         polygonOffsetFactor: 1,
@@ -1062,20 +1089,50 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     im.renderOrder = 0;
     return im;
   }
-  // Σ-8-fix-4: rebuild で容量超過したら 2 倍に拡張して作り直す。
+
+  // 底面シャドウ IM（半透明の暗い水平ストリップ）
+  function makeCliffShadowIM(cap: number): THREE.InstancedMesh {
+    const im = new THREE.InstancedMesh(
+      _cliffShadowGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false,
+      }),
+      cap,
+    );
+    im.count = 0;
+    im.castShadow = false;
+    im.receiveShadow = false;
+    im.renderOrder = 0;
+    return im;
+  }
+
+  let cliffSoilIM = makeCliffVariantIM(_cliffSoilGeo, MAX_CLIFF_CAPACITY);
+  let cliffRockIM = makeCliffVariantIM(_cliffRockGeo, MAX_CLIFF_CAPACITY);
+  let cliffDampIM = makeCliffVariantIM(_cliffDampGeo, MAX_CLIFF_CAPACITY);
+  let cliffShadowIM = makeCliffShadowIM(MAX_CLIFF_CAPACITY);
+  scene.add(cliffSoilIM, cliffRockIM, cliffDampIM, cliffShadowIM);
+
+  // rebuild で総数が容量を超えたら全 IM を 2 倍に拡張する
   function ensureCliffCapacity(needed: number) {
-    if (needed <= MAX_CLIFF_WALLS) return;
-    while (MAX_CLIFF_WALLS < needed) MAX_CLIFF_WALLS *= 2;
-    const old = cliffWallIM;
-    // 旧 atlas マップは material 側に残るので新 IM 側にも継承
-    const oldMat = old.material as THREE.MeshToonMaterial;
-    const newIM = makeCliffWallIM(MAX_CLIFF_WALLS);
-    const newMat = newIM.material as THREE.MeshToonMaterial;
-    if (oldMat.map) { newMat.map = oldMat.map; newMat.color.setHex(0xffffff); newMat.needsUpdate = true; }
-    scene.remove(old);
-    old.dispose();
-    scene.add(newIM);
-    cliffWallIM = newIM;
+    if (needed <= MAX_CLIFF_CAPACITY) return;
+    while (MAX_CLIFF_CAPACITY < needed) MAX_CLIFF_CAPACITY *= 2;
+    const cap = MAX_CLIFF_CAPACITY;
+
+    const rebuildVariant = (old: THREE.InstancedMesh, geo: THREE.PlaneGeometry) => {
+      const oldMat = old.material as THREE.MeshToonMaterial;
+      const newIM = makeCliffVariantIM(geo, cap);
+      const newMat = newIM.material as THREE.MeshToonMaterial;
+      if (oldMat.map) { newMat.map = oldMat.map; newMat.color.setHex(0xffffff); newMat.needsUpdate = true; }
+      scene.remove(old); old.dispose(); scene.add(newIM);
+      return newIM;
+    };
+    cliffSoilIM = rebuildVariant(cliffSoilIM, _cliffSoilGeo);
+    cliffRockIM = rebuildVariant(cliffRockIM, _cliffRockGeo);
+    cliffDampIM = rebuildVariant(cliffDampIM, _cliffDampGeo);
+
+    const oldShadow = cliffShadowIM;
+    cliffShadowIM = makeCliffShadowIM(cap);
+    scene.remove(oldShadow); oldShadow.dispose(); scene.add(cliffShadowIM);
   }
 
   // ==========================================================
@@ -1109,10 +1166,11 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
     tex.generateMipmaps = false;
     terrainMat.map = tex;
     terrainMat.needsUpdate = true;
-    const cwMat = cliffWallIM.material as THREE.MeshToonMaterial;
-    cwMat.map = tex;
-    cwMat.color.setHex(0xffffff);  // map に色を任せる
-    cwMat.needsUpdate = true;
+    // R1: 3 バリアント崖 IM すべてに atlas テクスチャを注入し、color を 0xffffff へ
+    for (const im of [cliffSoilIM, cliffRockIM, cliffDampIM]) {
+      const m = im.material as THREE.MeshToonMaterial;
+      m.map = tex; m.color.setHex(0xffffff); m.needsUpdate = true;
+    }
     // Σ-8-d-2: water tile IM 4 種にも atlas water cell を貼る。
     // 既存の青色 tint に重ね、v2 の水面筆致を水たまりにも反映する。
     for (const im of [waterDampIM, waterShallowIM, waterMidIM, waterDeepIM]) {
@@ -1804,19 +1862,27 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       }
       prevElevs=world.terrain.map(row=>row.map(t=>t.elev));
 
-      // Σ-8-b-3 / Σ-8-c: 崖を壁面 InstancedMesh で実体化。
-      // per-tile geometry になったので 1 段差(25) でも視覚 gap が出る → 閾値も 25 に。
-      // ただし lower 側のタイルが境界方向を指す ramp を持っているなら通行可、壁は不要。
+      // R1: 崖壁面を 3 バリアント IM + 底面シャドウ IM で実体化。
+      // soil / rock / damp の 3 セルを upper/lower material と water level で選ぶ。
+      // 壁ごとに deterministic brightness variation を入れて縦壁紙感を緩和。
+      // 底面に thin horizontal shadow strip を置いて地面との接点を読ませる。
       const ROWS2=world.terrain.length, COLS2=world.terrain[0]?.length??0;
-      const CLIFF_WALL_THRESH = 25;  // 1 段差以上で壁（ramp で接続される境界は除く）
+      const CLIFF_WALL_THRESH = 25;
       const TILE = TERRAIN_TILE_SIZE;
+      const SHADOW_DEPTH = TILE * 0.32;  // 崖根本のシャドウの奥行き
       const _cliffMat = new THREE.Matrix4();
       const _cliffPos = new THREE.Vector3();
       const _cliffQuat = new THREE.Quaternion();
       const _cliffScale = new THREE.Vector3();
-      const _cliffEulerEW = new THREE.Euler(0, Math.PI / 2, 0); // east/west 境界用
-      const _cliffEulerNS = new THREE.Euler(0, 0, 0);          // north/south 境界用
-      // Σ-8-fix-4: 1 pass 目で必要数を数えて capacity 確保 → 2 pass 目で setMatrixAt
+      const _shadowMat = new THREE.Matrix4();
+      const _shadowPos = new THREE.Vector3();
+      const _shadowQuat = new THREE.Quaternion();  // identity: geo は already rotated
+      const _shadowScale = new THREE.Vector3();
+      const _cliffEulerEW = new THREE.Euler(0, Math.PI / 2, 0);
+      const _cliffEulerNS = new THREE.Euler(0, 0, 0);
+      const _cwColor = new THREE.Color();
+
+      // 1 pass: total count for capacity
       let needed = 0;
       for (let r2 = 0; r2 < ROWS2; r2++) for (let c2 = 0; c2 < COLS2; c2++) {
         const t0 = world.terrain[r2]![c2]!;
@@ -1840,35 +1906,45 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         }
       }
       ensureCliffCapacity(needed);
-      let cwCount = 0;
-      for (let r2=0; r2<ROWS2; r2++) for (let c2=0; c2<COLS2; c2++){
+
+      // 2 pass: fill per-variant IM + shadow IM
+      let cwSoil = 0, cwRock = 0, cwDamp = 0, cwShadow = 0;
+      for (let r2=0; r2<ROWS2; r2++) for (let c2=0; c2<COLS2; c2++) {
         const t0 = world.terrain[r2]![c2]!;
         const e0 = t0.elev;
+
         // east 境界: タイル(c2,r2) と (c2+1,r2)
         if (c2+1 < COLS2) {
           const tE = world.terrain[r2]![c2+1]!;
           const eE = tE.elev;
           const diff = Math.abs(e0 - eE);
           if (diff >= CLIFF_WALL_THRESH) {
-            // ramp 接続チェック：低い側が境界方向を指す ramp を持っていれば壁省略
             const lowerLeft = e0 < eE;
             const lower = lowerLeft ? t0 : tE;
+            const upper = lowerLeft ? tE : t0;
             const requiredDir = lowerLeft ? 'E' : 'W';
-            const rampConnects = (diff === 25 && lower.ramp === requiredDir);
-            if (!rampConnects) {
+            if (!(diff === 25 && lower.ramp === requiredDir)) {
               const lo = Math.min(e0, eE), hi = Math.max(e0, eE);
               const wallH = (hi - lo) * ELEV_SCALE;
               _cliffPos.set((c2+1)*TILE, (lo + hi)/2 * ELEV_SCALE, (r2 + 0.5)*TILE);
               _cliffQuat.setFromEuler(_cliffEulerEW);
               _cliffScale.set(TILE, wallH, 1);
               _cliffMat.compose(_cliffPos, _cliffQuat, _cliffScale);
-              if (cwCount < MAX_CLIFF_WALLS) {
-                cliffWallIM.setMatrixAt(cwCount, _cliffMat);
-                cwCount++;
-              }
+              const bright = cliffBright(r2, c2, true);
+              _cwColor.setRGB(bright, bright, bright);
+              const v = cliffVariant(upper.material, lower.material, lower.waterLevel, lower.isSea);
+              if (v === 1) { cliffRockIM.setMatrixAt(cwRock, _cliffMat); cliffRockIM.setColorAt(cwRock++, _cwColor); }
+              else if (v === 2) { cliffDampIM.setMatrixAt(cwDamp, _cliffMat); cliffDampIM.setColorAt(cwDamp++, _cwColor); }
+              else { cliffSoilIM.setMatrixAt(cwSoil, _cliffMat); cliffSoilIM.setColorAt(cwSoil++, _cwColor); }
+              // 底面シャドウ: EW 境界なので thin in X, wide in Z
+              _shadowPos.set((c2+1)*TILE, lo * ELEV_SCALE + 0.5, (r2 + 0.5)*TILE);
+              _shadowScale.set(SHADOW_DEPTH, 1, TILE);
+              _shadowMat.compose(_shadowPos, _shadowQuat, _shadowScale);
+              cliffShadowIM.setMatrixAt(cwShadow++, _shadowMat);
             }
           }
         }
+
         // south 境界: タイル(c2,r2) と (c2,r2+1)
         if (r2+1 < ROWS2) {
           const tS = world.terrain[r2+1]![c2]!;
@@ -1877,25 +1953,39 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
           if (diff >= CLIFF_WALL_THRESH) {
             const lowerTop = e0 < eS;
             const lower = lowerTop ? t0 : tS;
+            const upper = lowerTop ? tS : t0;
             const requiredDir = lowerTop ? 'S' : 'N';
-            const rampConnects = (diff === 25 && lower.ramp === requiredDir);
-            if (!rampConnects) {
+            if (!(diff === 25 && lower.ramp === requiredDir)) {
               const lo = Math.min(e0, eS), hi = Math.max(e0, eS);
               const wallH = (hi - lo) * ELEV_SCALE;
               _cliffPos.set((c2 + 0.5)*TILE, (lo + hi)/2 * ELEV_SCALE, (r2+1)*TILE);
               _cliffQuat.setFromEuler(_cliffEulerNS);
               _cliffScale.set(TILE, wallH, 1);
               _cliffMat.compose(_cliffPos, _cliffQuat, _cliffScale);
-              if (cwCount < MAX_CLIFF_WALLS) {
-                cliffWallIM.setMatrixAt(cwCount, _cliffMat);
-                cwCount++;
-              }
+              const bright = cliffBright(r2, c2, false);
+              _cwColor.setRGB(bright, bright, bright);
+              const v = cliffVariant(upper.material, lower.material, lower.waterLevel, lower.isSea);
+              if (v === 1) { cliffRockIM.setMatrixAt(cwRock, _cliffMat); cliffRockIM.setColorAt(cwRock++, _cwColor); }
+              else if (v === 2) { cliffDampIM.setMatrixAt(cwDamp, _cliffMat); cliffDampIM.setColorAt(cwDamp++, _cwColor); }
+              else { cliffSoilIM.setMatrixAt(cwSoil, _cliffMat); cliffSoilIM.setColorAt(cwSoil++, _cwColor); }
+              // 底面シャドウ: NS 境界なので wide in X, thin in Z
+              _shadowPos.set((c2 + 0.5)*TILE, lo * ELEV_SCALE + 0.5, (r2+1)*TILE);
+              _shadowScale.set(TILE, 1, SHADOW_DEPTH);
+              _shadowMat.compose(_shadowPos, _shadowQuat, _shadowScale);
+              cliffShadowIM.setMatrixAt(cwShadow++, _shadowMat);
             }
           }
         }
       }
-      cliffWallIM.count = cwCount;
-      cliffWallIM.instanceMatrix.needsUpdate = true;
+
+      // commit all cliff IMs
+      cliffSoilIM.count = cwSoil; cliffSoilIM.instanceMatrix.needsUpdate = true;
+      if (cwSoil > 0 && cliffSoilIM.instanceColor) cliffSoilIM.instanceColor.needsUpdate = true;
+      cliffRockIM.count = cwRock; cliffRockIM.instanceMatrix.needsUpdate = true;
+      if (cwRock > 0 && cliffRockIM.instanceColor) cliffRockIM.instanceColor.needsUpdate = true;
+      cliffDampIM.count = cwDamp; cliffDampIM.instanceMatrix.needsUpdate = true;
+      if (cwDamp > 0 && cliffDampIM.instanceColor) cliffDampIM.instanceColor.needsUpdate = true;
+      cliffShadowIM.count = cwShadow; cliffShadowIM.instanceMatrix.needsUpdate = true;
 
       // 旧 cliffLines: contour トグルが ON のときのみ debug 用に薄く出す
       if(cliffLines){ scene.remove(cliffLines); cliffLines.geometry.dispose(); cliffLines=null; }
