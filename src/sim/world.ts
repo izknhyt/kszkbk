@@ -466,6 +466,8 @@ export const CONSTRUCTION_PTS: Partial<Record<FeatureKind, number>> = {
   water:      45,
   farm:       45,
   house:      80,
+  nursery:    80,
+  hakaba:     60,
   well:       80,
   firewatch:  80,
   pasture:    80,
@@ -2363,11 +2365,12 @@ export function ensurePlots(w: WorldState) {
 }
 
 export function populationCap(w: WorldState): number {
-  // M2.1 Step 4.2: 旧 BUILDINGS の `pop+N` 効果は新規ランでは w.buildings=[]
-  // により自然に効かない。既存セーブで残っている旧建物分の cap+ は legacy
-  // として維持（読み取り専用、Step 4.4 で save migration を入れる予定）。
-  // 将来的に新 Feature `house` 等が pop+ を担う設計へ移行する。
+  // 新 Feature: 完成した house（devLevel>=2）1棟につき +3。
+  // 旧 BUILDINGS legacy は新規ランでは w.buildings=[] で自然に0。
   let cap = w.baseCap;
+  for (const f of w.features) {
+    if (f.kind === 'house' && f.devLevel >= 2) cap += 3;
+  }
   for (const b of w.buildings) {
     const def = BUILDINGS[b.defId];
     if (!def) continue;
@@ -2382,12 +2385,15 @@ function countBuildingLevels(w: WorldState, defId: string): number {
 }
 
 function applyBuildingMods(w: WorldState) {
-  // M2.1 Step 4.2: 旧 BUILDINGS の `pmult+N` / `spawn+N` 効果は新規ランで
-  // w.buildings=[] により自然に no-op。既存セーブで残っている旧建物分は legacy
-  // として効果が残る（読み取り専用、Step 4.4 で save migration 予定）。
-  // 将来 hakaba feature が pmult、nursery feature が spawn を担う設計へ移行する。
+  // 新 Feature: 完成した hakaba（devLevel>=2）1基につき pmult+0.10、
+  //             完成した nursery（devLevel>=2）1棟につき spawnMul+0.18。
+  // 旧 BUILDINGS legacy は新規ランでは w.buildings=[] で自然に0。
   let mult = CONFIG.GLOBAL_POINT_MULT_BASE;
   let spawnMul = 1;
+  for (const f of w.features) {
+    if (f.kind === 'hakaba' && f.devLevel >= 2) mult += 0.10;
+    if (f.kind === 'nursery' && f.devLevel >= 2) spawnMul += 0.18;
+  }
   for (const b of w.buildings) {
     const def = BUILDINGS[b.defId];
     if (!def) continue;
