@@ -12,9 +12,10 @@ import { CONFIG } from '../config';
 // **persist する**:
 //   - メタ: runId / runStartedAtMs / difficulty / nextId
 //   - 進行: points / totalPointsEarned / totalDeaths / totalBirths / stompCount
-//          / timeSec / dex / villageRank（buildings 経由）
+//          / timeSec / spawnCooldown / event / dex / villageRank（buildings 経由）
 //   - 統計: recentDeaths / sumDeathAgeSec / longestLife / shortestLife
 //          / wolvesKilled
+//   - 個体: chibis / corpses / npcs（A* path cache など transient は除外）
 //   - 配置: buildings / features（transient flow/saturated は除外）/ obstacles
 //   - 資源: resources（food/wood/stone/plank/power/brick/wool/cloth/soil 等）
 //   - 気象: weather / weatherForecast / lastWeatherDayCount
@@ -22,10 +23,6 @@ import { CONFIG } from '../config';
 //          mud/snow/isSea）/ terrainSeed / terraformJobs
 //
 // **persist しない（ロード時に再生成）**:
-//   - chibis: ロード後に initial spawn ロジックで再生成（個体は使い捨て）
-//   - npcs: ロード後に createNpcs(difficulty) で初期配置から再生成
-//          フラナの mood / hp も初期値から開始
-//   - corpses: 死体は次ランで持ち越さない
 //   - wolves: 夜の襲撃は次ロード時に再キュー
 //   - bubbles / floodZones: transient FX
 //   - terrainVersion: ロード後 0 リセット、A* path も全 chibi で初期化される
@@ -33,8 +30,7 @@ import { CONFIG } from '../config';
 //   - terraformPriorityExpire / constructionPriorityExpire: モジュール状態、
 //     ロード後は空（プレイヤーが再指示）
 //
-// 「ちびわふは使い捨て、ランの記憶は数値統計と地形に残す」設計思想。
-// 続編プレイでも村の地形・資源・建設は維持される。
+// 通常の「再開」では生存中個体・フラナ・死体ログも維持する。
 // =========================================================================
 export type SlotId = 1 | 2 | 3;
 
@@ -206,6 +202,18 @@ interface SaveData {
   totalBirths: number;
   stompCount: number;
   timeSec: number;
+  chibis?: WorldState['chibis'];
+  corpses?: WorldState['corpses'];
+  npcs?: WorldState['npcs'];
+  spawnCooldown?: number;
+  baseSpawnInterval?: number;
+  baseCap?: number;
+  furanaGrabbedTimer?: number;
+  event?: WorldState['event'];
+  ondoCooldown?: number;
+  fireCooldown?: number;
+  bokaigiCooldown?: number;
+  bokaigiMarkerTimer?: number;
   dex: WorldState['dex'];
   buildings: WorldState['buildings'];
   recentDeaths: WorldState['recentDeaths'];
@@ -227,6 +235,57 @@ interface SaveData {
   terraformJobs?: TerraformJob[];
   // v12+: Σ-3 地形シード
   terrainSeed?: number;
+}
+
+function serializeChibi(c: WorldState['chibis'][number]): WorldState['chibis'][number] {
+  const {
+    pathPoints: _pathPoints,
+    pathVersion: _pathVersion,
+    pathFailedSec: _pathFailedSec,
+    wolfAlarmIgnoredTick: _wolfAlarmIgnoredTick,
+    ...rest
+  } = c;
+  return {
+    ...rest,
+    pos: { ...c.pos },
+    target: c.target ? { ...c.target } : null,
+    traits: [...c.traits],
+    params: { ...c.params },
+    flavors: [...c.flavors],
+    lifeLog: c.lifeLog.slice(-30).map((ev) => ({ ...ev })),
+    flight: c.flight ? { ...c.flight, hitKeys: [...c.flight.hitKeys] } : null,
+    pathPoints: undefined,
+    pathVersion: undefined,
+    pathFailedSec: undefined,
+  };
+}
+
+function deserializeChibi(c: WorldState['chibis'][number]): WorldState['chibis'][number] {
+  return {
+    ...c,
+    pos: { ...c.pos },
+    target: c.target ? { ...c.target } : null,
+    traits: [...(c.traits ?? [])],
+    params: { ...c.params },
+    flavors: [...(c.flavors ?? [])],
+    lifeLog: (c.lifeLog ?? []).slice(-30).map((ev) => ({ ...ev })),
+    flight: c.flight ? { ...c.flight, hitKeys: [...c.flight.hitKeys] } : null,
+    pathPoints: undefined,
+    pathVersion: undefined,
+    pathFailedSec: undefined,
+    wolfAlarmIgnoredTick: undefined,
+  };
+}
+
+function serializeNpc(n: WorldState['npcs'][number]): WorldState['npcs'][number] {
+  return {
+    ...n,
+    pos: { ...n.pos },
+    home: { ...n.home },
+    target: n.target ? { ...n.target } : null,
+    lifeLog: n.lifeLog.slice(-20).map((ev) => ({ ...ev })),
+    flight: n.flight ? { ...n.flight, hitKeys: [...n.flight.hitKeys] } : null,
+  };
 }
 
 // スロット概要（スタート画面で 3 枚のカードに表示）
@@ -291,6 +350,19 @@ export function save(w: WorldState, slot: SlotId) {
     totalBirths: w.totalBirths,
     stompCount: w.stompCount,
     timeSec: w.timeSec,
+    chibis: w.chibis.map(serializeChibi),
+    corpses: w.corpses.map(serializeChibi),
+    // M2.1: 旧NPCは復元しない設計なので、保存側もフラナだけに絞る。
+    npcs: w.npcs.filter((n) => n.id === 'furana').map(serializeNpc),
+    spawnCooldown: w.spawnCooldown,
+    baseSpawnInterval: w.baseSpawnInterval,
+    baseCap: w.baseCap,
+    furanaGrabbedTimer: w.furanaGrabbedTimer,
+    event: w.event,
+    ondoCooldown: w.ondoCooldown,
+    fireCooldown: w.fireCooldown,
+    bokaigiCooldown: w.bokaigiCooldown,
+    bokaigiMarkerTimer: w.bokaigiMarkerTimer,
     dex: w.dex,
     // M2.1 Step 4.4: 旧 BUILDINGS 由来の w.buildings は display-only として
     // persist 維持（既存セーブの旧建物が消えると数値効果も急変するため）。
@@ -339,6 +411,30 @@ export function load(w: WorldState, slot: SlotId): boolean {
     w.totalBirths = data.totalBirths ?? 0;
     w.stompCount = data.stompCount ?? 0;
     w.timeSec = data.timeSec;
+    if (Array.isArray(data.chibis)) w.chibis = data.chibis.map(deserializeChibi);
+    if (Array.isArray(data.corpses)) w.corpses = data.corpses.map(deserializeChibi);
+    if (Array.isArray(data.npcs)) {
+      const restoredNpcs = data.npcs
+        .filter((n) => n && n.id === 'furana')
+        .map(serializeNpc);
+      if (restoredNpcs.length > 0) w.npcs = restoredNpcs;
+    }
+    w.nameSet = new Set([
+      ...w.nameSet,
+      ...w.chibis.map((c) => c.name),
+      ...w.corpses.map((c) => c.name),
+    ]);
+    const furana = w.npcs.find((n) => n.id === 'furana' && !n.dead);
+    if (furana) w.furanaPos = { ...furana.pos };
+    if (typeof data.spawnCooldown === 'number') w.spawnCooldown = data.spawnCooldown;
+    if (typeof data.baseSpawnInterval === 'number') w.baseSpawnInterval = data.baseSpawnInterval;
+    if (typeof data.baseCap === 'number') w.baseCap = data.baseCap;
+    if (typeof data.furanaGrabbedTimer === 'number') w.furanaGrabbedTimer = data.furanaGrabbedTimer;
+    if (data.event !== undefined) w.event = data.event;
+    if (typeof data.ondoCooldown === 'number') w.ondoCooldown = data.ondoCooldown;
+    if (typeof data.fireCooldown === 'number') w.fireCooldown = data.fireCooldown;
+    if (typeof data.bokaigiCooldown === 'number') w.bokaigiCooldown = data.bokaigiCooldown;
+    if (typeof data.bokaigiMarkerTimer === 'number') w.bokaigiMarkerTimer = data.bokaigiMarkerTimer;
     if (data.dex) {
       for (const k of Object.keys(data.dex) as Array<keyof typeof data.dex>) {
         if (w.dex[k]) w.dex[k] = data.dex[k];

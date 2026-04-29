@@ -489,9 +489,9 @@ function spriteMesh(w: number, h: number, tex: THREE.Texture): THREE.Mesh {
 // 日時計ティント
 // ============================================================
 const PHASE_TINT: Record<DayPhase,{sky:number;amb:number;dir:number;dirC:number}> = {
-  morning: {sky:0xf5c880, amb:0.55, dir:0.85, dirC:0xffcc88},
+  morning: {sky:0xc8d7d5, amb:0.55, dir:0.85, dirC:0xffcc88},
   noon:    {sky:0x87ceeb, amb:0.70, dir:1.00, dirC:0xffffff},
-  evening: {sky:0xe06030, amb:0.45, dir:0.70, dirC:0xff9a50},
+  evening: {sky:0x9ca7a8, amb:0.45, dir:0.70, dirC:0xff9a50},
   night:   {sky:0x0a1020, amb:0.15, dir:0.20, dirC:0x6080b0},
 };
 
@@ -835,14 +835,27 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   let terrainGeo: THREE.BufferGeometry|null = null;
   let terrainBuiltAt = -9999;
 
-  // --- 海面（恒久的に存在、isSeaAt タイルの下敷き）---
-  const seaMat = new THREE.MeshBasicMaterial({color:0x1f4c7a,transparent:true,opacity:0.85,side:THREE.DoubleSide});
-  const seaMesh = new THREE.Mesh(
-    (() => { const g=new THREE.PlaneGeometry(CONFIG.WORLD_W,CONFIG.WORLD_H); g.rotateX(-Math.PI/2); return g; })(),
-    seaMat,
+  // --- 遠景の水面/地形外バックドロップ ---
+  // カメラを引いた時に renderer clear color が画面下へ大きく出ると、夕方などで
+  // オレンジの空白に見える。地形より低い大判水面を敷いて、箱庭の外周を水で受ける。
+  const worldBackdrop = new THREE.Mesh(
+    (() => { const g=new THREE.PlaneGeometry(CONFIG.WORLD_W * 4, CONFIG.WORLD_H * 4); g.rotateX(-Math.PI/2); return g; })(),
+    new THREE.MeshBasicMaterial({color:0x4f9fc2,side:THREE.DoubleSide}),
   );
-  seaMesh.position.set(CONFIG.WORLD_W/2, 0.8, CONFIG.WORLD_H/2);
-  scene.add(seaMesh);
+  worldBackdrop.position.set(CONFIG.WORLD_W/2, -12, CONFIG.WORLD_H/2);
+  worldBackdrop.renderOrder = -10;
+  scene.add(worldBackdrop);
+
+  // --- 海面（isSea タイルだけに水面を置く。巨大プレーンはズームアウト時に矩形破綻する）---
+  const _seaTileGeo = new THREE.PlaneGeometry(TERRAIN_TILE_SIZE, TERRAIN_TILE_SIZE);
+  _seaTileGeo.rotateX(-Math.PI/2);
+  const seaTileIM = new THREE.InstancedMesh(
+    _seaTileGeo,
+    new THREE.MeshBasicMaterial({color:0x1f6f9f,transparent:true,opacity:0.82,depthWrite:false,side:THREE.DoubleSide}),
+    T_COLS*T_ROWS,
+  );
+  seaTileIM.count = 0;
+  scene.add(seaTileIM);
 
   // --- Σ-7-b: 動的水たまりタイル（waterLevel >=0.2 のタイル毎に配置）---
   // 4 段階の深さで色分け（湿り/浅瀬/中/深）。4 個の InstancedMesh を使い分ける。
@@ -1205,12 +1218,22 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
   }
 
   function getCamera(): CameraView {
-    const h=camH();
-    const asp=renderer.domElement.clientWidth/Math.max(1,renderer.domElement.clientHeight);
-    const tanH=Math.tan((camera.fov*Math.PI/180)/2);
-    const vhalf=h*tanH*Math.sqrt(2)*0.75;
-    const whalf=vhalf*asp;
-    return { x:camX-whalf, y:camZ-vhalf, w:whalf*2, h:vhalf*2,
+    camera.updateMatrixWorld();
+    const pts: Array<{ x: number; z: number }> = [];
+    for (const [nx, ny] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
+      rc.setFromCamera(new THREE.Vector2(nx, ny), camera);
+      const hit = new THREE.Vector3();
+      if (rc.ray.intersectPlane(groundPlane, hit)) pts.push({ x: hit.x, z: hit.z });
+    }
+    if (pts.length === 4) {
+      const minX = Math.min(...pts.map((p) => p.x));
+      const maxX = Math.max(...pts.map((p) => p.x));
+      const minZ = Math.min(...pts.map((p) => p.z));
+      const maxZ = Math.max(...pts.map((p) => p.z));
+      return { x:minX, y:minZ, w:maxX-minX, h:maxZ-minZ, scale:zoom, bounds:{w:CONFIG.WORLD_W,h:CONFIG.WORLD_H} };
+    }
+    const fallback = camH() * 0.4;
+    return { x:camX-fallback, y:camZ-fallback, w:fallback*2, h:fallback*2,
              scale:zoom, bounds:{w:CONFIG.WORLD_W,h:CONFIG.WORLD_H} };
   }
 
@@ -1554,7 +1577,17 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
       } else {
         refreshTerrainGeo(terrainGeo, world.terrain);
       }
-      seaMesh.visible=world.terrain.some(row=>row.some(t=>t.isSea));
+      let seaIdx = 0;
+      for (let sr=0; sr<world.terrain.length; sr++) for (let sc=0; sc<(world.terrain[0]?.length ?? 0); sc++) {
+        const tile = world.terrain[sr]![sc]!;
+        if (!tile.isSea) continue;
+        const cx=(sc+0.5)*TERRAIN_TILE_SIZE, cy=(sr+0.5)*TERRAIN_TILE_SIZE;
+        _imDummy.position.set(cx, elevAt(world.terrain,cx,cy) + 1.0, cy);
+        _imDummy.updateMatrix();
+        seaTileIM.setMatrixAt(seaIdx++,_imDummy.matrix);
+      }
+      seaTileIM.count = seaIdx;
+      seaTileIM.instanceMatrix.needsUpdate = true;
 
       // 崩落検出 → 土煙パーティクル（前フレーム比 elev 差 ≥10 のタイル）
       if(prevElevs){
@@ -2206,7 +2239,7 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         // 位置更新（terrain 高度に追従）
         const ey=elevAt(world.terrain,cx,cy);
         const sc=worldToScreen(cx,cy,ey);
-        div.style.transform=`translate(-50%,-50%) translate(${sc.x-Math.round(sc.x)+Math.round(sc.x)}px,${sc.y-Math.round(sc.y)+Math.round(sc.y)}px)`;
+        div.style.transform='translate(-50%,-50%)';
         div.style.left=`${sc.x}px`;
         div.style.top=`${sc.y - 20}px`;
 
@@ -2214,9 +2247,13 @@ export async function createStage(host: HTMLElement): Promise<StageHandle> {
         const label=job.target==='raise'?'⛰ 盛り土':'⛏ 切り土';
         const barFill=abandoned?'#ff8020':'#4ad870';
         const bg=abandoned?'rgba(200,80,0,0.85)':'rgba(20,10,5,0.75)';
-        div.innerHTML=`<div style="background:${bg};border-radius:3px;padding:2px 4px;font-size:10px;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">` +
-          `${abandoned?'⚠ 作業者不在':`${label} ${pct}% (${workers}人)`}` +
-          `</div><div style="width:40px;height:4px;background:#333;border-radius:2px;margin-top:1px">` +
+        const zoomedOut = zoom < 0.48;
+        const text = abandoned ? '⚠ 作業者不在' : (zoomedOut ? `${pct}%` : `${label} ${pct}% (${workers}人)`);
+        const width = zoomedOut ? 30 : 40;
+        const fontSize = zoomedOut ? 9 : 10;
+        div.innerHTML=`<div style="background:${bg};border-radius:3px;padding:2px 4px;font-size:${fontSize}px;color:#fff;font-weight:700;white-space:nowrap;line-height:1.3">` +
+          `${text}` +
+          `</div><div style="width:${width}px;height:4px;background:#333;border-radius:2px;margin-top:1px">` +
           `<div style="width:${pct}%;height:100%;background:${barFill};border-radius:2px;transition:width 0.3s"></div></div>`;
       }
     }

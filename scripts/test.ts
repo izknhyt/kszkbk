@@ -12,6 +12,8 @@ import type { TerrainTile, RampDir, TerrainMaterial } from '../src/types';
 import { CONFIG } from '../src/config';
 import { findPath, passCost } from '../src/sim/pathfinding';
 import { elevAtTileSurface } from '../src/sim/terrain/query';
+import { createWorld, ensurePlots, forceSpawn } from '../src/sim/world';
+import { clearSave, load, save } from '../src/meta/save';
 
 let passed = 0, failed = 0;
 function assert(cond: boolean, msg: string) {
@@ -52,6 +54,18 @@ function makeFlatGrid(rows: number, cols: number, elev = 50): TerrainTile[][] {
     g.push(row);
   }
   return g;
+}
+
+function installLocalStorageMock() {
+  const store = new Map<string, string>();
+  (globalThis as unknown as { localStorage: Storage }).localStorage = {
+    get length() { return store.size; },
+    clear: () => store.clear(),
+    getItem: (key: string) => store.get(key) ?? null,
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    removeItem: (key: string) => { store.delete(key); },
+    setItem: (key: string, value: string) => { store.set(key, String(value)); },
+  };
 }
 
 // =========================================================================
@@ -192,6 +206,56 @@ group('undo: rememberPreEdit boolean 戻し値', () => {
   assert(a3 === false, '(2,2) 同タイル再訪 added=false');
   // added=false なので rollback 呼ばない（呼んだら (2,2) が pop される）
   assert(snapshots.length === 2, 'rollback 呼ばないので snapshots [(1,1),(2,2)] 維持');
+});
+
+// =========================================================================
+// save/load: 生存個体・NPC・天気復元
+// =========================================================================
+group('save/load: living state persistence', () => {
+  installLocalStorageMock();
+  clearSave(1);
+
+  const w = createWorld('standard');
+  ensurePlots(w);
+  forceSpawn(w);
+  const c = w.chibis[0]!;
+  c.hunger = 77;
+  c.fatigue = 33;
+  c.lifeLog.push({ sec: 12, text: '保存テストした' });
+  c.pathPoints = [{ x: 1, y: 2 }];
+  c.pathVersion = 999;
+  c.pathFailedSec = 0.5;
+  w.spawnCooldown = 42;
+  w.weather = { kind: 'storm', remainingSec: 123 };
+  w.weatherForecast = [
+    { dayOffset: 0, kind: 'storm' },
+    { dayOffset: 1, kind: 'snow' },
+    { dayOffset: 2, kind: 'clear' },
+  ];
+  w.lastWeatherDayCount = 9;
+  const furana = w.npcs.find((n) => n.id === 'furana')!;
+  furana.mood = 23;
+  furana.hp = 111;
+  furana.pos = { x: 321, y: 654 };
+
+  save(w, 1);
+
+  const loaded = createWorld('standard');
+  const ok = load(loaded, 1);
+  ensurePlots(loaded, { preserveWeather: true });
+
+  assert(ok === true, 'save slot を load できる');
+  assert(loaded.chibis.length === 1, '生存中 chibi 数を復元');
+  assert(loaded.chibis[0]!.name === c.name, '生存中 chibi 名を復元');
+  assert(loaded.chibis[0]!.hunger === 77 && loaded.chibis[0]!.fatigue === 33, '空腹/疲労を復元');
+  assert(loaded.chibis[0]!.lifeLog.at(-1)?.text === '保存テストした', 'lifeLog を復元');
+  assert(loaded.chibis[0]!.pathPoints === undefined && loaded.chibis[0]!.pathVersion === undefined, 'A* path cache は復元しない');
+  assert(loaded.spawnCooldown === 42, 'spawnCooldown を復元');
+  assert(loaded.weather.kind === 'storm' && loaded.weather.remainingSec === 123, 'ロード済み天気を ensurePlots が上書きしない');
+  assert(loaded.weatherForecast[1]?.kind === 'snow', 'weatherForecast を復元');
+  const loadedFurana = loaded.npcs.find((n) => n.id === 'furana')!;
+  assert(loadedFurana.mood === 23 && loadedFurana.hp === 111, 'フラナ mood/hp を復元');
+  assert(loadedFurana.pos.x === 321 && loaded.furanaPos.x === 321, 'フラナ位置と furanaPos を復元');
 });
 
 // =========================================================================

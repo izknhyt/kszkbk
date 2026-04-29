@@ -44,10 +44,10 @@ export const DEATH_CAUSES: Record<string, DeathCause> = {
   },
   fire: {
     id: 'fire',
-    title: '鍛冶場からの延焼',
+    title: '火事に巻き込まれた',
     rare: false,
     points: 10,
-    template: (n) => `${n}は火事の方向へ行き、火事の方向から戻って来なかった。`,
+    template: (n) => `${n}は煙の方へ様子を見に行き、そのまま火の中で迷子になった。`,
   },
   roushuai: {
     id: 'roushuai',

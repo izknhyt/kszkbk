@@ -13,7 +13,6 @@ import { CONFIG, type TimeScale } from '../config';
 export interface UICallbacks {
   onBuild: (defId: string) => void;
   onUpgrade: (defId: string) => void;
-  onOndo: () => void;
   onBokaigi: () => void;
   onFire: () => void;
   onSpawn: () => void;
@@ -24,7 +23,6 @@ export interface UICallbacks {
 }
 
 export function bindUI(world: WorldState, cb: UICallbacks) {
-  byBtn('btn-ondo').addEventListener('click', () => cb.onOndo());
   byBtn('btn-bokai').addEventListener('click', () => cb.onBokaigi());
   byBtn('btn-fire').addEventListener('click', () => cb.onFire());
   byBtn('btn-spawn').addEventListener('click', () => cb.onSpawn());

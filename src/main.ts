@@ -20,7 +20,6 @@ import {
   tickWorld,
   triggerBokaigi,
   triggerFire,
-  triggerOndo,
   upgradeOne,
 } from './sim/world';
 import { pushLife } from './sim/world';
@@ -155,7 +154,7 @@ async function start() {
   const host = document.getElementById('stage') as HTMLElement;
   const world = createWorld(startResult.difficulty);
   if (startResult.resume) load(world, currentSlot);
-  ensurePlots(world);
+  ensurePlots(world, { preserveWeather: startResult.resume });
   // HUD 難度バッジ
   const diffBadge = document.getElementById('stat-difficulty');
   if (diffBadge) {
@@ -177,7 +176,6 @@ async function start() {
     onUpgrade: (id) => {
       if (upgradeOne(world, id)) refreshUI(world, cb);
     },
-    onOndo: () => triggerOndo(world),
     onBokaigi: () => triggerBokaigi(world),
     onFire: () => triggerFire(world),
     onSpawn: () => forceSpawn(world),
@@ -635,7 +633,6 @@ async function start() {
     buildTab?.click();
     setTerraformMode(terraformMode === 'raise' ? null : 'raise');
   });
-  document.getElementById('ab-ondo')?.addEventListener('click', () => triggerOndo(world));
   document.getElementById('ab-bokai')?.addEventListener('click', () => triggerBokaigi(world));
   document.getElementById('ab-fire')?.addEventListener('click', () => triggerFire(world));
 
